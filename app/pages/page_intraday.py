@@ -7,13 +7,15 @@ import streamlit as st
 from ..state import AppState
 from ..config import MODEL_LABELS
 from ..components.sidebar import render_sidebar
+from ..components.top_nav import mark_refreshed
 from ..components.intraday_path import intraday_path
 from ..components.metric_row import metric_row
 from ..services.weather_service import (
     fetch_hko_data, get_intraday_state, compute_rain_kwargs, hkt_now,
 )
 from ..services.model_service import run_all_models
-from ..services.market_service import fetch_event_markets
+from ..services.market_service import fetch_event_markets, parse_date_from_event
+from ..services.today_event_resolver import resolve_today_event
 
 
 def run() -> None:
@@ -25,7 +27,20 @@ def run() -> None:
 
     st.header("📈 Intraday Temperature & Rain Analysis")
 
-    slug = state.selected_event.get("slug", "")
+    if state.selected_event is None:
+        ev = resolve_today_event()
+        if ev:
+            state.selected_event = ev
+            parsed = parse_date_from_event(ev.get("title", ""), ev.get("slug", ""))
+            if parsed:
+                state.target_date = parsed
+            state.is_min_temp = ("lowest" in ev.get("title", "").lower() or "lowest" in ev.get("slug", "").lower())
+            mark_refreshed()
+
+    slug = state.selected_event.get("slug", "") if state.selected_event else ""
+    if not slug:
+        st.markdown('<div style="padding:60px 32px;max-width:1280px;margin:0 auto;"><div class="glass-card"><p style="color:#8F9BB7;">No event found for today.</p></div></div>', unsafe_allow_html=True)
+        return
     is_min_temp = state.is_min_temp
     target_date = state.target_date
     target_date_str = pd.Timestamp(target_date).strftime("%Y%m%d") if target_date else hkt_now().strftime("%Y%m%d")
