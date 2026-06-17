@@ -1,0 +1,21 @@
+[
+  {
+    "promoted_at": "2026-06-07T20:29:09.827920",
+    "candidate_dir": "models\\intraday_ml_rain_candidate\\20260607_120700",
+    "active_dir": "models\\intraday_ml\\active",
+    "archived_to": "models\\intraday_ml\\archive\\20260607_202909",
+    "validation_metrics": {
+      "upside": {
+        "mae": 0.5683,
+        "coverage_80": 0.7866
+      },
+      "downside": {
+        "mae": 0.2862,
+        "coverage_80": 0.8826
+      },
+      "upside_zero_auc": 0.8086,
+      "downside_zero_auc": 0.7601
+    },
+    "gates_passed": true
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "PROMOTION_GATES": {
+    "max_all_data_MAE_deterioration": 0.02,
+    "min_rainy_regime_MAE_improvement": 0.05,
+    "min_heavy_rain_MAE_improvement": 0.05,
+    "min_forward_test_rain_cases": 10,
+    "require_leakage_audit_pass": true,
+    "require_runtime_smoke_test_pass": true,
+    "require_feature_list_consistency_pass": true
+  }
+}

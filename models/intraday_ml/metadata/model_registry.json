@@ -1,0 +1,25 @@
+{
+  "active_model_version": "baseline_20240607_102000",
+  "active_model_type": "baseline",
+  "active_path": "models/intraday_ml/active/",
+  "feature_list_path": "models/intraday_ml/active/feature_list.json",
+  "feature_count": 21,
+  "model_files": [
+    "upside_q10.txt",
+    "upside_q25.txt",
+    "upside_q50.txt",
+    "upside_q75.txt",
+    "upside_q90.txt",
+    "downside_q10.txt",
+    "downside_q25.txt",
+    "downside_q50.txt",
+    "downside_q75.txt",
+    "downside_q90.txt",
+    "upside_zero.txt",
+    "downside_zero.txt",
+    "feature_list.json"
+  ],
+  "rain_aware_features_present": false,
+  "promoted_at": null,
+  "updated_at": "2026-06-07T17:00:00Z"
+}

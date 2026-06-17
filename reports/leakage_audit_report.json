@@ -1,0 +1,71 @@
+{
+  "audit_timestamp": "2026-06-09T21:05:45.535733",
+  "dataset": "data/intraday_ml_train_with_rain_nowcast.parquet",
+  "dataset_shape": [
+    199710,
+    109
+  ],
+  "results": [
+    {
+      "check": "rainfall_point_in_time",
+      "status": "pass",
+      "count": 0
+    },
+    {
+      "check": "rainfall_freshness",
+      "status": "pass",
+      "count": 0
+    },
+    {
+      "check": "no_future_rain_in_recent_flag",
+      "status": "pass",
+      "count": 0
+    },
+    {
+      "check": "nowcast_point_in_time",
+      "status": "pass",
+      "count": 0
+    },
+    {
+      "check": "nowcast_freshness",
+      "status": "pass",
+      "count": 0
+    },
+    {
+      "check": "no_valid_time_leakage",
+      "status": "pass",
+      "count": 0
+    },
+    {
+      "check": "forbidden_rainfall_features",
+      "status": "pass",
+      "forbidden_found": []
+    },
+    {
+      "check": "vague_rainfall_column_names",
+      "status": "pass",
+      "found": []
+    },
+    {
+      "check": "unallowed_rainfall_features",
+      "status": "pass",
+      "unallowed_found": []
+    },
+    {
+      "check": "target_not_in_features",
+      "status": "pass",
+      "targets_as_features": []
+    },
+    {
+      "check": "dataset_integrity",
+      "status": "pass",
+      "issues": []
+    }
+  ],
+  "summary": {
+    "pass": 11,
+    "warn": 0,
+    "fail": 0,
+    "overall": "pass"
+  }
+}

@@ -1,0 +1,14 @@
+streamlit
+streamlit-autorefresh
+pandas
+numpy
+xgboost
+scikit-learn
+requests
+beautifulsoup4
+plotly
+pyarrow
+scipy
+lightgbm
+pyyaml
+polymarket-paper-trader>=0.1.7

@@ -1,0 +1,25 @@
+{
+  "status": "compiled",
+  "candidate": "C_rain_aware_nowcast",
+  "candidate_dir": "models\\intraday_ml_rain_nowcast_candidate\\20260609_001249\\C_rain_aware_nowcast",
+  "model_files": [
+    "is_downside_zero.txt",
+    "is_upside_zero.txt",
+    "remaining_downside_q10.txt",
+    "remaining_downside_q25.txt",
+    "remaining_downside_q50.txt",
+    "remaining_downside_q75.txt",
+    "remaining_downside_q90.txt",
+    "remaining_upside_q10.txt",
+    "remaining_upside_q25.txt",
+    "remaining_upside_q50.txt",
+    "remaining_upside_q75.txt",
+    "remaining_upside_q90.txt"
+  ],
+  "feature_list_file": "feature_list.json",
+  "feature_count": 72,
+  "validation_metrics_file": "validation_metrics.json",
+  "training_config_file": "training_config.json",
+  "compiled_at": "2026-06-09T21:59:53.949119",
+  "overall_status": "pass"
+}

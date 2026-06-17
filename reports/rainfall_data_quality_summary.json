@@ -1,0 +1,21 @@
+{
+  "total_days": 1102,
+  "bad_days": 1,
+  "watch_days": 0,
+  "max_missing_rate": 0.1771,
+  "days_with_negative_increments": 0,
+  "worst_dates_by_missing_rate": [
+    "2026-06-06",
+    "2023-06-01",
+    "2023-06-02",
+    "2023-06-03",
+    "2023-06-04"
+  ],
+  "worst_dates_by_neg_inc": [
+    "2023-06-01",
+    "2023-06-02",
+    "2023-06-03",
+    "2023-06-04",
+    "2023-06-05"
+  ]
+}

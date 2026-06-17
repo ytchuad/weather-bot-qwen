@@ -1,0 +1,90 @@
+{
+  "base": {
+    "all_data": {
+      "slice": "all_data",
+      "count": 17278,
+      "mae": 0.5633,
+      "coverage": 0.7916,
+      "false_pos_rate": 0.0451
+    },
+    "rain_present": {
+      "slice": "rain_present",
+      "count": 417,
+      "mae": 0.5734,
+      "coverage": 0.8201,
+      "false_pos_rate": 0.0048
+    },
+    "heavy_rain": {
+      "slice": "heavy_rain",
+      "count": 55,
+      "mae": 1.0093,
+      "coverage": 0.6364,
+      "false_pos_rate": 0.0
+    },
+    "post_peak_rain": {
+      "slice": "post_peak_rain",
+      "count": 151,
+      "mae": 0.0325,
+      "coverage": 1.0,
+      "false_pos_rate": 0.0
+    },
+    "morning_peak_rain": {
+      "slice": "morning_peak_rain",
+      "count": 42,
+      "mae": 0.9309,
+      "coverage": 0.7381,
+      "false_pos_rate": 0.0
+    },
+    "no_rain": {
+      "slice": "no_rain",
+      "count": 16861,
+      "mae": 0.563,
+      "coverage": 0.7909,
+      "false_pos_rate": 0.0461
+    }
+  },
+  "rain": {
+    "all_data": {
+      "slice": "all_data",
+      "count": 17278,
+      "mae": 0.5677,
+      "coverage": 0.8124,
+      "false_pos_rate": 0.0291
+    },
+    "rain_present": {
+      "slice": "rain_present",
+      "count": 417,
+      "mae": 0.5058,
+      "coverage": 0.8225,
+      "false_pos_rate": 0.0096
+    },
+    "heavy_rain": {
+      "slice": "heavy_rain",
+      "count": 55,
+      "mae": 0.8557,
+      "coverage": 0.6364,
+      "false_pos_rate": 0.0
+    },
+    "post_peak_rain": {
+      "slice": "post_peak_rain",
+      "count": 151,
+      "mae": 0.0324,
+      "coverage": 1.0,
+      "false_pos_rate": 0.0199
+    },
+    "morning_peak_rain": {
+      "slice": "morning_peak_rain",
+      "count": 42,
+      "mae": 0.8521,
+      "coverage": 0.6429,
+      "false_pos_rate": 0.0
+    },
+    "no_rain": {
+      "slice": "no_rain",
+      "count": 16861,
+      "mae": 0.5692,
+      "coverage": 0.8122,
+      "false_pos_rate": 0.0295
+    }
+  }
+}

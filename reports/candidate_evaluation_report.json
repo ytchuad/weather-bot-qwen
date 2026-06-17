@@ -1,0 +1,696 @@
+{
+  "timestamp": "2026-06-09T21:41:49.794473",
+  "test_range": "2026-01-01 00:00:00 -> 2026-04-30 23:50:00",
+  "test_rows": 17278,
+  "candidates": {
+    "A_baseline": {
+      "features": 21
+    },
+    "B_rain_observed": {
+      "features": 36
+    },
+    "C_rain_aware_nowcast": {
+      "features": 72
+    }
+  },
+  "results": {
+    "A_baseline": {
+      "all_data": {
+        "remaining_upside": {
+          "count": 17278,
+          "mae": 0.6015,
+          "coverage_80": 0.7638,
+          "coverage_50": 0.4119,
+          "accuracy": 0.8184,
+          "fp_rate": 0.0516,
+          "fn_rate": 0.1299,
+          "auc": 0.8293
+        },
+        "remaining_downside": {
+          "count": 17278,
+          "mae": 0.2458,
+          "coverage_80": 0.8838,
+          "coverage_50": 0.7118,
+          "accuracy": 0.6276,
+          "fp_rate": 0.2462,
+          "fn_rate": 0.1262,
+          "auc": 0.663
+        }
+      },
+      "no_rain_nowcast": {
+        "count": 1,
+        "note": "too few samples"
+      },
+      "any_rain_nowcast_0_120m": {
+        "remaining_upside": {
+          "count": 2887,
+          "mae": 0.6175,
+          "coverage_80": 0.7485,
+          "coverage_50": 0.3883,
+          "accuracy": 0.8033,
+          "fp_rate": 0.036,
+          "fn_rate": 0.1607,
+          "auc": 0.8282
+        },
+        "remaining_downside": {
+          "count": 2887,
+          "mae": 0.4942,
+          "coverage_80": 0.7534,
+          "coverage_50": 0.5944,
+          "accuracy": 0.5764,
+          "fp_rate": 0.3228,
+          "fn_rate": 0.1008,
+          "auc": 0.6428
+        }
+      },
+      "heavy_rain_nowcast_0_120m": {
+        "remaining_upside": {
+          "count": 255,
+          "mae": 0.9739,
+          "coverage_80": 0.6745,
+          "coverage_50": 0.302,
+          "accuracy": 0.7686,
+          "fp_rate": 0.0353,
+          "fn_rate": 0.1961,
+          "auc": 0.7688
+        },
+        "remaining_downside": {
+          "count": 255,
+          "mae": 1.008,
+          "coverage_80": 0.5608,
+          "coverage_50": 0.4118,
+          "accuracy": 0.5608,
+          "fp_rate": 0.4039,
+          "fn_rate": 0.0353,
+          "auc": 0.6196
+        }
+      },
+      "front_loaded_rain_nowcast": {
+        "remaining_upside": {
+          "count": 1370,
+          "mae": 0.641,
+          "coverage_80": 0.7372,
+          "coverage_50": 0.3978,
+          "accuracy": 0.8307,
+          "fp_rate": 0.0255,
+          "fn_rate": 0.1438,
+          "auc": 0.8501
+        },
+        "remaining_downside": {
+          "count": 1370,
+          "mae": 0.521,
+          "coverage_80": 0.7292,
+          "coverage_50": 0.5606,
+          "accuracy": 0.5737,
+          "fp_rate": 0.3131,
+          "fn_rate": 0.1131,
+          "auc": 0.64
+        }
+      },
+      "rain_present": {
+        "remaining_upside": {
+          "count": 417,
+          "mae": 0.8912,
+          "coverage_80": 0.6595,
+          "coverage_50": 0.2422,
+          "accuracy": 0.7338,
+          "fp_rate": 0.024,
+          "fn_rate": 0.2422,
+          "auc": 0.7554
+        },
+        "remaining_downside": {
+          "count": 417,
+          "mae": 0.6202,
+          "coverage_80": 0.717,
+          "coverage_50": 0.5564,
+          "accuracy": 0.5372,
+          "fp_rate": 0.3645,
+          "fn_rate": 0.0983,
+          "auc": 0.5448
+        }
+      },
+      "rain_absent": {
+        "remaining_upside": {
+          "count": 16861,
+          "mae": 0.5944,
+          "coverage_80": 0.7664,
+          "coverage_50": 0.4161,
+          "accuracy": 0.8205,
+          "fp_rate": 0.0523,
+          "fn_rate": 0.1272,
+          "auc": 0.8295
+        },
+        "remaining_downside": {
+          "count": 16861,
+          "mae": 0.2366,
+          "coverage_80": 0.888,
+          "coverage_50": 0.7157,
+          "accuracy": 0.6298,
+          "fp_rate": 0.2433,
+          "fn_rate": 0.1269,
+          "auc": 0.6648
+        }
+      },
+      "post_peak_rain": {
+        "remaining_upside": {
+          "count": 51,
+          "mae": 1.5577,
+          "coverage_80": 0.451,
+          "coverage_50": 0.1765,
+          "accuracy": 0.4902,
+          "fp_rate": 0.1176,
+          "fn_rate": 0.3922,
+          "auc": 0.3642
+        },
+        "remaining_downside": {
+          "count": 51,
+          "mae": 1.0021,
+          "coverage_80": 0.6078,
+          "coverage_50": 0.451,
+          "accuracy": 0.7451,
+          "fp_rate": 0.2549,
+          "fn_rate": 0.0,
+          "auc": 0.74
+        }
+      },
+      "morning_peak_then_rain": {
+        "remaining_upside": {
+          "count": 13,
+          "mae": 0.3389,
+          "coverage_80": 1.0,
+          "coverage_50": 0.3077,
+          "accuracy": 0.5385,
+          "fp_rate": 0.0,
+          "fn_rate": 0.4615,
+          "auc": 0.0
+        },
+        "remaining_downside": {
+          "count": 13,
+          "mae": 0.3261,
+          "coverage_80": 1.0,
+          "coverage_50": 0.4615,
+          "accuracy": 0.0,
+          "fp_rate": 1.0,
+          "fn_rate": 0.0,
+          "auc": NaN
+        }
+      },
+      "afternoon_heavy_rain": {
+        "remaining_upside": {
+          "count": 19,
+          "mae": 0.7683,
+          "coverage_80": 0.5789,
+          "coverage_50": 0.1579,
+          "accuracy": 1.0,
+          "fp_rate": 0.0,
+          "fn_rate": 0.0,
+          "auc": 1.0
+        },
+        "remaining_downside": {
+          "count": 19,
+          "mae": 0.1969,
+          "coverage_80": 1.0,
+          "coverage_50": 0.7368,
+          "accuracy": 0.4211,
+          "fp_rate": 0.4211,
+          "fn_rate": 0.1579,
+          "auc": 0.3864
+        }
+      },
+      "rain_after_min_so_far": {
+        "remaining_upside": {
+          "count": 358,
+          "mae": 0.7868,
+          "coverage_80": 0.7374,
+          "coverage_50": 0.2626,
+          "accuracy": 0.7374,
+          "fp_rate": 0.0279,
+          "fn_rate": 0.2346,
+          "auc": 0.7811
+        },
+        "remaining_downside": {
+          "count": 358,
+          "mae": 0.5873,
+          "coverage_80": 0.7542,
+          "coverage_50": 0.567,
+          "accuracy": 0.4832,
+          "fp_rate": 0.4106,
+          "fn_rate": 0.1061,
+          "auc": 0.4819
+        }
+      }
+    },
+    "B_rain_observed": {
+      "all_data": {
+        "remaining_upside": {
+          "count": 17278,
+          "mae": 0.6057,
+          "coverage_80": 0.7858,
+          "coverage_50": 0.4123,
+          "accuracy": 0.8241,
+          "fp_rate": 0.0491,
+          "fn_rate": 0.1268,
+          "auc": 0.8337
+        },
+        "remaining_downside": {
+          "count": 17278,
+          "mae": 0.24,
+          "coverage_80": 0.8854,
+          "coverage_50": 0.633,
+          "accuracy": 0.6579,
+          "fp_rate": 0.23,
+          "fn_rate": 0.1121,
+          "auc": 0.6783
+        }
+      },
+      "no_rain_nowcast": {
+        "count": 1,
+        "note": "too few samples"
+      },
+      "any_rain_nowcast_0_120m": {
+        "remaining_upside": {
+          "count": 2887,
+          "mae": 0.5718,
+          "coverage_80": 0.7707,
+          "coverage_50": 0.4257,
+          "accuracy": 0.8303,
+          "fp_rate": 0.0232,
+          "fn_rate": 0.1465,
+          "auc": 0.8489
+        },
+        "remaining_downside": {
+          "count": 2887,
+          "mae": 0.4516,
+          "coverage_80": 0.7527,
+          "coverage_50": 0.5033,
+          "accuracy": 0.5916,
+          "fp_rate": 0.2996,
+          "fn_rate": 0.1088,
+          "auc": 0.66
+        }
+      },
+      "heavy_rain_nowcast_0_120m": {
+        "remaining_upside": {
+          "count": 255,
+          "mae": 0.7841,
+          "coverage_80": 0.7059,
+          "coverage_50": 0.3686,
+          "accuracy": 0.8118,
+          "fp_rate": 0.0078,
+          "fn_rate": 0.1804,
+          "auc": 0.7945
+        },
+        "remaining_downside": {
+          "count": 255,
+          "mae": 0.8533,
+          "coverage_80": 0.5373,
+          "coverage_50": 0.2667,
+          "accuracy": 0.5961,
+          "fp_rate": 0.3608,
+          "fn_rate": 0.0431,
+          "auc": 0.6164
+        }
+      },
+      "front_loaded_rain_nowcast": {
+        "remaining_upside": {
+          "count": 1370,
+          "mae": 0.5902,
+          "coverage_80": 0.7613,
+          "coverage_50": 0.435,
+          "accuracy": 0.8467,
+          "fp_rate": 0.0168,
+          "fn_rate": 0.1365,
+          "auc": 0.8642
+        },
+        "remaining_downside": {
+          "count": 1370,
+          "mae": 0.4834,
+          "coverage_80": 0.7277,
+          "coverage_50": 0.4883,
+          "accuracy": 0.5956,
+          "fp_rate": 0.2942,
+          "fn_rate": 0.1102,
+          "auc": 0.6639
+        }
+      },
+      "rain_present": {
+        "remaining_upside": {
+          "count": 417,
+          "mae": 0.7134,
+          "coverage_80": 0.6739,
+          "coverage_50": 0.3261,
+          "accuracy": 0.8225,
+          "fp_rate": 0.0072,
+          "fn_rate": 0.1703,
+          "auc": 0.8124
+        },
+        "remaining_downside": {
+          "count": 417,
+          "mae": 0.5819,
+          "coverage_80": 0.6691,
+          "coverage_50": 0.3453,
+          "accuracy": 0.5276,
+          "fp_rate": 0.3237,
+          "fn_rate": 0.1487,
+          "auc": 0.5572
+        }
+      },
+      "rain_absent": {
+        "remaining_upside": {
+          "count": 16861,
+          "mae": 0.6031,
+          "coverage_80": 0.7886,
+          "coverage_50": 0.4144,
+          "accuracy": 0.8242,
+          "fp_rate": 0.0502,
+          "fn_rate": 0.1257,
+          "auc": 0.8323
+        },
+        "remaining_downside": {
+          "count": 16861,
+          "mae": 0.2315,
+          "coverage_80": 0.8908,
+          "coverage_50": 0.6401,
+          "accuracy": 0.6612,
+          "fp_rate": 0.2277,
+          "fn_rate": 0.1111,
+          "auc": 0.6803
+        }
+      },
+      "post_peak_rain": {
+        "remaining_upside": {
+          "count": 51,
+          "mae": 1.1181,
+          "coverage_80": 0.4314,
+          "coverage_50": 0.098,
+          "accuracy": 0.5686,
+          "fp_rate": 0.0392,
+          "fn_rate": 0.3922,
+          "auc": 0.4383
+        },
+        "remaining_downside": {
+          "count": 51,
+          "mae": 0.9413,
+          "coverage_80": 0.6863,
+          "coverage_50": 0.2941,
+          "accuracy": 0.8235,
+          "fp_rate": 0.1765,
+          "fn_rate": 0.0,
+          "auc": 0.82
+        }
+      },
+      "morning_peak_then_rain": {
+        "remaining_upside": {
+          "count": 13,
+          "mae": 0.3561,
+          "coverage_80": 0.6154,
+          "coverage_50": 0.0769,
+          "accuracy": 0.3846,
+          "fp_rate": 0.1538,
+          "fn_rate": 0.4615,
+          "auc": 0.1429
+        },
+        "remaining_downside": {
+          "count": 13,
+          "mae": 0.4919,
+          "coverage_80": 1.0,
+          "coverage_50": 0.2308,
+          "accuracy": 0.3077,
+          "fp_rate": 0.6923,
+          "fn_rate": 0.0,
+          "auc": NaN
+        }
+      },
+      "afternoon_heavy_rain": {
+        "remaining_upside": {
+          "count": 19,
+          "mae": 0.7828,
+          "coverage_80": 0.4737,
+          "coverage_50": 0.0526,
+          "accuracy": 0.9474,
+          "fp_rate": 0.0526,
+          "fn_rate": 0.0,
+          "auc": 1.0
+        },
+        "remaining_downside": {
+          "count": 19,
+          "mae": 0.2924,
+          "coverage_80": 1.0,
+          "coverage_50": 0.5789,
+          "accuracy": 0.4737,
+          "fp_rate": 0.4737,
+          "fn_rate": 0.0526,
+          "auc": 0.3636
+        }
+      },
+      "rain_after_min_so_far": {
+        "remaining_upside": {
+          "count": 358,
+          "mae": 0.6454,
+          "coverage_80": 0.7542,
+          "coverage_50": 0.3547,
+          "accuracy": 0.8408,
+          "fp_rate": 0.0084,
+          "fn_rate": 0.1508,
+          "auc": 0.856
+        },
+        "remaining_downside": {
+          "count": 358,
+          "mae": 0.538,
+          "coverage_80": 0.7207,
+          "coverage_50": 0.3464,
+          "accuracy": 0.4749,
+          "fp_rate": 0.3631,
+          "fn_rate": 0.162,
+          "auc": 0.5068
+        }
+      }
+    },
+    "C_rain_aware_nowcast": {
+      "all_data": {
+        "remaining_upside": {
+          "count": 17278,
+          "mae": 0.592,
+          "coverage_80": 0.7818,
+          "coverage_50": 0.4056,
+          "accuracy": 0.8154,
+          "fp_rate": 0.0595,
+          "fn_rate": 0.1251,
+          "auc": 0.8318
+        },
+        "remaining_downside": {
+          "count": 17278,
+          "mae": 0.2321,
+          "coverage_80": 0.8973,
+          "coverage_50": 0.6639,
+          "accuracy": 0.656,
+          "fp_rate": 0.2368,
+          "fn_rate": 0.1072,
+          "auc": 0.6817
+        }
+      },
+      "no_rain_nowcast": {
+        "count": 1,
+        "note": "too few samples"
+      },
+      "any_rain_nowcast_0_120m": {
+        "remaining_upside": {
+          "count": 2887,
+          "mae": 0.5273,
+          "coverage_80": 0.7555,
+          "coverage_50": 0.4032,
+          "accuracy": 0.8251,
+          "fp_rate": 0.0374,
+          "fn_rate": 0.1375,
+          "auc": 0.852
+        },
+        "remaining_downside": {
+          "count": 2887,
+          "mae": 0.4415,
+          "coverage_80": 0.787,
+          "coverage_50": 0.5833,
+          "accuracy": 0.6093,
+          "fp_rate": 0.2799,
+          "fn_rate": 0.1108,
+          "auc": 0.6799
+        }
+      },
+      "heavy_rain_nowcast_0_120m": {
+        "remaining_upside": {
+          "count": 255,
+          "mae": 0.5085,
+          "coverage_80": 0.7294,
+          "coverage_50": 0.3529,
+          "accuracy": 0.8078,
+          "fp_rate": 0.0588,
+          "fn_rate": 0.1333,
+          "auc": 0.8093
+        },
+        "remaining_downside": {
+          "count": 255,
+          "mae": 0.8429,
+          "coverage_80": 0.698,
+          "coverage_50": 0.451,
+          "accuracy": 0.7686,
+          "fp_rate": 0.1804,
+          "fn_rate": 0.051,
+          "auc": 0.6529
+        }
+      },
+      "front_loaded_rain_nowcast": {
+        "remaining_upside": {
+          "count": 1370,
+          "mae": 0.5641,
+          "coverage_80": 0.7423,
+          "coverage_50": 0.3927,
+          "accuracy": 0.8474,
+          "fp_rate": 0.0285,
+          "fn_rate": 0.1241,
+          "auc": 0.8667
+        },
+        "remaining_downside": {
+          "count": 1370,
+          "mae": 0.4752,
+          "coverage_80": 0.7562,
+          "coverage_50": 0.5599,
+          "accuracy": 0.6124,
+          "fp_rate": 0.2752,
+          "fn_rate": 0.1124,
+          "auc": 0.6798
+        }
+      },
+      "rain_present": {
+        "remaining_upside": {
+          "count": 417,
+          "mae": 0.5895,
+          "coverage_80": 0.6978,
+          "coverage_50": 0.2734,
+          "accuracy": 0.7674,
+          "fp_rate": 0.06,
+          "fn_rate": 0.1727,
+          "auc": 0.8054
+        },
+        "remaining_downside": {
+          "count": 417,
+          "mae": 0.57,
+          "coverage_80": 0.7554,
+          "coverage_50": 0.5036,
+          "accuracy": 0.6211,
+          "fp_rate": 0.2302,
+          "fn_rate": 0.1487,
+          "auc": 0.6137
+        }
+      },
+      "rain_absent": {
+        "remaining_upside": {
+          "count": 16861,
+          "mae": 0.5921,
+          "coverage_80": 0.7839,
+          "coverage_50": 0.4089,
+          "accuracy": 0.8166,
+          "fp_rate": 0.0595,
+          "fn_rate": 0.124,
+          "auc": 0.83
+        },
+        "remaining_downside": {
+          "count": 16861,
+          "mae": 0.2238,
+          "coverage_80": 0.9008,
+          "coverage_50": 0.6679,
+          "accuracy": 0.6568,
+          "fp_rate": 0.2369,
+          "fn_rate": 0.1062,
+          "auc": 0.6805
+        }
+      },
+      "post_peak_rain": {
+        "remaining_upside": {
+          "count": 51,
+          "mae": 0.8502,
+          "coverage_80": 0.5686,
+          "coverage_50": 0.1569,
+          "accuracy": 0.5294,
+          "fp_rate": 0.1961,
+          "fn_rate": 0.2745,
+          "auc": 0.4985
+        },
+        "remaining_downside": {
+          "count": 51,
+          "mae": 0.9678,
+          "coverage_80": 0.7059,
+          "coverage_50": 0.2941,
+          "accuracy": 0.8235,
+          "fp_rate": 0.1765,
+          "fn_rate": 0.0,
+          "auc": 0.82
+        }
+      },
+      "morning_peak_then_rain": {
+        "remaining_upside": {
+          "count": 13,
+          "mae": 0.3205,
+          "coverage_80": 1.0,
+          "coverage_50": 0.2308,
+          "accuracy": 0.2308,
+          "fp_rate": 0.3077,
+          "fn_rate": 0.4615,
+          "auc": 0.0
+        },
+        "remaining_downside": {
+          "count": 13,
+          "mae": 0.4746,
+          "coverage_80": 1.0,
+          "coverage_50": 0.2308,
+          "accuracy": 0.3077,
+          "fp_rate": 0.6923,
+          "fn_rate": 0.0,
+          "auc": NaN
+        }
+      },
+      "afternoon_heavy_rain": {
+        "remaining_upside": {
+          "count": 19,
+          "mae": 0.6683,
+          "coverage_80": 0.5789,
+          "coverage_50": 0.0526,
+          "accuracy": 0.8421,
+          "fp_rate": 0.1579,
+          "fn_rate": 0.0,
+          "auc": 1.0
+        },
+        "remaining_downside": {
+          "count": 19,
+          "mae": 0.2856,
+          "coverage_80": 1.0,
+          "coverage_50": 0.6316,
+          "accuracy": 0.5789,
+          "fp_rate": 0.2632,
+          "fn_rate": 0.1579,
+          "auc": 0.5114
+        }
+      },
+      "rain_after_min_so_far": {
+        "remaining_upside": {
+          "count": 358,
+          "mae": 0.5322,
+          "coverage_80": 0.7682,
+          "coverage_50": 0.3101,
+          "accuracy": 0.7765,
+          "fp_rate": 0.0698,
+          "fn_rate": 0.1536,
+          "auc": 0.837
+        },
+        "remaining_downside": {
+          "count": 358,
+          "mae": 0.5195,
+          "coverage_80": 0.7849,
+          "coverage_50": 0.5168,
+          "accuracy": 0.581,
+          "fp_rate": 0.2598,
+          "fn_rate": 0.1592,
+          "auc": 0.5482
+        }
+      }
+    }
+  }
+}

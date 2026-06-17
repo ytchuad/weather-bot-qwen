@@ -1,0 +1,33 @@
+{
+  "features": [
+    "pred_max_latest",
+    "pred_min_latest",
+    "lead_days",
+    "delta_max_1d",
+    "delta_min_1d",
+    "delta_max_3d",
+    "delta_min_3d",
+    "month_sin",
+    "month_cos",
+    "wind_force",
+    "wind_dir_sin",
+    "wind_dir_cos",
+    "kw_\u96e8",
+    "kw_\u96f7\u66b4",
+    "kw_\u9a5f\u96e8",
+    "kw_\u591a\u96f2",
+    "kw_\u5929\u6674",
+    "kw_\u9177\u71b1",
+    "kw_\u5bd2\u51b7",
+    "kw_\u6f6e\u6fd5",
+    "kw_\u9727",
+    "kw_\u7159\u971e",
+    "mean_rh"
+  ],
+  "target_cols": [
+    "tmax",
+    "tmin"
+  ],
+  "std_conversion_factor": 1.2533141373155001,
+  "min_std": 0.5
+}

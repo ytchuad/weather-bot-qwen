@@ -1,0 +1,25 @@
+[project]
+name = "weather-bot"
+version = "0.1.0"
+description = "Weather Quant Dashboard"
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit",
+    "streamlit-autorefresh",
+    "pandas",
+    "numpy",
+    "xgboost",
+    "scikit-learn",
+    "requests",
+    "beautifulsoup4",
+    "plotly",
+    "pyarrow",
+    "scipy",
+    "lightgbm",
+    "pyyaml",
+    "polymarket-paper-trader>=0.1.7",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*", "execution*", "models*", "features*", "data*", "backtest*", "dpshbosh*"]

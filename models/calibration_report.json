@@ -1,0 +1,237 @@
+{
+  "overall_log_loss": 1.0355631420461693,
+  "cv_log_losses": [
+    0.8437340261740686,
+    0.9056119035895667,
+    0.9944835904594407,
+    1.2621871252330705,
+    1.1726628427279893
+  ],
+  "feature_importance": {
+    "raw_prob_28": 0.0,
+    "raw_prob_29": 0.0,
+    "raw_prob_30": 0.0,
+    "raw_prob_31": 0.0,
+    "raw_prob_32": 0.0,
+    "raw_prob_33": 0.0,
+    "raw_prob_34": 0.0,
+    "raw_prob_35": 0.0,
+    "ens_mean": 0.5081174969673157,
+    "ens_std": 0.4918825328350067,
+    "skewness": 0.0,
+    "kurtosis": 0.0
+  },
+  "reliability_data": [
+    {
+      "class": 0,
+      "bin_center": 0.35000000000000003,
+      "mean_predicted_prob": 0.3989269947857993,
+      "mean_actual_freq": 1.0,
+      "count": 1,
+      "calibration_error": 0.6010730052142007
+    },
+    {
+      "class": 0,
+      "bin_center": 0.45,
+      "mean_predicted_prob": 0.4749857277140359,
+      "mean_actual_freq": 0.6,
+      "count": 5,
+      "calibration_error": 0.12501427228596407
+    },
+    {
+      "class": 0,
+      "bin_center": 0.55,
+      "mean_predicted_prob": 0.5619900101612345,
+      "mean_actual_freq": 0.8484848484848485,
+      "count": 66,
+      "calibration_error": 0.286494838323614
+    },
+    {
+      "class": 0,
+      "bin_center": 0.6500000000000001,
+      "mean_predicted_prob": 0.6634493160666367,
+      "mean_actual_freq": 0.7197149643705463,
+      "count": 421,
+      "calibration_error": 0.056265648303909566
+    },
+    {
+      "class": 0,
+      "bin_center": 0.75,
+      "mean_predicted_prob": 0.7488008403187051,
+      "mean_actual_freq": 0.6885245901639344,
+      "count": 976,
+      "calibration_error": 0.06027625015477067
+    },
+    {
+      "class": 0,
+      "bin_center": 0.8500000000000001,
+      "mean_predicted_prob": 0.8324787501077184,
+      "mean_actual_freq": 0.7304347826086957,
+      "count": 345,
+      "calibration_error": 0.10204396749902278
+    },
+    {
+      "class": 0,
+      "bin_center": 0.95,
+      "mean_predicted_prob": 0.916738039187084,
+      "mean_actual_freq": 0.9,
+      "count": 10,
+      "calibration_error": 0.016738039187083942
+    },
+    {
+      "class": 1,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.0716302428290911,
+      "mean_actual_freq": 0.0893719806763285,
+      "count": 828,
+      "calibration_error": 0.0177417378472374
+    },
+    {
+      "class": 1,
+      "bin_center": 0.15000000000000002,
+      "mean_predicted_prob": 0.13448669403492958,
+      "mean_actual_freq": 0.087527352297593,
+      "count": 914,
+      "calibration_error": 0.04695934173733658
+    },
+    {
+      "class": 1,
+      "bin_center": 0.25,
+      "mean_predicted_prob": 0.22827162607159335,
+      "mean_actual_freq": 0.1232876712328767,
+      "count": 73,
+      "calibration_error": 0.10498395483871664
+    },
+    {
+      "class": 1,
+      "bin_center": 0.35000000000000003,
+      "mean_predicted_prob": 0.34064845479603767,
+      "mean_actual_freq": 0.0,
+      "count": 9,
+      "calibration_error": 0.34064845479603767
+    },
+    {
+      "class": 2,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.06240458993945725,
+      "mean_actual_freq": 0.1122923588039867,
+      "count": 1505,
+      "calibration_error": 0.049887768864529454
+    },
+    {
+      "class": 2,
+      "bin_center": 0.15000000000000002,
+      "mean_predicted_prob": 0.1229298441485134,
+      "mean_actual_freq": 0.08223684210526316,
+      "count": 304,
+      "calibration_error": 0.04069300204325024
+    },
+    {
+      "class": 2,
+      "bin_center": 0.25,
+      "mean_predicted_prob": 0.21854710642694733,
+      "mean_actual_freq": 0.16666666666666666,
+      "count": 12,
+      "calibration_error": 0.05188043976028067
+    },
+    {
+      "class": 2,
+      "bin_center": 0.35000000000000003,
+      "mean_predicted_prob": 0.32661479762062445,
+      "mean_actual_freq": 0.0,
+      "count": 3,
+      "calibration_error": 0.32661479762062445
+    },
+    {
+      "class": 3,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.045023736009914016,
+      "mean_actual_freq": 0.07015457788347206,
+      "count": 1682,
+      "calibration_error": 0.02513084187355804
+    },
+    {
+      "class": 3,
+      "bin_center": 0.15000000000000002,
+      "mean_predicted_prob": 0.13446499809510698,
+      "mean_actual_freq": 0.031496062992125984,
+      "count": 127,
+      "calibration_error": 0.102968935102981
+    },
+    {
+      "class": 3,
+      "bin_center": 0.25,
+      "mean_predicted_prob": 0.2317892741706959,
+      "mean_actual_freq": 0.06666666666666667,
+      "count": 15,
+      "calibration_error": 0.16512260750402924
+    },
+    {
+      "class": 4,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.016970100442947545,
+      "mean_actual_freq": 0.023230088495575223,
+      "count": 1808,
+      "calibration_error": 0.006259988052627678
+    },
+    {
+      "class": 4,
+      "bin_center": 0.15000000000000002,
+      "mean_predicted_prob": 0.13179802751227032,
+      "mean_actual_freq": 0.0,
+      "count": 14,
+      "calibration_error": 0.13179802751227032
+    },
+    {
+      "class": 4,
+      "bin_center": 0.25,
+      "mean_predicted_prob": 0.2294332852037313,
+      "mean_actual_freq": 0.0,
+      "count": 2,
+      "calibration_error": 0.2294332852037313
+    },
+    {
+      "class": 5,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.006127879221766674,
+      "mean_actual_freq": 0.002196595277320154,
+      "count": 1821,
+      "calibration_error": 0.00393128394444652
+    },
+    {
+      "class": 5,
+      "bin_center": 0.15000000000000002,
+      "mean_predicted_prob": 0.11315716215282635,
+      "mean_actual_freq": 0.0,
+      "count": 3,
+      "calibration_error": 0.11315716215282635
+    },
+    {
+      "class": 6,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.0,
+      "mean_actual_freq": 0.0,
+      "count": 1824,
+      "calibration_error": 0.0
+    },
+    {
+      "class": 7,
+      "bin_center": 0.05,
+      "mean_predicted_prob": 0.0,
+      "mean_actual_freq": 0.0,
+      "count": 1824,
+      "calibration_error": 0.0
+    }
+  ],
+  "buckets": [
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35
+  ],
+  "training_samples": 49428
+}

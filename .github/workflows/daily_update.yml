@@ -1,0 +1,40 @@
+name: Daily Data Update
+
+on:
+  schedule:
+    # 每天 UTC 時間 0:30 和 12:30 執行（換算台灣時間約 8:30 和 20:30）
+    - cron: '30 0,12 * * *'
+  workflow_dispatch:  # 允許手動觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      - name: Update intraday data
+        run: python data/update_intraday_data.py
+
+      - name: Update live forecast
+        run: python data/update_forecast_live.py
+
+      - name: Run model performance logging
+        run: python features/log_model_performance.py
+
+      - name: Commit and push if changes
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase
+          git add data/intraday_hko_10min.parquet data/live_forecast_history.parquet data/model_performance_log.parquet
+          git diff --staged --quiet || (git commit -m "Automated daily data update" && git push origin main)

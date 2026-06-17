@@ -1,0 +1,37 @@
+2026-06-08 20:34:17,078 [INFO] Resolved time_key: 20221101
+2026-06-08 20:34:17,079 [INFO] Archive URL: https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2FF3%2FGridded_rainfall_nowcast.csv&time=20221101
+2026-06-08 20:34:17,079 [INFO] Verify SSL: True
+2026-06-08 20:34:17,079 [INFO] Station lat/lon: 22.3019, 114.1742; radius_km=5.00
+2026-06-08 20:34:17,081 [INFO] Downloading: https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2FF3%2FGridded_rainfall_nowcast.csv&time=20221101
+2026-06-08 20:34:24,091 [INFO] Download result: {'status': 'downloaded', 'http_status': 200, 'zip_path': 'data\\raw_zip\\rainfall_nowcast\\gridded_rainfall_nowcast_20221101.zip', 'size_bytes': 616931073, 'url': 'https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2FF3%2FGridded_rainfall_nowcast.csv&time=20221101'}
+2026-06-08 20:34:24,113 [INFO] ZIP members selected: 2875
+2026-06-08 20:34:41,561 [INFO] Processed members: 100/2875
+2026-06-08 20:34:58,759 [INFO] Processed members: 200/2875
+2026-06-08 20:35:15,647 [INFO] Processed members: 300/2875
+2026-06-08 20:35:32,752 [INFO] Processed members: 400/2875
+2026-06-08 20:35:49,652 [INFO] Processed members: 500/2875
+2026-06-08 20:36:07,041 [INFO] Processed members: 600/2875
+2026-06-08 20:36:24,032 [INFO] Processed members: 700/2875
+2026-06-08 20:36:40,614 [INFO] Processed members: 800/2875
+2026-06-08 20:36:57,844 [INFO] Processed members: 900/2875
+2026-06-08 20:37:15,086 [INFO] Processed members: 1000/2875
+2026-06-08 20:37:31,027 [INFO] Processed members: 1100/2875
+2026-06-08 20:37:46,781 [INFO] Processed members: 1200/2875
+2026-06-08 20:38:02,853 [INFO] Processed members: 1300/2875
+2026-06-08 20:38:18,524 [INFO] Processed members: 1400/2875
+2026-06-08 20:38:34,358 [INFO] Processed members: 1500/2875
+2026-06-08 20:38:50,074 [INFO] Processed members: 1600/2875
+2026-06-08 20:39:05,884 [INFO] Processed members: 1700/2875
+2026-06-08 20:39:21,743 [INFO] Processed members: 1800/2875
+2026-06-08 20:39:37,435 [INFO] Processed members: 1900/2875
+2026-06-08 20:39:53,275 [INFO] Processed members: 2000/2875
+2026-06-08 20:40:09,010 [INFO] Processed members: 2100/2875
+2026-06-08 20:40:24,695 [INFO] Processed members: 2200/2875
+2026-06-08 20:40:40,497 [INFO] Processed members: 2300/2875
+2026-06-08 20:40:56,523 [INFO] Processed members: 2400/2875
+2026-06-08 20:41:12,408 [INFO] Processed members: 2500/2875
+2026-06-08 20:41:28,188 [INFO] Processed members: 2600/2875
+2026-06-08 20:41:43,905 [INFO] Processed members: 2700/2875
+2026-06-08 20:41:59,790 [INFO] Processed members: 2800/2875
+2026-06-08 20:42:11,869 [INFO] Summary: {'status': 'completed', 'archive_id': '20221101', 'resolved_time_key': '20221101', 'download_result': {'status': 'downloaded', 'http_status': 200, 'zip_path': 'data\\raw_zip\\rainfall_nowcast\\gridded_rainfall_nowcast_20221101.zip', 'size_bytes': 616931073, 'url': 'https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2FF3%2FGridded_rainfall_nowcast.csv&time=20221101'}, 'station_lat': 22.301944444444445, 'station_lon': 114.17416666666666, 'radius_km': 5.0, 'member_count': 2875, 'member_status_counts': {'processed': 2875}, 'long_rows': 11500, 'wide_rows': 2875, 'manifest_path': 'reports\\rainfall_nowcast\\member_manifest_20221101.parquet', 'nearest_grid_path': 'reports\\rainfall_nowcast\\nearest_hko_grid_points_20221101.csv', 'long_features_path': 'data\\features\\rainfall_nowcast\\rainfall_nowcast_station_features_long_20221101.parquet', 'wide_features_path': 'data\\features\\rainfall_nowcast\\rainfall_nowcast_station_features_wide_20221101.parquet'}
+2026-06-08 20:43:41,949 [INFO] Deleted ZIP because --keep-zip was not set: data\raw_zip\rainfall_nowcast\gridded_rainfall_nowcast_20221101.zip
