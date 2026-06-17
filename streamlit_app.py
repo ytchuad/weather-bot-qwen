@@ -33,30 +33,23 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---- page definitions (shared module) ----
-from app.nav_pages import hub_page, intraday_page, strategies_page, analytics_page, health_page
+# ---- page runners (direct import, no st.navigation) ----
+from collections import OrderedDict
+import json
 
+from app.pages.page_hub import run as run_hub
+from app.pages.page_intraday import run as run_intraday
+from app.pages.page_strategies import run as run_strategies
+from app.pages.page_analytics import run as run_analytics
+from app.pages.page_health import run as run_health
 
-# ---- navigation (hidden — we use our own top nav) ----
-pg = st.navigation(
-    {
-        "Dashboard": [hub_page, intraday_page],
-        "Trading": [strategies_page],
-        "Analysis": [analytics_page, health_page],
-    },
-    position="hidden",
-)
-
-
-# ── Page nav ──────────────────────────────────────────────────────
-# Map nav-key → st.Page object  (used by top_nav highlighting)
-_nav_key_to_page = {
-    "hub": hub_page,
-    "intraday": intraday_page,
-    "strategies": strategies_page,
-    "analytics": analytics_page,
-    "health": health_page,
-}
+_PAGE_RUNNERS = OrderedDict([
+    ("hub", run_hub),
+    ("intraday", run_intraday),
+    ("strategies", run_strategies),
+    ("analytics", run_analytics),
+    ("health", run_health),
+])
 
 
 # ── Global UI: glass theme + top nav (rendered on EVERY page) ────────
@@ -65,20 +58,37 @@ from app.components.top_nav import render_top_nav
 
 inject_glass_css()
 
-# Determine current page key from the navigation result
-# The default page (Hub) has url_path="" — map that to "hub"
-_current_page_key = pg.url_path if pg.url_path else "hub"
+# Session-state-based page routing (no st.navigation / URL pathname change)
+if "page" not in st.session_state:
+    st.session_state.page = "hub"
+
+_current_page_key = st.session_state.page
 render_top_nav(current=_current_page_key)
 
-# Nav JS bridge — intercepts top-nav-link clicks and navigates via
-# URL pathname change.  Streamlit's router picks this up natively.
-# A cross-fade CSS transition masks the brief flash.
+# Hidden nav trigger zone — JS bridge clicks these buttons to trigger
+# st.session_state.page changes + st.rerun() (no browser reload).
+_PAGE_KEYS = list(_PAGE_RUNNERS.keys())
+
+st.markdown('<div id="_nav-trigger-markers" class="top-nav-hidden" '
+            f'data-keys=\'{json.dumps(_PAGE_KEYS)}\'></div>',
+            unsafe_allow_html=True)
+
+_nt_cols = st.columns(len(_PAGE_KEYS))
+for _i, _key in enumerate(_PAGE_KEYS):
+    with _nt_cols[_i]:
+        if st.button("", key=f"_nt_{_key}"):
+            st.session_state.page = _key
+            st.rerun()
+
+# SPA JS bridge — clicks hidden trigger button instead of window.location
 _NAV_JS_BRIDGE = """<script>
 (function(){
-  var links = document.querySelectorAll('.top-nav-link[data-nav-key]');
-  if (!links.length) { setTimeout(arguments.callee, 300); return; }
-  if (document.body.hasAttribute('data-nav-wired')) return;
-  document.body.setAttribute('data-nav-wired', '1');
+  var marker = document.getElementById('_nav-trigger-markers');
+  if (!marker) { setTimeout(arguments.callee, 300); return; }
+  if (document.body.hasAttribute('data-spa-wired')) return;
+  document.body.setAttribute('data-spa-wired', '1');
+
+  var keys = JSON.parse(marker.getAttribute('data-keys'));
 
   document.body.addEventListener('click', function(e){
     var link = e.target.closest('.top-nav-link[data-nav-key]');
@@ -88,12 +98,23 @@ _NAV_JS_BRIDGE = """<script>
     var key = link.getAttribute('data-nav-key');
     if (!key) return;
 
-    /* Fade-out the main content before navigation to mask the flash */
+    /* Fade-out */
     var main = document.querySelector('section[data-testid="stMain"]');
     if (main) { main.style.opacity = '0'; main.style.transition = 'opacity 0.12s ease'; }
 
-    var path = key === 'hub' ? '/' : '/' + key;
-    setTimeout(function(){ window.location.pathname = path; }, 120);
+    /* Find hidden trigger button and click it */
+    var idx = keys.indexOf(key);
+    if (idx >= 0) {
+      var container = marker.closest('[data-testid="stVerticalBlock"]');
+      if (!container) return;
+      var hblock = container.querySelector('div[data-testid="stHorizontalBlock"]');
+      if (!hblock) return;
+      var cols = hblock.querySelectorAll('div[data-testid="column"]');
+      if (cols[idx]) {
+        var btn = cols[idx].querySelector('button');
+        if (btn) { setTimeout(function(){ btn.click(); }, 120); }
+      }
+    }
   });
 })();
 </script>"""
@@ -181,4 +202,4 @@ if "_scheduler_started" not in st.session_state:
     t = threading.Thread(target=_scheduler_loop, daemon=True, name="scheduler")
     t.start()
 
-pg.run()
+_PAGE_RUNNERS[st.session_state.page]()
