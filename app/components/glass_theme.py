@@ -353,6 +353,13 @@ section[data-testid="stMain"] > div {
 section[data-testid="stMain"] {
     animation: _page-fade-in 0.22s ease-out both;
 }
+
+/* Hide the SPA nav trigger zone */
+div.top-nav-hidden { display: none !important; }
+div[data-testid="stVerticalBlock"]:has(div.top-nav-hidden)
+  > div[data-testid="stHorizontalBlock"] {
+  display: none !important;
+}
 """
 
 def inject_glass_css():

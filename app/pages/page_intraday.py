@@ -7,7 +7,6 @@ import streamlit as st
 from ..state import AppState
 from ..config import MODEL_LABELS
 from ..components.sidebar import render_sidebar
-from ..components.top_nav import mark_refreshed
 from ..components.intraday_path import intraday_path
 from ..components.metric_row import metric_row
 from ..services.weather_service import (
@@ -35,7 +34,7 @@ def run() -> None:
             if parsed:
                 state.target_date = parsed
             state.is_min_temp = ("lowest" in ev.get("title", "").lower() or "lowest" in ev.get("slug", "").lower())
-            mark_refreshed()
+            pass
 
     slug = state.selected_event.get("slug", "") if state.selected_event else ""
     if not slug:
