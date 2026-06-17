@@ -10,9 +10,10 @@ CSS = r"""
 .stApp > header { display: none !important; }
 section.main > div { padding: 0 !important; }
 section[data-testid="stSidebar"] { display: none !important; }
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+/* No scrollbar — content scrolls via Streamlit's internal container */
+::-webkit-scrollbar { display: none !important; width: 0 !important; }
+* { scrollbar-width: none !important; }
+html { overflow: hidden !important; }
 body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-serif !important; }
 .mono, code, .stat-value { font-family: 'Space Mono', monospace !important; font-variant-numeric: tabular-nums !important; }
 
