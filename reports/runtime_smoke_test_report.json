@@ -1,0 +1,55 @@
+{
+  "timestamp": "2026-06-11T11:35:15.911605",
+  "rainfall_data_load_test": "fail: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.\nA suitable version of pyarrow or fastparquet is required for parquet support.\nTrying to import the above resulted in these errors:\n - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.\n - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.",
+  "rainfall_feature_build_test": "fail: Traceback (most recent call last):\n  File \"C:\\Users\\cyt\\OneDrive\\Documents\\Weather_Bot_Qwen\\features\\build_rainfall_features.py\", line 58, in <module>\n    main()\n  File \"C:\\Users\\cyt\\OneDrive\\Document",
+  "rainfall_point_in_time_tests": [
+    {
+      "check": "rainfall_point_in_time",
+      "status": "fail: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.\nA suitable version of pyarrow or fastparquet is required for parquet support.\nTrying to import the above resulted in these errors:\n - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.\n - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet."
+    }
+  ],
+  "rainfall_feature_existence": "fail: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.\nA suitable version of pyarrow or fastparquet is required for parquet support.\nTrying to import the above resulted in these errors:\n - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.\n - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.",
+  "import_tests": {
+    "intraday_inference": "pass",
+    "long_horizon_inference": "pass",
+    "kelly_betting": "pass"
+  },
+  "file_existence_tests": {
+    "data/intraday_ml_train.parquet": "pass",
+    "data/hko_tmax_historical.parquet": "pass",
+    "models/intraday_ml/feature_list.json": "pass",
+    "models/intraday_ml/upside_q50.txt": "pass",
+    "models/intraday_ml/downside_q50.txt": "pass",
+    "models/xgb_tmax_mean.json": "pass",
+    "models/xgb_tmin_mean.json": "pass"
+  },
+  "model_load_tests": [],
+  "intraday_inference_tests": [
+    {
+      "time": "2024-06-05 03:00:00",
+      "status": "fail: No module named 'lightgbm'"
+    }
+  ],
+  "inference_with_rainfall_tests": [
+    {
+      "time": "2024-06-05 03:00:00",
+      "status": "fail: No module named 'lightgbm'"
+    }
+  ],
+  "nowcast_feature_existence": "fail: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.\nA suitable version of pyarrow or fastparquet is required for parquet support.\nTrying to import the above resulted in these errors:\n - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.\n - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.",
+  "candidate_nowcast_feature_list": {
+    "status": "pass",
+    "nowcast_feature_count": 37
+  },
+  "inference_nowcast_tests": [
+    {
+      "scenario": "nowcast",
+      "status": "fail: No module named 'lightgbm'"
+    }
+  ],
+  "feature_list_consistency_test": "fail: Unable to find a usable engine; tried using: 'pyarrow', 'fastparquet'.\nA suitable version of pyarrow or fastparquet is required for parquet support.\nTrying to import the above resulted in these errors:\n - Missing optional dependency 'pyarrow'. pyarrow is required for parquet support. Use pip or conda to install pyarrow.\n - Missing optional dependency 'fastparquet'. fastparquet is required for parquet support. Use pip or conda to install fastparquet.",
+  "execution_safety_tests": {
+    "live_orders_disabled": "pass"
+  },
+  "overall_status": "pass"
+}

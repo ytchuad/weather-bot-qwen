@@ -1,0 +1,53 @@
+name: Weather Data Update
+
+on:
+  schedule:
+    # 每 30 分鐘執行一次
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # 允許手動點擊按鈕觸發
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 賦予寫入倉庫的權限
+        
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Data Scrapers
+        env:
+          TZ: Asia/Hong_Kong
+        run: |
+          python -c "from features.live_feature_builder import update_forecast_database; update_forecast_database()"
+          python -c "from features.forward_test_logger import discover_and_log_all_markets; discover_and_log_all_markets()"         
+
+      - name: Run Auto Rebalance
+        env:
+          TZ: Asia/Hong_Kong
+        run: |
+          python -c "from execution.auto_rebalance import run_auto_rebalance; run_auto_rebalance()" 
+
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          git add -f data/*.parquet
+          
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: auto-update parquet data [skip ci]"
+            # 終極防呆：先嘗試 push，若被拒絕則自動 pull 合併後再 push
+            git push || (git pull origin main --rebase -X theirs && git push)
+          fi

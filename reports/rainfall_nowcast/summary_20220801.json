@@ -1,0 +1,26 @@
+{
+  "status": "completed",
+  "archive_id": "20220801",
+  "resolved_time_key": "20220801",
+  "download_result": {
+    "status": "downloaded",
+    "http_status": 200,
+    "zip_path": "data\\raw_zip\\rainfall_nowcast\\gridded_rainfall_nowcast_20220801.zip",
+    "size_bytes": 608786158,
+    "url": "https://app.data.gov.hk/v1/historical-archive/get-file?url=https%3A%2F%2Fdata.weather.gov.hk%2FweatherAPI%2Fhko_data%2FF3%2FGridded_rainfall_nowcast.csv&time=20220801"
+  },
+  "station_lat": 22.301944444444445,
+  "station_lon": 114.17416666666666,
+  "radius_km": 5.0,
+  "member_count": 2970,
+  "member_status_counts": {
+    "processed": 2969,
+    "failed": 1
+  },
+  "long_rows": 11876,
+  "wide_rows": 2969,
+  "manifest_path": "reports\\rainfall_nowcast\\member_manifest_20220801.parquet",
+  "nearest_grid_path": "reports\\rainfall_nowcast\\nearest_hko_grid_points_20220801.csv",
+  "long_features_path": "data\\features\\rainfall_nowcast\\rainfall_nowcast_station_features_long_20220801.parquet",
+  "wide_features_path": "data\\features\\rainfall_nowcast\\rainfall_nowcast_station_features_wide_20220801.parquet"
+}

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "accounts": {
+    "baseline_paper": {
+      "strategy": "enhanced_v1_paper",
+      "status": "running",
+      "last_run": null,
+      "scheduler_on": true
+    },
+    "rain_observed_paper": {
+      "strategy": "rain_observed_paper",
+      "status": "idle",
+      "last_run": null,
+      "scheduler_on": false
+    },
+    "rain_nowcast_paper": {
+      "strategy": "enhanced_v1_paper",
+      "status": "paused",
+      "last_run": null,
+      "scheduler_on": false
+    },
+    "gated_ensemble_paper": {
+      "strategy": "gated_ensemble_paper",
+      "status": "idle",
+      "last_run": null,
+      "scheduler_on": false
+    },
+    "enhanced_v1_paper": {
+      "strategy": "enhanced_v1_paper",
+      "status": "running",
+      "last_run": null,
+      "scheduler_on": true
+    }
+  }
+}

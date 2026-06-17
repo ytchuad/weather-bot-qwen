@@ -1,0 +1,11 @@
+{
+  "count": 0,
+  "rainy_case_count": 0,
+  "heavy_rain_case_count": 0,
+  "baseline_mae": null,
+  "rain_aware_mae": null,
+  "regime_switch_mae": null,
+  "baseline_false_negative_max_reached_rate": null,
+  "rain_aware_false_negative_max_reached_rate": null,
+  "switch_false_negative_max_reached_rate": null
+}

@@ -1,0 +1,115 @@
+{
+  "overall_metrics": {
+    "Tmax_q10_MAE": 1.4229006944345963,
+    "Tmax_q10_Pinball": 0.14729133924553084,
+    "Tmax_q25_MAE": 1.308327036760686,
+    "Tmax_q25_Pinball": 0.340645023306135,
+    "Tmax_q50_MAE": 1.2531433146467958,
+    "Tmax_q50_Pinball": 0.6265716573233979,
+    "Tmax_q75_MAE": 1.25878678239732,
+    "Tmax_q75_Pinball": 0.8577289806561709,
+    "Tmax_q90_MAE": 1.2030215023527704,
+    "Tmax_q90_Pinball": 0.8312475637293874,
+    "Tmax_Coverage_80pct": 0.5652584848918802,
+    "Tmax_Interval_Width_80pct": 0.8360554885469133,
+    "Tmin_q10_MAE": 0.344683699363079,
+    "Tmin_q10_Pinball": 0.035367069675818964,
+    "Tmin_q25_MAE": 0.33271093243945926,
+    "Tmin_q25_Pinball": 0.1359196264912683,
+    "Tmin_q50_MAE": 0.44455448062410047,
+    "Tmin_q50_Pinball": 0.22227724031205023,
+    "Tmin_q75_MAE": 0.657663670270588,
+    "Tmin_q75_Pinball": 0.20274554331581374,
+    "Tmin_q90_MAE": 0.9564861573049308,
+    "Tmin_q90_Pinball": 0.13107674939196318,
+    "Tmin_Coverage_80pct": 0.9105398825719605,
+    "Tmin_Interval_Width_80pct": 1.2103527731655568,
+    "Tmax_Brier_Zero": 0.2795951625176006,
+    "Tmin_Brier_Zero": 0.1987724580062204
+  },
+  "slice_metrics": {
+    "all_data": {
+      "count": 69830,
+      "mae": 1.2531433146467958,
+      "pinball_q10": 0.14729133924553084,
+      "pinball_q90": 0.8312475637293874,
+      "coverage_p50": 0.33607332092223974,
+      "false_negative_max_reached_count": 134,
+      "false_negative_max_reached_rate": 0.001918946011742804,
+      "avg_predicted_upside_when_actual_zero": 0.08842999933268811
+    },
+    "rain_present": {
+      "count": 2858,
+      "mae": 0.6960842542119849,
+      "pinball_q10": 0.07618926775144728,
+      "pinball_q90": 0.4414997765905796,
+      "coverage_p50": 0.35724282715185446,
+      "false_negative_max_reached_count": 0,
+      "false_negative_max_reached_rate": 0.0,
+      "avg_predicted_upside_when_actual_zero": 0.05664746146444382
+    },
+    "no_rain": {
+      "count": 66972,
+      "mae": 1.2769155596853596,
+      "pinball_q10": 0.15032558819031508,
+      "pinball_q90": 0.8478798753766835,
+      "coverage_p50": 0.33516992175834676,
+      "false_negative_max_reached_count": 134,
+      "false_negative_max_reached_rate": 0.0020008361703398436,
+      "avg_predicted_upside_when_actual_zero": 0.09048706155039954
+    },
+    "thin_rain": {
+      "count": 1016,
+      "mae": 0.8990252731200177,
+      "pinball_q10": 0.09890724866539788,
+      "pinball_q90": 0.5997973252554212,
+      "coverage_p50": 0.37401574803149606,
+      "false_negative_max_reached_count": 0,
+      "false_negative_max_reached_rate": 0.0,
+      "avg_predicted_upside_when_actual_zero": 0.04988167444773953
+    },
+    "heavy_rain": {
+      "count": 808,
+      "mae": 0.6150147666098427,
+      "pinball_q10": 0.06827789450241335,
+      "pinball_q90": 0.35315984797579686,
+      "coverage_p50": 0.34529702970297027,
+      "false_negative_max_reached_count": 0,
+      "false_negative_max_reached_rate": 0.0,
+      "avg_predicted_upside_when_actual_zero": 0.06520457692351841
+    },
+    "post_peak_rain": {
+      "count": 270,
+      "mae": 0.7273079718569767,
+      "pinball_q10": 0.0769359957595368,
+      "pinball_q90": 0.468656109316174,
+      "coverage_p50": 0.23703703703703705,
+      "false_negative_max_reached_count": 0,
+      "false_negative_max_reached_rate": 0.0,
+      "avg_predicted_upside_when_actual_zero": 0.05204416389154932
+    },
+    "morning_peak_rain": {
+      "count": 79,
+      "mae": 0.6517965829413244,
+      "pinball_q10": 0.07153006343820333,
+      "pinball_q90": 0.31013286556292596,
+      "coverage_p50": 0.2911392405063291,
+      "false_negative_max_reached_count": 0,
+      "false_negative_max_reached_rate": 0.0,
+      "avg_predicted_upside_when_actual_zero": 0.08287206615165854
+    }
+  },
+  "adoption_decision": {
+    "decision": "regime_based_switch_candidate",
+    "reason": [
+      "rain-aware model improves rain_present MAE.",
+      "rain-aware model improves heavy_rain MAE.",
+      "Forward test evidence is pending before production adoption."
+    ],
+    "required_before_promotion": [
+      "Establish forward test evidence.",
+      "Run forward test in paper mode."
+    ]
+  },
+  "generated_at": "2026-06-07T22:20:35.945132"
+}

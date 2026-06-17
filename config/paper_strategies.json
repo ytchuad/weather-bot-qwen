@@ -1,0 +1,263 @@
+{
+  "version": 2,
+  "default_strategy": "enhanced_v1_paper",
+  "defaults": {
+    "entry": {
+      "min_hour": 8,
+      "model_selection": {
+        "model_c_multiplier": 1.0,
+        "model_b_fallback_multiplier": 0.7,
+        "model_a_fallback_multiplier": 0.5
+      },
+      "regime_thresholds": {
+        "day_08_12": { "min_edge": 0.03, "exposure_cap": 0.50 },
+        "rain_08_12": { "min_edge": 0.05, "exposure_cap": 0.40 },
+        "slot_12_16": { "min_edge": 0.02, "exposure_cap": 0.25 },
+        "slot_16_24": { "min_edge": null, "exposure_cap": 0.0 }
+      },
+      "boundary_proximity": {
+        "min_standardized_distance": 0.5,
+        "aggressive_reduction_threshold": 0.3,
+        "aggressive_reduction_multiplier": 0.5
+      },
+      "probability_confidence": {
+        "max_model_std": 2.5
+      }
+    },
+    "position_sizing": {
+      "time_window_multiplier": [
+        { "hours": [8, 10], "value": 0.6 },
+        { "hours": [10, 14], "value": 1.0 },
+        { "hours": [14, 16], "value": 0.7 },
+        { "hours": [16, 24], "value": 0.3 }
+      ],
+      "rain_uncertainty_multiplier": {
+        "no_rain": 1.0,
+        "weak_rain": 0.7,
+        "moderate_or_heavy_rain": 0.5
+      },
+      "max_per_bucket": 0.15,
+      "total_max": 0.50
+    },
+    "rebalance": {
+      "min_qty_delta": 0.5,
+      "material_edge_delta": 0.01,
+      "material_prob_pp": 5,
+      "material_ev_pp": 2,
+      "min_top_bucket_unchanged_cycles": 1
+    },
+    "exit": {
+      "hold_conviction_prob": 0.98,
+      "hold_max_hours": 6,
+      "edge_reversal_threshold": -0.05,
+      "stop_prob": 0.05,
+      "drawdown": {
+        "stop_new_entries": -0.10,
+        "reduce_risk": -0.075,
+        "hard_flatten": -0.15
+      },
+      "time_to_settlement": {
+        "taper_start_hours": 4,
+        "strong_taper_hours": 2,
+        "strong_taper_multiplier": 0.3
+      }
+    }
+  },
+  "strategies": {
+    "baseline_paper": {
+      "label": "Baseline Intraday",
+      "module": "execution.rebalancer",
+      "entry_point": "generate_orders_from_probs",
+      "paper_only": true,
+      "description": "Baseline intraday model using combined posterior distribution",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 6,
+        "only_on_event_date": false
+      }
+    },
+    "rain_observed_paper": {
+      "label": "Rain Observed",
+      "module": "execution.rebalancer",
+      "entry_point": "generate_orders_from_probs",
+      "paper_only": true,
+      "description": "Strategy using observed rainfall features",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      }
+    },
+    "rain_nowcast_paper": {
+      "label": "Rain Nowcast",
+      "module": "execution.rebalancer",
+      "entry_point": "generate_orders_from_probs",
+      "paper_only": true,
+      "description": "Strategy using rain nowcast predictions",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      }
+    },
+    "gated_ensemble_paper": {
+      "label": "Gated Ensemble",
+      "module": "execution.rebalancer",
+      "entry_point": "generate_orders_from_probs",
+      "paper_only": true,
+      "description": "Ensemble with rain-regime gating and bucket validation gates",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      }
+    },
+    "enhanced_v1_paper": {
+      "label": "Enhanced V1",
+      "module": "execution.strategy_engine",
+      "entry_point": "run_enhanced_rebalance_cycle",
+      "paper_only": true,
+      "description": "Time-sliced exposure, 3% edge threshold, liquidity check, rain protection, volatility/confidence multipliers",
+      "exposure_limits": {
+        "morning": 0.5,
+        "afternoon": 0.3,
+        "evening": 0.1,
+        "night": 0.0
+      },
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      },
+      "override": {
+        "entry": {
+          "regime_thresholds": {
+            "rain_08_12": { "min_edge": 0.06 }
+          }
+        },
+        "position_sizing": {
+          "time_window_multiplier": [
+            { "hours": [8, 10], "value": 0.5 },
+            { "hours": [10, 14], "value": 1.0 },
+            { "hours": [14, 16], "value": 0.5 },
+            { "hours": [16, 24], "value": 0.0 }
+          ]
+        }
+      }
+    },
+    "enhanced_v2_paper": {
+      "label": "Enhanced V2",
+      "module": "execution.strategy_engine",
+      "entry_point": "run_config_rebalance_cycle",
+      "paper_only": true,
+      "description": "Config-driven entry/exit gates, model selection (C→B→A), unified sizing with multipliers, 7-trigger rebalance, drawdown/T2S controls",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      },
+      "override": {
+        "entry": {
+          "regime_thresholds": {
+            "rain_08_12": { "min_edge": 0.055 }
+          },
+          "boundary_proximity": {
+            "min_standardized_distance": 0.6,
+            "aggressive_reduction_threshold": 0.35
+          }
+        },
+        "position_sizing": {
+          "time_window_multiplier": [
+            { "hours": [8, 10], "value": 0.5 },
+            { "hours": [10, 14], "value": 1.0 },
+            { "hours": [14, 16], "value": 0.5 },
+            { "hours": [16, 24], "value": 0.0 }
+          ],
+          "max_per_bucket": 0.12
+        },
+        "rebalance": {
+          "material_prob_pp": 8,
+          "material_ev_pp": 3
+        },
+        "exit": {
+          "edge_reversal_threshold": -0.04,
+          "stop_prob": 0.08
+        }
+      }
+    },
+    "enhanced_v2_aggressive_paper": {
+      "label": "Enhanced V2 Aggressive",
+      "module": "execution.strategy_engine",
+      "entry_point": "run_config_rebalance_cycle",
+      "paper_only": true,
+      "description": "V2 variant: lower rain edge (4.5%), looser boundary (0.35σ), default rebalance thresholds (5pp/2pp)",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      },
+      "override": {
+        "entry": {
+          "regime_thresholds": {
+            "rain_08_12": { "min_edge": 0.045 }
+          },
+          "boundary_proximity": {
+            "min_standardized_distance": 0.35,
+            "aggressive_reduction_threshold": 0.2
+          }
+        },
+        "position_sizing": {
+          "time_window_multiplier": [
+            { "hours": [8, 10], "value": 0.55 },
+            { "hours": [10, 14], "value": 1.0 },
+            { "hours": [14, 16], "value": 0.55 },
+            { "hours": [16, 24], "value": 0.0 }
+          ]
+        },
+        "exit": {
+          "edge_reversal_threshold": -0.04,
+          "stop_prob": 0.08
+        }
+      }
+    },
+    "enhanced_v2_conservative_paper": {
+      "label": "Enhanced V2 Conservative",
+      "module": "execution.strategy_engine",
+      "entry_point": "run_config_rebalance_cycle",
+      "paper_only": true,
+      "description": "V2 variant: stricter rain edge (6.0%), tighter exposure (10% per bucket), conservative rebalance (8pp/3pp)",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      },
+      "override": {
+        "entry": {
+          "regime_thresholds": {
+            "rain_08_12": { "min_edge": 0.06 }
+          },
+          "boundary_proximity": {
+            "min_standardized_distance": 0.6,
+            "aggressive_reduction_threshold": 0.35
+          }
+        },
+        "position_sizing": {
+          "time_window_multiplier": [
+            { "hours": [8, 10], "value": 0.5 },
+            { "hours": [10, 14], "value": 1.0 },
+            { "hours": [14, 16], "value": 0.5 },
+            { "hours": [16, 24], "value": 0.0 }
+          ],
+          "max_per_bucket": 0.10
+        },
+        "rebalance": {
+          "material_prob_pp": 8,
+          "material_ev_pp": 3
+        },
+        "exit": {
+          "edge_reversal_threshold": -0.04,
+          "stop_prob": 0.08
+        }
+      }
+    }
+  }
+}

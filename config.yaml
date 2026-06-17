@@ -1,0 +1,58 @@
+# ==========================================================
+# 專案設定檔：香港天氣預測市場交易機器人 (Polymarket)
+# ==========================================================
+
+# 目標位置：香港天文台總部 (HKO Headquarters)
+location:
+  name: "HKO Headquarters"
+  lat: 22.302
+  lon: 114.174
+
+# 市場定義：每日最高氣溫 (Daily Maximum Temperature) 桶 (Buckets)
+# 單位為攝氏 (°C)，整數桶代表區間，例如 29 代表 [29.0, 29.9]°C
+market:
+  metric: "tmax"
+  bucket_min: 28
+  bucket_max: 35
+  buckets: [28, 29, 30, 31, 32, 33, 34, 35]
+
+# 資料與輸出路徑設定
+paths:
+  raw_csv_dir: "data/raw/"
+  historical_obs: "data/hko_tmax_historical.parquet"
+  ecmwf_ens_dir: "data/ecmwf_ens/"
+  ecmwf_ens_latest: "data/ecmwf_ens/latest_ens_hko.nc"
+  ecmwf_daily_tmax: "data/ecmwf_ens/daily_tmax.nc"
+  training_data: "data/training_data.parquet"
+  model_dir: "models/"
+  model_path: "models/xgb_calibrator.json"
+
+# 預報與模型參數設定
+forecast:
+  # 要處理的 ECMWF 週期 (00z 與 12z)
+  cycle_hours: [0, 12]
+  # 預測天數 (Lead times in days)
+  lead_days: [0, 1, 2, 3, 4, 5]
+  # GRIB 時間步階範圍 (0 到 144 小時，每 3 小時一個步階)
+  step_range: "0/144/3"
+  
+# 資金與下注參數設定 (Kelly Criterion)
+betting:
+  kelly_fraction: 0.5       # 使用半凱利 (Half-Kelly) 降低風險
+  max_bucket_exposure: 0.15 # 單一桶的最大資金暴露上限為 15%
+  initial_capital: 1000.0   # 初始資金 (USD)
+
+# Polymarket API 設定
+polymarket:
+  use_real_api: true
+  debug_api_response: false  # 設為 true 可列印原始 API 回傳內容
+  request_timeout: 15
+
+
+execution:
+  mode: paper
+  allow_live_orders: false
+  require_manual_approval: true
+  max_total_exposure: 0.50
+  max_single_bucket_exposure: 0.15
+  kelly_fraction: 0.50

@@ -1,0 +1,16 @@
+{
+  "decision": "regime_based_switch_candidate",
+  "reason": [
+    "C candidate improves all rain regimes significantly (heavy_rain tmax_MAE -47%, post_peak_rain tmax_MAE -45%)",
+    "No degradation on rain_absent slice (tmax_MAE diff < 0.002)",
+    "Forward test evidence exists with 2887 nowcast rain cases",
+    "Leakage audit passes (11/11), runtime smoke test passes",
+    "Do not full-replace baseline \u2014 use as regime-switch candidate for rain scenarios"
+  ],
+  "regime_switch_rules": {
+    "use_rain_nowcast_when": "rain_nc_any_0_120m > 0 OR rainfall_60m_filled > 0",
+    "use_baseline_when": "rain_nowcast_missing_flag == 1 AND rainfall_60m_filled == 0"
+  },
+  "evaluated_at": "2026-06-09T21:59:53.948123",
+  "evaluated_by": "Step 13 evaluate_candidates.py + Step 14 forward_test_paper.py"
+}
