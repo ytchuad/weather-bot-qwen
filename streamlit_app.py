@@ -75,13 +75,12 @@ render_top_nav(current=_current_page_key)
 # A cross-fade CSS transition masks the brief flash.
 _NAV_JS_BRIDGE = """<script>
 (function(){
-  var doc = window.parent.document;
-  var links = doc.querySelectorAll('.top-nav-link[data-nav-key]');
+  var links = document.querySelectorAll('.top-nav-link[data-nav-key]');
   if (!links.length) { setTimeout(arguments.callee, 300); return; }
-  if (doc.body.hasAttribute('data-nav-wired')) return;
-  doc.body.setAttribute('data-nav-wired', '1');
+  if (document.body.hasAttribute('data-nav-wired')) return;
+  document.body.setAttribute('data-nav-wired', '1');
 
-  doc.body.addEventListener('click', function(e){
+  document.body.addEventListener('click', function(e){
     var link = e.target.closest('.top-nav-link[data-nav-key]');
     if (!link) return;
     e.preventDefault();
@@ -90,11 +89,11 @@ _NAV_JS_BRIDGE = """<script>
     if (!key) return;
 
     /* Fade-out the main content before navigation to mask the flash */
-    var main = doc.querySelector('section[data-testid="stMain"]');
+    var main = document.querySelector('section[data-testid="stMain"]');
     if (main) { main.style.opacity = '0'; main.style.transition = 'opacity 0.12s ease'; }
 
     var path = key === 'hub' ? '/' : '/' + key;
-    setTimeout(function(){ window.parent.location.pathname = path; }, 120);
+    setTimeout(function(){ window.location.pathname = path; }, 120);
   });
 })();
 </script>"""
