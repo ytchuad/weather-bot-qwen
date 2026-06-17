@@ -222,7 +222,7 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     sm = list(st.session_state.get(_MODELS_KEY, []))
 
     # ── Section title + gear popover ──────────────────────────
-    cols = st.columns([10, 1])
+    cols = st.columns([1, 1])
     with cols[0]:
         st.markdown(
             '<div class="section-title" style="margin-top:24px;">Model Predictions</div>',
@@ -230,7 +230,7 @@ def _render_model_cards(ar: dict, markets: list) -> None:
         )
     _selected_removed = False
     with cols[1]:
-        with st.popover("⚙", use_container_width=True):
+        with st.popover("⚙", use_container_width=False):
             avail = _model_options(ar)
             cur = set(sm)
             for m in avail:

@@ -94,6 +94,10 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
+/* Right-align the gear column — .gear-col targets the column with the popover */
+button[data-testid="stPopoverButton"] {
+    margin-left: auto !important;
+}
 /* Make the popover button look like a bare clickable gear icon — no button chrome */
 button[data-testid="stPopoverButton"] {
     width: 32px !important; height: 32px !important;
