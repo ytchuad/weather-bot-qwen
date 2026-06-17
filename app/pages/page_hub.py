@@ -156,19 +156,18 @@ def _chart(df_today: pd.DataFrame) -> go.Figure:
 _JS_BRIDGE = """<script>
 (function(){
   function wire(){
-    var doc = window.parent.document;
-    var bd = doc.querySelector('#bucket-data');
-    var bucketContent = doc.querySelector('#bucket-content');
+    var bd = document.querySelector('#bucket-data');
+    var bucketContent = document.querySelector('#bucket-content');
     if (!bd || !bucketContent) { setTimeout(wire, 200); return; }
 
     /* Guard: only add the click listener once (survives fragment & full reruns) */
-    if (doc.body.hasAttribute('data-mc-wired')) return;
-    doc.body.setAttribute('data-mc-wired', '1');
+    if (document.body.hasAttribute('data-mc-wired')) return;
+    document.body.setAttribute('data-mc-wired', '1');
 
     /* Hide any visible Streamlit text inputs on this page
        (they are bridge widgets that should not be user-visible) */
     try {
-      var allDivs = doc.querySelectorAll('div[data-testid="stElementContainer"]');
+      var allDivs = document.querySelectorAll('div[data-testid="stElementContainer"]');
       allDivs.forEach(function(div){
         /* If container has no visible content except a label, hide it */
         var vis = div.querySelector('input');
@@ -181,18 +180,18 @@ _JS_BRIDGE = """<script>
       });
     } catch(e){}
 
-    doc.body.addEventListener('click', function(e){
+    document.body.addEventListener('click', function(e){
       var card = e.target.closest('.mc');
       if (!card) return;
       var k = card.getAttribute('data-key');
       if (!k) return;
 
       /* Re-read bucket data each click (DOM may have been rebuilt by fragment rerun) */
-      var freshBd = doc.querySelector('#bucket-data');
+      var freshBd = document.querySelector('#bucket-data');
       var data = freshBd ? JSON.parse(freshBd.textContent) : {};
 
       /* 1. Update active card styling */
-      doc.querySelectorAll('.mc').forEach(function(c){
+      document.querySelectorAll('.mc').forEach(function(c){
         c.classList.remove('mc-active');
         c.classList.remove('mc-pulse');
       });
@@ -201,8 +200,8 @@ _JS_BRIDGE = """<script>
       setTimeout(function(){ card.classList.remove('mc-pulse'); }, 200);
 
       /* 2. Update bucket bars — instant, no rerun */
-      var bc = doc.querySelector('#bucket-content');
-      var bl = doc.querySelector('#bucket-model-label');
+      var bc = document.querySelector('#bucket-content');
+      var bl = document.querySelector('#bucket-model-label');
       if (data[k]) {
         if (bc) bc.innerHTML = data[k].html;
         if (bl) bl.textContent = data[k].label;
