@@ -94,9 +94,13 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Right-align the gear column — .gear-col targets the column with the popover */
-button[data-testid="stPopoverButton"] {
-    margin-left: auto !important;
+/* Collapse the model-preds gear column to 32px, right edge of page */
+div[data-testid="stHorizontalBlock"]:has(div#mp-title)
+  > div[data-testid="column"]:last-child {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 32px !important;
+  align-items: flex-end !important;
 }
 /* Make the popover button look like a bare clickable gear icon — no button chrome */
 button[data-testid="stPopoverButton"] {

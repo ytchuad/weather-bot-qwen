@@ -222,10 +222,10 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     sm = list(st.session_state.get(_MODELS_KEY, []))
 
     # ── Section title + gear popover ──────────────────────────
-    cols = st.columns([5, 1])
+    cols = st.columns([10, 1])
     with cols[0]:
         st.markdown(
-            '<div class="section-title" style="margin-top:24px;">Model Predictions</div>',
+            '<div class="section-title" id="mp-title" style="margin-top:24px;">Model Predictions</div>',
             unsafe_allow_html=True,
         )
     _selected_removed = False
