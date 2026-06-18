@@ -12,3 +12,6 @@ scipy
 lightgbm
 pyyaml
 polymarket-paper-trader>=0.1.7
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+cachetools>=5.3.3
