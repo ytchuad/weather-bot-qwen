@@ -94,26 +94,60 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Popover trigger — tiny & invisible, in normal flow right below title row
-   so the popover opens near the gear icon */
+/* Collapse column gap & sizing for the title+gear row */
+div[data-testid="stHorizontalBlock"]:has(div#mp-title) {
+  gap: 0 !important;
+}
+div[data-testid="stHorizontalBlock"]:has(div#mp-title)
+  > div[data-testid="column"]:last-child {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 32px !important;
+  align-items: flex-end !important;
+}
+/* Popover trigger — bare gear icon via pseudo-element, no button chrome */
 button[data-testid="stPopoverButton"] {
-  display: block !important;
-  margin-left: auto !important;
-  margin-top: 0 !important;
-  opacity: 0.01 !important;
-  width: 2px !important;
-  height: 2px !important;
-  padding: 0 !important;
-  min-height: 0 !important;
-  min-width: 0 !important;
-  border: none !important;
-  pointer-events: none !important;
-  cursor: default !important;
+    width: 32px !important; height: 32px !important;
+    padding: 0 !important; min-height: 0 !important;
+    min-width: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    cursor: pointer !important;
+    transition: opacity 0.2s ease !important;
+    position: relative !important;
+    overflow: hidden !important;
+    font-size: 0 !important;
+    line-height: 0 !important;
+    color: transparent !important;
+}
+/* Hide the label container and expansion icon (both are child divs) */
+button[data-testid="stPopoverButton"] > div {
+    display: none !important;
+}
+/* Render gear icon via pseudo-element */
+button[data-testid="stPopoverButton"]::before {
+    content: "\2699";
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important; height: 100% !important;
+    font-size: 18px !important;
+    line-height: 1 !important;
+    font-family: 'Inter', sans-serif !important;
+    color: #8F9BB7 !important;
+    transition: color 0.2s ease, transform 0.2s ease;
+}
+button[data-testid="stPopoverButton"]:hover::before {
+    color: #E6E9EF !important;
+    transform: rotate(30deg);
 }
 
 /* Popover body (dropdown panel)
    Use opacity animation to mask the brief flash while baseweb positions it. */
-div[data-testid="stPopoverBody"] {
+div[data-testid="stPopoverBody"],
+div[data-testid="stPopoverPanel"] {
     background: rgba(20,19,50,0.96) !important;
     backdrop-filter: blur(32px) !important; -webkit-backdrop-filter: blur(32px) !important;
     border: 0.5px solid rgba(255,255,255,0.08) !important;
@@ -128,15 +162,6 @@ div[data-testid="stPopoverBody"] {
     100% { opacity: 1; }
 }
 
-div[data-testid="stPopoverBody"],
-div[data-testid="stPopoverPanel"] {
-    background: rgba(20,19,50,0.96) !important;
-    backdrop-filter: blur(32px) !important; -webkit-backdrop-filter: blur(32px) !important;
-    border: 0.5px solid rgba(255,255,255,0.08) !important;
-    border-radius: 16px !important;
-    padding: 16px 20px !important;
-    box-shadow: 0 8px 60px rgba(0,0,0,0.4) !important;
-}
 /* Toggle styling inside popover panel */
 div[data-testid="stPopoverBody"] [data-testid="stToggleButton"],
 div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"],
@@ -160,12 +185,16 @@ div[data-testid="stPopoverPanel"] .stToggle label {
     font-weight: 500 !important; flex: 1 !important;
 }
 /* Popover body inner text & general styling */
-div[data-testid="stPopoverBody"] * {
+div[data-testid="stPopoverBody"] *,
+div[data-testid="stPopoverPanel"] * {
     font-family: 'Inter', sans-serif !important;
 }
 div[data-testid="stPopoverBody"] span,
+div[data-testid="stPopoverPanel"] span,
 div[data-testid="stPopoverBody"] p,
-div[data-testid="stPopoverBody"] label {
+div[data-testid="stPopoverPanel"] p,
+div[data-testid="stPopoverBody"] label,
+div[data-testid="stPopoverPanel"] label {
     color: #D1D5E0 !important;
 }
 
