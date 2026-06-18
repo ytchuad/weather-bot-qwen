@@ -94,8 +94,8 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Popover trigger — invisible, sits in natural flow.
-   JS temporarily sets position:fixed at gear-icon location before clicking. */
+/* Popover trigger — invisible, stays in natural flow (right after title).
+   JS repositions the panel itself below the gear icon before first paint. */
 button[data-testid="stPopoverButton"] {
   opacity: 0 !important;
   width: 0 !important; height: 0 !important;
@@ -103,9 +103,11 @@ button[data-testid="stPopoverButton"] {
   border: none !important;
   overflow: hidden !important;
   pointer-events: none !important;
+  font-size: 0 !important; line-height: 0 !important;
 }
 
-/* Popover body (dropdown panel) */
+/* Popover body (dropdown panel)
+   Use opacity animation to mask the brief flash while baseweb positions it. */
 div[data-testid="stPopoverBody"],
 div[data-testid="stPopoverPanel"] {
     background: rgba(20,19,50,0.96) !important;
@@ -122,49 +124,40 @@ div[data-testid="stPopoverPanel"] {
     100% { opacity: 1; }
 }
 
-/* Model toggle checkboxes inside popover — no checkbox box, clickable label text */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"],
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] {
-    padding: 8px 0 !important;
+/* Toggle styling inside popover panel */
+div[data-testid="stPopoverBody"] [data-testid="stToggleButton"],
+div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"],
+div[data-testid="stPopoverBody"] .stToggle,
+div[data-testid="stPopoverPanel"] .stToggle {
+    padding: 6px 0 !important;
     border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
-    background: transparent !important;
 }
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:last-child {
+div[data-testid="stPopoverBody"] [data-testid="stToggleButton"]:last-child,
+div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"]:last-child,
+div[data-testid="stPopoverBody"] .stToggle:last-child,
+div[data-testid="stPopoverPanel"] .stToggle:last-child {
     border-bottom: none !important;
 }
-/* Hide the checkbox visual (first child of label — could be div, span, or svg) */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label > :first-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label > :first-child {
-    display: none !important;
-}
-/* Off state (unchecked) — grey + italic */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label,
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label > :last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label > :last-child {
-    color: #8F9BB7 !important;
-    font-style: italic !important;
+div[data-testid="stPopoverBody"] [data-testid="stToggleButton"] label,
+div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"] label,
+div[data-testid="stPopoverBody"] .stToggle label,
+div[data-testid="stPopoverPanel"] .stToggle label {
     font-family: 'Inter', sans-serif !important;
-    font-size: 13px !important;
-    font-weight: 500 !important;
-    cursor: pointer !important;
-    gap: 0 !important;
-    padding-left: 0 !important;
+    font-size: 12px !important; color: #D1D5E0 !important;
+    font-weight: 500 !important; flex: 1 !important;
 }
-/* On state (checked via input or aria-checked) — white, normal */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label,
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label > :last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label > :last-child {
-    color: #FFFFFF !important;
-    font-style: normal !important;
-}
-/* Popover body inner text */
+/* Popover body inner text & general styling */
 div[data-testid="stPopoverBody"] *,
 div[data-testid="stPopoverPanel"] * {
     font-family: 'Inter', sans-serif !important;
-    font-size: 13px !important;
+}
+div[data-testid="stPopoverBody"] span,
+div[data-testid="stPopoverPanel"] span,
+div[data-testid="stPopoverBody"] p,
+div[data-testid="stPopoverPanel"] p,
+div[data-testid="stPopoverBody"] label,
+div[data-testid="stPopoverPanel"] label {
+    color: #D1D5E0 !important;
 }
 
 .weather-bg {
