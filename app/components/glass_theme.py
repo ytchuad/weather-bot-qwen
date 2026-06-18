@@ -125,11 +125,21 @@ div[data-testid="stPopoverPanel"] {
 }
 
 /* Hide the model-toggle bridge text input in the popover */
-div[data-testid="stPopoverBody"] div[data-testid="stTextInput"],
-div[data-testid="stPopoverPanel"] div[data-testid="stTextInput"] {
+div[data-testid="stPopoverBody"] [data-testid="stTextInput"],
+div[data-testid="stPopoverPanel"] [data-testid="stTextInput"] {
     display: none !important;
 }
-/* Clickable model toggle labels in popover */
+div[data-testid="stPopoverBody"] div[data-testid="stElementContainer"]:has([data-testid="stTextInput"]),
+div[data-testid="stPopoverPanel"] div[data-testid="stElementContainer"]:has([data-testid="stTextInput"]) {
+    display: none !important;
+    margin: 0 !important; padding: 0 !important;
+    height: 0 !important; min-height: 0 !important;
+}
+/* Clickable model toggle labels in popover — no default background */
+div[data-testid="stPopoverBody"] ._mt,
+div[data-testid="stPopoverPanel"] ._mt {
+    background: transparent !important;
+}
 div[data-testid="stPopoverBody"] ._mt:last-child,
 div[data-testid="stPopoverPanel"] ._mt:last-child {
     border-bottom: none !important;

@@ -155,105 +155,90 @@ def _chart(df_today: pd.DataFrame) -> go.Figure:
 
 _JS_BRIDGE = """<script>
 (function(){
-  function wire(){
-    var bd = document.querySelector('#bucket-data');
-    var bucketContent = document.querySelector('#bucket-content');
-    if (!bd || !bucketContent) { setTimeout(wire, 200); return; }
+  /* Register click handler immediately (gear + model toggle don't need bucket data).
+     Guard: only once across fragment & full reruns. */
+  if (document.body.hasAttribute('data-mc-wired')) return;
+  document.body.setAttribute('data-mc-wired', '1');
 
-    /* Guard: only add the click listener once (survives fragment & full reruns) */
-    if (document.body.hasAttribute('data-mc-wired')) return;
-    document.body.setAttribute('data-mc-wired', '1');
-
-    /* Hide any visible Streamlit text inputs on this page
-       (they are bridge widgets that should not be user-visible) */
-    try {
-      var allDivs = document.querySelectorAll('div[data-testid="stElementContainer"]');
-      allDivs.forEach(function(div){
-        /* If container has no visible content except a label, hide it */
-        var vis = div.querySelector('input');
-        var txt = div.querySelector('textarea');
-        if ((vis && vis.type === 'text' && !vis.placeholder) || txt) {
-          var label = div.querySelector('label') || div.querySelector('[data-baseweb="label"]');
-          var isBridge = label && (label.textContent.trim().charAt(0) === '_');
-          if (isBridge) div.style.display = 'none';
-        }
-      });
-    } catch(e){}
-
-    document.body.addEventListener('click', function(e){
-      /* Model toggle in popover → write to hidden bridge input */
-      var mt = e.target.closest('._mt');
-      if (mt) {
-        var model = mt.getAttribute('data-model');
-        if (model) {
-          var popover = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-          var inp = popover ? popover.querySelector('input[data-testid="stTextInput"]') : null;
-          if (inp) {
-            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-            nativeSetter.call(inp, 't:' + model);
-            inp.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-        }
-        /* Don't let the click close the popover */
-        e.stopPropagation();
-        return;
-      }
-
-      /* Gear icon → reposition hidden trigger below it, then open popover */
-      var gb = e.target.closest('._gear-btn');
-      if (gb) {
-        e.preventDefault();
-        var pb = document.querySelector('button[data-testid="stPopoverButton"]');
-        if (!pb) return;
-        /* If popover is already open, just let the click-through close it */
-        var isOpen = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-        if (isOpen) return;
-        /* Open popover at trigger's natural position, then reposition panel */
-        pb.click();
-        requestAnimationFrame(function() {
-          var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-          if (panel && gb.isConnected) {
-            var gr = gb.getBoundingClientRect();
-            panel.style.position = 'fixed';
-            panel.style.top = (gr.bottom + 4) + 'px';
-            panel.style.right = (window.innerWidth - gr.right) + 'px';
-            panel.style.left = 'auto';
-            panel.style.bottom = 'auto';
-            panel.style.transform = 'none';
-          }
-        });
-        return;
-      }
-
-      var card = e.target.closest('.mc');
-      if (!card) return;
-      var k = card.getAttribute('data-key');
-      if (!k) return;
-
-      /* Re-read bucket data each click (DOM may have been rebuilt by fragment rerun) */
-      var freshBd = document.querySelector('#bucket-data');
-      var data = freshBd ? JSON.parse(freshBd.textContent) : {};
-
-      /* 1. Update active card styling */
-      document.querySelectorAll('.mc').forEach(function(c){
-        c.classList.remove('mc-active');
-        c.classList.remove('mc-pulse');
-      });
-      card.classList.add('mc-active');
-      card.classList.add('mc-pulse');
-      setTimeout(function(){ card.classList.remove('mc-pulse'); }, 200);
-
-      /* 2. Update bucket bars — instant, no rerun */
-      var bc = document.querySelector('#bucket-content');
-      var bl = document.querySelector('#bucket-model-label');
-      if (data[k]) {
-        if (bc) bc.innerHTML = data[k].html;
-        if (bl) bl.textContent = data[k].label;
-      }
-
+  /* Hide bridge inputs (label starting with non-alphanum shortcuts like "###") */
+  try {
+    document.querySelectorAll('div[data-testid="stElementContainer"]').forEach(function(div){
+      var vis = div.querySelector('input');
+      var txt = div.querySelector('textarea');
+      if (!vis && !txt) return;
+      var label = div.querySelector('label') || div.querySelector('[data-baseweb="label"]');
+      var text = label ? label.textContent.trim() : '';
+      if (text === '###' || text.charAt(0) === '_') div.style.display = 'none';
     });
-  }
-  wire();
+  } catch(e){}
+
+  document.body.addEventListener('click', function(e){
+    /* Model toggle in popover → write to hidden bridge input */
+    var mt = e.target.closest('._mt');
+    if (mt) {
+      var model = mt.getAttribute('data-model');
+      if (model) {
+        /* data-testid="stTextInput" is on the CONTAINER div, not the <input> */
+        var container = document.querySelector('div[data-testid="stPopoverBody"] [data-testid="stTextInput"], div[data-testid="stPopoverPanel"] [data-testid="stTextInput"]');
+        var inp = container ? container.querySelector('input') : null;
+        if (inp) {
+          var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          nativeSetter.call(inp, 't:' + model);
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      }
+      e.stopPropagation();
+      return;
+    }
+
+    /* Gear icon → reposition hidden trigger below it, then open popover */
+    var gb = e.target.closest('._gear-btn');
+    if (gb) {
+      e.preventDefault();
+      var pb = document.querySelector('button[data-testid="stPopoverButton"]');
+      if (!pb) return;
+      var isOpen = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+      if (isOpen) return;
+      pb.click();
+      requestAnimationFrame(function() {
+        var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+        if (panel && gb.isConnected) {
+          var gr = gb.getBoundingClientRect();
+          panel.style.position = 'fixed';
+          panel.style.top = (gr.bottom + 4) + 'px';
+          panel.style.right = (window.innerWidth - gr.right) + 'px';
+          panel.style.left = 'auto';
+          panel.style.bottom = 'auto';
+          panel.style.transform = 'none';
+        }
+      });
+      return;
+    }
+
+    /* Model card click — needs bucket data */
+    var card = e.target.closest('.mc');
+    if (!card) return;
+    var k = card.getAttribute('data-key');
+    if (!k) return;
+
+    var freshBd = document.querySelector('#bucket-data');
+    var data = freshBd ? JSON.parse(freshBd.textContent) : {};
+
+    document.querySelectorAll('.mc').forEach(function(c){
+      c.classList.remove('mc-active');
+      c.classList.remove('mc-pulse');
+    });
+    card.classList.add('mc-active');
+    card.classList.add('mc-pulse');
+    setTimeout(function(){ card.classList.remove('mc-pulse'); }, 200);
+
+    var bc = document.querySelector('#bucket-content');
+    var bl = document.querySelector('#bucket-model-label');
+    if (data[k]) {
+      if (bc) bc.innerHTML = data[k].html;
+      if (bl) bl.textContent = data[k].label;
+    }
+  });
 })();
 </script>"""
 
@@ -309,7 +294,7 @@ def _render_model_cards(ar: dict, markets: list) -> None:
                 if cur_sel not in sm:
                     st.session_state[_SELECTED_KEY] = sm[0] if sm else None
                     _selected_removed = True
-                st.session_state["_mt_bridge"] = ""
+            st.session_state["_mt_bridge"] = "x"
 
     # If the selected model was toggled off, the bucket section (outside this
     # fragment) needs a full rerun to show the fallback model's data.
