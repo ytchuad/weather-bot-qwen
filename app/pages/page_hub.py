@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 from ..components.top_nav import mark_refreshed
 from ..config import MODEL_LABELS, TMAX_BUCKETS, TMIN_BUCKETS
@@ -41,9 +42,12 @@ def _active_model(selected_models: list[str], all_results: dict) -> str:
     m = st.session_state.get(_SELECTED_KEY)
     if m and m in all_results:
         return m
+    if m and m in selected_models:
+        return m
     if selected_models:
         return selected_models[0]
     return next((k for k in all_results if k != "_intraday_error"), "")
+
 
 
 def _temp_card_html(temp: float, humidity: float, max_obs: float | None, min_obs: float | None) -> str:
@@ -153,75 +157,310 @@ def _chart(df_today: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def _on_model_toggle(m: str) -> None:
-    """on_change callback: lightweight state sync, no I/O."""
-    new_val = st.session_state.get(f"toggle_{m}", False)
-    sm = list(st.session_state.get(_MODELS_KEY, []))
-    cur_sel = st.session_state.get(_SELECTED_KEY)
-    if m in sm and not new_val:
-        sm.remove(m)
-    elif m not in sm and new_val:
-        sm.append(m)
-    else:
-        return
-    st.session_state[_MODELS_KEY] = sm
-    if cur_sel not in sm:
-        st.session_state[_SELECTED_KEY] = sm[0] if sm else None
-        st.session_state["_trigger_full_rerun"] = True
+
 
 
 _JS_BRIDGE = """<script>
 (function S(){
-  if (document.body.hasAttribute('data-mc-wired')) return;
-  document.body.setAttribute('data-mc-wired', '1');
+  var doc = window.parent.document;
+  if (doc.body.hasAttribute('data-mc-wired')) return;
+  doc.body.setAttribute('data-mc-wired', '1');
 
-  /* Reposition popover panel below gear icon */
-  function reposition() {
-    var gb = document.querySelector('._gear-btn');
-    var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-    if (!gb || !panel || !gb.isConnected) return;
+  var dropdownOpen = false;
+  var dragSrcEl = null;
+
+  /* ── Dropdown helpers ─────────────────────────────── */
+  function toggleDropdown() {
+    var panel = doc.querySelector('#model-dropdown-panel');
+    if (!panel) return;
+    dropdownOpen = !dropdownOpen;
+    panel.style.display = dropdownOpen ? 'block' : 'none';
+    if (dropdownOpen) positionDropdown();
+  }
+
+  function closeDropdown() {
+    dropdownOpen = false;
+    var panel = doc.querySelector('#model-dropdown-panel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  function positionDropdown() {
+    var gb = doc.querySelector('._gear-btn');
+    var panel = doc.querySelector('#model-dropdown-panel');
+    if (!gb || !panel) return;
     var gr = gb.getBoundingClientRect();
     panel.style.position = 'fixed';
-    panel.style.top = (gr.bottom + 4) + 'px';
+    panel.style.top = (gr.bottom + 8) + 'px';
     panel.style.right = (window.innerWidth - gr.right) + 'px';
     panel.style.left = 'auto';
     panel.style.bottom = 'auto';
-    panel.style.transform = 'none';
   }
 
-  /* MutationObserver: catch popover body re-insertion during fragment rerun */
-  var obs = new MutationObserver(function() {
-    var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-    if (panel && !panel.hasAttribute('data-rp')) {
-      panel.setAttribute('data-rp', '1');
-      reposition();
-    }
-  });
-  obs.observe(document.body, { childList: true, subtree: true });
+  /* ── Build dropdown from JSON ─────────────────────── */
+  function buildDropdown() {
+    var dataEl = doc.querySelector('#model-dropdown-data');
+    var panel = doc.querySelector('#model-dropdown-panel');
+    if (!dataEl || !panel) return;
 
-  document.body.addEventListener('click', function(e){
-    /* Gear icon → open popover + reposition */
-    var gb = e.target.closest('._gear-btn');
-    if (gb) {
-      e.preventDefault();
-      var pb = document.querySelector('button[data-testid="stPopoverButton"]');
-      if (!pb) return;
-      if (document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]')) return;
-      pb.click();
-      requestAnimationFrame(reposition);
+    var data;
+    try { data = JSON.parse(dataEl.textContent); } catch(e) { return; }
+
+    var activeList = panel.querySelector('#md-active-list');
+    var inactiveList = panel.querySelector('#md-inactive-list');
+    if (!activeList || !inactiveList) return;
+
+    activeList.innerHTML = '';
+    inactiveList.innerHTML = '';
+
+    data.active.forEach(function(m) {
+      var el = doc.createElement('div');
+      el.className = 'md-item md-active';
+      el.setAttribute('data-key', m.key);
+      el.setAttribute('draggable', 'true');
+      el.innerHTML = '<span class="md-drag-handle">⋮⋮</span>'
+        + '<span class="md-name">' + m.label + '</span>'
+        + '<span class="md-key">[' + m.key + ']</span>';
+      activeList.appendChild(el);
+    });
+
+    data.inactive.forEach(function(m) {
+      var el = doc.createElement('div');
+      el.className = 'md-item md-inactive';
+      el.setAttribute('data-key', m.key);
+      el.innerHTML = '<span class="md-drag-handle" style="visibility:hidden;">⋮⋮</span>'
+        + '<span class="md-name">' + m.label + '</span>'
+        + '<span class="md-key">[' + m.key + ']</span>';
+      inactiveList.appendChild(el);
+    });
+  }
+
+  /* ── Grid helpers ───────────────────────────────── */
+  function adjustGridColumns() {
+    var grid = doc.querySelector('#_mc-grid');
+    if (!grid) return;
+    var count = grid.querySelectorAll('.mc').length;
+    count = Math.max(count, 1);
+    grid.style.gridTemplateColumns = 'repeat(' + count + ', 1fr)';
+  }
+
+  function addCard(key) {
+    var grid = doc.querySelector('#_mc-grid');
+    var cardDataEl = doc.querySelector('#card-data');
+    if (!grid || !cardDataEl) return;
+
+    var cardData;
+    try { cardData = JSON.parse(cardDataEl.textContent); } catch(e) { return; }
+
+    var cardHtml = cardData[key];
+    if (!cardHtml) return;
+
+    var wrapper = doc.createElement('div');
+    wrapper.innerHTML = cardHtml;
+    var newCard = wrapper.firstChild;
+    newCard.classList.add('mc-entering');
+    grid.appendChild(newCard);
+
+    requestAnimationFrame(function() {
+      newCard.classList.remove('mc-entering');
+    });
+
+    adjustGridColumns();
+  }
+
+  function removeCard(key) {
+    var card = doc.querySelector('.mc[data-key="' + key + '"]');
+    if (!card) return;
+
+    card.classList.add('mc-removing');
+    setTimeout(function() {
+      if (card.parentNode) card.parentNode.removeChild(card);
+      adjustGridColumns();
+    }, 200);
+  }
+
+  /* ── Drag & Drop (event delegation on active list) ── */
+  function initDragDelegation() {
+    var container = doc.querySelector('#md-active-list');
+    if (!container) return;
+
+    container.addEventListener('dragstart', function(e) {
+      var item = e.target.closest('.md-item');
+      if (!item) return;
+      dragSrcEl = item;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', item.getAttribute('data-key'));
+      item.classList.add('md-dragging');
+    });
+
+    container.addEventListener('dragend', function(e) {
+      var item = e.target.closest('.md-item');
+      if (item) item.classList.remove('md-dragging');
+      container.querySelectorAll('.md-item').forEach(function(it) {
+        it.classList.remove('md-drag-over');
+      });
+      dragSrcEl = null;
+      sendReorder();
+    });
+
+    container.addEventListener('dragover', function(e) {
+      if (e.preventDefault) e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      var overItem = e.target.closest('.md-item');
+      if (overItem && overItem !== dragSrcEl) {
+        container.querySelectorAll('.md-item').forEach(function(it) {
+          it.classList.remove('md-drag-over');
+        });
+        overItem.classList.add('md-drag-over');
+      }
+      return false;
+    });
+
+    container.addEventListener('dragleave', function(e) {
+      var item = e.target.closest('.md-item');
+      if (item) item.classList.remove('md-drag-over');
+    });
+
+    container.addEventListener('drop', function(e) {
+      if (e.stopPropagation) e.stopPropagation();
+      var overItem = e.target.closest('.md-item');
+      if (overItem && dragSrcEl && overItem !== dragSrcEl) {
+        var srcIdx = Array.from(container.children).indexOf(dragSrcEl);
+        var dstIdx = Array.from(container.children).indexOf(overItem);
+        if (srcIdx < dstIdx) {
+          container.insertBefore(dragSrcEl, overItem.nextSibling);
+        } else {
+          container.insertBefore(dragSrcEl, overItem);
+        }
+      }
+      return false;
+    });
+  }
+
+  function buildCardGrid() {
+    var grid = doc.querySelector('#_mc-grid');
+    var cardDataEl = doc.querySelector('#card-data');
+    if (!grid || !cardDataEl) return;
+    var cardData;
+    try { cardData = JSON.parse(cardDataEl.textContent); } catch(e) { return; }
+    var activeList = doc.querySelector('#md-active-list');
+    if (!activeList) return;
+    var selKey = null;
+    var curActive = grid.querySelector('.mc-active');
+    if (curActive) selKey = curActive.getAttribute('data-key');
+    var keys = [];
+    activeList.querySelectorAll('.md-item').forEach(function(el) {
+      var k = el.getAttribute('data-key');
+      if (k && cardData[k]) keys.push(k);
+    });
+    grid.innerHTML = '';
+    keys.forEach(function(key) {
+      var wrapper = doc.createElement('div');
+      wrapper.innerHTML = cardData[key];
+      var card = wrapper.firstChild;
+      if (key === selKey) card.classList.add('mc-active');
+      grid.appendChild(card);
+    });
+    adjustGridColumns();
+  }
+
+  function sendReorder() {
+    buildCardGrid();
+  }
+
+  function toggleModel(key) {
+    var item = doc.querySelector('.md-item[data-key="' + key + '"]');
+    if (!item) return;
+    var isActive = item.classList.contains('md-active');
+    var activeList = doc.querySelector('#md-active-list');
+    var inactiveList = doc.querySelector('#md-inactive-list');
+    if (isActive) {
+      removeCard(key);
+      item.classList.remove('md-active');
+      item.classList.add('md-inactive');
+      item.setAttribute('draggable', 'false');
+      var handle = item.querySelector('.md-drag-handle');
+      if (handle) handle.style.visibility = 'hidden';
+      if (inactiveList) inactiveList.appendChild(item);
+    } else {
+      addCard(key);
+      item.classList.remove('md-inactive');
+      item.classList.add('md-active');
+      item.setAttribute('draggable', 'true');
+      var handle = item.querySelector('.md-drag-handle');
+      if (handle) handle.style.visibility = 'visible';
+      if (activeList) activeList.appendChild(item);
+    }
+  }
+
+  function syncToServer(selectedKey) {
+    var activeList = doc.querySelector('#md-active-list');
+    if (!activeList) return;
+    var keys = [];
+    activeList.querySelectorAll('.md-item').forEach(function(el) {
+      var k = el.getAttribute('data-key');
+      if (k) keys.push(k);
+    });
+    var url = new URL(window.parent.location);
+    url.searchParams.set('ml_order', keys.join(','));
+    url.searchParams.set('ml_sel', selectedKey);
+    window.parent.history.replaceState({}, '', url);
+    var btns = doc.querySelectorAll('div[data-testid="stButton"] button');
+    var btn = null;
+    btns.forEach(function(b) { if (b.textContent.trim() === 'Sync') btn = b; });
+    if (btn) btn.click();
+  }
+
+  /* ── MutationObserver: rebuild on fragment rerun ──── */
+  var dataObs = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      mutation.addedNodes.forEach(function(node) {
+        if (node.nodeType === 1 && (
+          node.id === 'model-dropdown-data' ||
+          (node.querySelector && node.querySelector('#model-dropdown-data'))
+        )) {
+          buildDropdown();
+          adjustGridColumns();
+        }
+      });
+    });
+  });
+  dataObs.observe(doc.body, { childList: true, subtree: true });
+
+  /* ── Event delegation ───────────────────────────── */
+  doc.body.addEventListener('click', function(e){
+    /* 1. Dropdown item click (toggle on/off) */
+    var mdItem = e.target.closest('.md-item');
+    if (mdItem && e.target.closest('#model-dropdown-panel')) {
+      if (e.target.closest('.md-drag-handle')) return;
+      var k = mdItem.getAttribute('data-key');
+      if (k) toggleModel(k);
       return;
     }
 
-    /* Model card click — update selected card + bucket */
+    /* 2. Gear icon → toggle dropdown */
+    var gb = e.target.closest('._gear-btn');
+    if (gb) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleDropdown();
+      return;
+    }
+
+    /* 3. Click outside dropdown → close */
+    if (dropdownOpen && !e.target.closest('#model-dropdown-panel')) {
+      closeDropdown();
+    }
+
+    /* 4. Model card click — update selected + sync to server */
     var card = e.target.closest('.mc');
     if (!card) return;
     var k = card.getAttribute('data-key');
     if (!k) return;
 
-    var freshBd = document.querySelector('#bucket-data');
+    var freshBd = doc.querySelector('#bucket-data');
     var data = freshBd ? JSON.parse(freshBd.textContent) : {};
 
-    document.querySelectorAll('.mc').forEach(function(c){
+    doc.querySelectorAll('.mc').forEach(function(c){
       c.classList.remove('mc-active');
       c.classList.remove('mc-pulse');
     });
@@ -229,24 +468,44 @@ _JS_BRIDGE = """<script>
     card.classList.add('mc-pulse');
     setTimeout(function(){ card.classList.remove('mc-pulse'); }, 200);
 
-    var bc = document.querySelector('#bucket-content');
-    var bl = document.querySelector('#bucket-model-label');
+    var bc = doc.querySelector('#bucket-content');
+    var bl = doc.querySelector('#bucket-model-label');
     if (data[k]) {
       if (bc) bc.innerHTML = data[k].html;
       if (bl) bl.textContent = data[k].label;
     }
+
+    syncToServer(k);
   });
+
+  /* ── Init ─────────────────────────────────────────── */
+  buildDropdown();
+  adjustGridColumns();
+  initDragDelegation();
 })();
 </script>"""
 
 
 # ── Fragment: model card section ───────────────────────────
-# Only this section reruns when a toggle changes — the rest of
-# the page (weather cards, bucket bars, chart) stays untouched.
 @st.fragment
 def _render_model_cards(ar: dict, markets: list) -> None:
+    # ── Consume URL-synced changes from JS bridge ──
+    qp = st.query_params
+    ml_order = qp.get("ml_order")
+    ml_sel = qp.get("ml_sel")
+    if ml_order:
+        keys = [k.strip() for k in ml_order.split(",") if k.strip()]
+        avail_set = set(_model_options(ar))
+        valid = [k for k in keys if k in avail_set]
+        if valid:
+            st.session_state[_MODELS_KEY] = valid
+    if ml_sel and ml_sel in _model_options(ar):
+        st.session_state[_SELECTED_KEY] = ml_sel
+    st.query_params.clear()
+
     sm = list(st.session_state.get(_MODELS_KEY, []))
-    # ── Section title (single markdown flexbox row, gear at far right) ──
+
+    # ── Section title with gear icon ──
     st.markdown(
         '<div class="_mpr" style="display:flex;justify-content:space-between;'
         'align-items:center;margin-top:24px;">'
@@ -258,70 +517,92 @@ def _render_model_cards(ar: dict, markets: list) -> None:
         unsafe_allow_html=True,
     )
 
-    # ── Popover (hidden trigger — repositioned by JS before opening) ──
-    with st.popover("⚙", use_container_width=False):
-        avail = _model_options(ar)
-        cur = set(sm)
-        for m in avail:
-            is_on = m in cur
-            label = MODEL_LABELS.get(m, m)
-            st.session_state[f"toggle_{m}"] = is_on
-            st.toggle(
-                f"{label}  [{m}]",
-                key=f"toggle_{m}",
-                on_change=_on_model_toggle,
-                args=(m,),
-            )
+    # ── Custom dropdown panel (always rendered, hidden by default) ──
+    avail = _model_options(ar)
+    active_models = []
+    inactive_models = []
 
-    # If the selected model was toggled off, full rerun so bucket section and
-    # model cards update (fragment alone can't update components outside it).
-    if st.session_state.pop("_trigger_full_rerun", False):
-        st.rerun()
+    for mk in avail:
+        label = MODEL_LABELS.get(mk, mk)
+        if mk in sm:
+            active_models.append({"key": mk, "label": label})
+        else:
+            inactive_models.append({"key": mk, "label": label})
 
-    # ── Model cards ──────────────────────────────────────────
-    if sm:
-        sel_key = st.session_state.get(_SELECTED_KEY)
+    dropdown_html = (
+        '<div id="model-dropdown-panel" style="display:none;">'
+        '<div class="md-section-title">Active Models <span style="color:#6B7280;font-size:10px;">(drag to reorder)</span></div>'
+        '<div id="md-active-list" class="md-list"></div>'
+        '<div class="md-divider"></div>'
+        '<div class="md-section-title">Inactive Models</div>'
+        '<div id="md-inactive-list" class="md-list"></div>'
+        '</div>'
+        '<script type="application/json" id="model-dropdown-data">'
+        + _json.dumps({"active": active_models, "inactive": inactive_models})
+        + '</script>'
+    )
+    st.markdown(dropdown_html, unsafe_allow_html=True)
 
-        # Glass cards — rendered via st.markdown so they land in the main DOM
-        n = len(sm)
-        cards_h = '<div style="display:grid;grid-template-columns:repeat(' + str(n) + ',1fr);gap:12px;">'
-        for mk in sm:
-            pred = ar.get(mk, {})
-            mv = pred.get("mean") if pred else None
-            sv = pred.get("std") if pred else None
-            lb = MODEL_LABELS.get(mk, mk)
-            ms = f"{mv:.1f}&deg;C" if mv is not None else "--"
-            ss = f"&plusmn;{sv:.2f}" if sv is not None else "&plusmn;--"
-            is_sel = sel_key == mk
-            active_cls = " mc-active" if is_sel else ""
-            cards_h += (
-                '<div class="mc' + active_cls + '" data-key="' + mk + '">'
-                '<div style="font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.1em;'
-                'text-transform:uppercase;color:#8F9BB7;margin-bottom:6px;">' + lb + '</div>'
-                '<div style="font-family:Space Mono,monospace;font-size:32px;font-weight:700;'
-                'color:#fff;line-height:1.2;margin-top:2px;">' + ms + '</div>'
-                '<div style="font-family:Space Mono,monospace;font-size:11px;color:#8F9BB7;'
-                'margin-top:1px;">' + ss + '</div>'
-                '</div>'
-            )
-        cards_h += '</div>'
+    # ── Sync trigger button (hidden, clicked by JS to trigger rerun) ──
+    st.markdown(
+        '<style>div[data-testid="stButton"]:has(button:only-child) '
+        '{ position:fixed; left:-9999px; }</style>',
+        unsafe_allow_html=True,
+    )
+    st.button("Sync", key="_js_sync_btn", on_click=lambda: None)
 
-        # Pre-render bucket data for ALL selected models (consumed by JS bridge)
-        _bucket_json = {}
-        for mk in sm:
-            _mk_probs = ar.get(mk, {}).get("probs", {})
-            _bucket_json[mk] = {
-                "html": _bucket_rows_html(markets, _mk_probs),
-                "label": MODEL_LABELS.get(mk, mk),
-            }
-        cards_h += '<script type="application/json" id="bucket-data">' + _json.dumps(_bucket_json) + '</script>'
-        st.markdown(cards_h, unsafe_allow_html=True)
+    # ── Pre-compute card HTML for ALL models ──
+    _card_data = {}
+    for mk in avail:
+        pred = ar.get(mk, {})
+        mv = pred.get("mean") if pred else None
+        sv = pred.get("std") if pred else None
+        lb = MODEL_LABELS.get(mk, mk)
+        ms = f"{mv:.1f}&deg;C" if mv is not None else "--"
+        ss = f"&plusmn;{sv:.2f}" if sv is not None else "&plusmn;--"
+        _card_data[mk] = (
+            '<div class="mc" data-key="' + mk + '">'
+            '<div style="font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.1em;'
+            'text-transform:uppercase;color:#8F9BB7;margin-bottom:6px;">' + lb + '</div>'
+            '<div style="font-family:Space Mono,monospace;font-size:32px;font-weight:700;'
+            'color:#fff;line-height:1.2;margin-top:2px;">' + ms + '</div>'
+            '<div style="font-family:Space Mono,monospace;font-size:11px;color:#8F9BB7;'
+            'margin-top:1px;">' + ss + '</div>'
+            '</div>'
+        )
+
+    # ── Pre-compute bucket data for ALL models ──
+    _bucket_json = {}
+    for mk in avail:
+        _mk_probs = ar.get(mk, {}).get("probs", {})
+        _bucket_json[mk] = {
+            "html": _bucket_rows_html(markets, _mk_probs),
+            "label": MODEL_LABELS.get(mk, mk),
+        }
+
+    # ── Model cards grid (ALWAYS rendered, even when empty) ──
+    sel_key = st.session_state.get(_SELECTED_KEY)
+    n = max(len(sm), 1)
+    cards_h = '<div id="_mc-grid" style="display:grid;grid-template-columns:repeat(' + str(n) + ',1fr);gap:12px;">'
+    for mk in sm:
+        card_html = _card_data.get(mk, "")
+        if sel_key == mk:
+            card_html = card_html.replace('class="mc"', 'class="mc mc-active"', 1)
+        cards_h += card_html
+    cards_h += '</div>'
+
+    # Data scripts (ALWAYS rendered, empty JSON if no data)
+    cards_h += '<script type="application/json" id="card-data">' + _json.dumps(_card_data) + '</script>'
+    cards_h += '<script type="application/json" id="bucket-data">' + _json.dumps(_bucket_json) + '</script>'
+
+    st.markdown(cards_h, unsafe_allow_html=True)
 
 
 def run() -> None:
     state = AppState()
     state.init_defaults()
 
+    # ── Handle URL-synced changes from JS bridge ──
     if state.selected_event is None:
         ev = resolve_today_event()
         if ev:
@@ -367,6 +648,24 @@ def run() -> None:
         state.pred_intra = {k: v for k, v in ar.items() if k not in ("9d", "aws", "_intraday_error")}
 
     _init_models(ar)
+
+    # ── Handle URL-synced changes (ml_order + ml_sel) ──
+    qp = st.query_params
+    ml_order = qp.get("ml_order")
+    ml_sel = qp.get("ml_sel")
+
+    if ml_order:
+        keys = [k.strip() for k in ml_order.split(",") if k.strip()]
+        avail = set(_model_options(ar))
+        valid = [k for k in keys if k in avail]
+        if valid:
+            st.session_state[_MODELS_KEY] = valid
+
+    if ml_sel:
+        st.session_state[_SELECTED_KEY] = ml_sel
+
+    st.query_params.clear()
+
     st.markdown('<div class="content-area">', unsafe_allow_html=True)
 
     # ── Row 1: Weather cards ───────────────────────────────
@@ -392,7 +691,7 @@ def run() -> None:
     sm = list(st.session_state.get(_MODELS_KEY, []))
 
     # JS bridge — outside the fragment so it persists and only initializes once
-    st.html(_JS_BRIDGE, unsafe_allow_javascript=True)
+    components.html(_JS_BRIDGE, height=0)
 
     # ── Row 3 + 4: Bucket + Chart side-by-side ────────────
     bc_col, ch_col = st.columns([1, 1], gap="small")
