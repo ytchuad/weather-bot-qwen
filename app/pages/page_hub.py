@@ -153,89 +153,89 @@ def _chart(df_today: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def _on_model_toggle(m: str) -> None:
+    """on_change callback: lightweight state sync, no I/O."""
+    new_val = st.session_state.get(f"toggle_{m}", False)
+    sm = list(st.session_state.get(_MODELS_KEY, []))
+    cur_sel = st.session_state.get(_SELECTED_KEY)
+    if m in sm and not new_val:
+        sm.remove(m)
+    elif m not in sm and new_val:
+        sm.append(m)
+    else:
+        return
+    st.session_state[_MODELS_KEY] = sm
+    if cur_sel not in sm:
+        st.session_state[_SELECTED_KEY] = sm[0] if sm else None
+        st.session_state["_trigger_full_rerun"] = True
+
+
 _JS_BRIDGE = """<script>
-(function(){
-  function wire(){
-    var bd = document.querySelector('#bucket-data');
-    var bucketContent = document.querySelector('#bucket-content');
-    if (!bd || !bucketContent) { setTimeout(wire, 200); return; }
+(function S(){
+  if (document.body.hasAttribute('data-mc-wired')) return;
+  document.body.setAttribute('data-mc-wired', '1');
 
-    /* Guard: only add the click listener once (survives fragment & full reruns) */
-    if (document.body.hasAttribute('data-mc-wired')) return;
-    document.body.setAttribute('data-mc-wired', '1');
-
-    /* Hide any visible Streamlit text inputs on this page
-       (they are bridge widgets that should not be user-visible) */
-    try {
-      var allDivs = document.querySelectorAll('div[data-testid="stElementContainer"]');
-      allDivs.forEach(function(div){
-        /* If container has no visible content except a label, hide it */
-        var vis = div.querySelector('input');
-        var txt = div.querySelector('textarea');
-        if ((vis && vis.type === 'text' && !vis.placeholder) || txt) {
-          var label = div.querySelector('label') || div.querySelector('[data-baseweb="label"]');
-          var isBridge = label && (label.textContent.trim().charAt(0) === '_');
-          if (isBridge) div.style.display = 'none';
-        }
-      });
-    } catch(e){}
-
-    document.body.addEventListener('click', function(e){
-      /* Gear icon → reposition hidden trigger below it, then open popover */
-      var gb = e.target.closest('._gear-btn');
-      if (gb) {
-        e.preventDefault();
-        var pb = document.querySelector('button[data-testid="stPopoverButton"]');
-        if (!pb) return;
-        /* If popover is already open, just let the click-through close it */
-        var isOpen = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-        if (isOpen) return;
-        /* Open popover at trigger's natural position, then reposition panel */
-        pb.click();
-        requestAnimationFrame(function() {
-          var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
-          if (panel && gb.isConnected) {
-            var gr = gb.getBoundingClientRect();
-            panel.style.position = 'fixed';
-            panel.style.top = (gr.bottom + 4) + 'px';
-            panel.style.right = (window.innerWidth - gr.right) + 'px';
-            panel.style.left = 'auto';
-            panel.style.bottom = 'auto';
-            panel.style.transform = 'none';
-          }
-        });
-        return;
-      }
-
-      var card = e.target.closest('.mc');
-      if (!card) return;
-      var k = card.getAttribute('data-key');
-      if (!k) return;
-
-      /* Re-read bucket data each click (DOM may have been rebuilt by fragment rerun) */
-      var freshBd = document.querySelector('#bucket-data');
-      var data = freshBd ? JSON.parse(freshBd.textContent) : {};
-
-      /* 1. Update active card styling */
-      document.querySelectorAll('.mc').forEach(function(c){
-        c.classList.remove('mc-active');
-        c.classList.remove('mc-pulse');
-      });
-      card.classList.add('mc-active');
-      card.classList.add('mc-pulse');
-      setTimeout(function(){ card.classList.remove('mc-pulse'); }, 200);
-
-      /* 2. Update bucket bars — instant, no rerun */
-      var bc = document.querySelector('#bucket-content');
-      var bl = document.querySelector('#bucket-model-label');
-      if (data[k]) {
-        if (bc) bc.innerHTML = data[k].html;
-        if (bl) bl.textContent = data[k].label;
-      }
-
-    });
+  /* Reposition popover panel below gear icon */
+  function reposition() {
+    var gb = document.querySelector('._gear-btn');
+    var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+    if (!gb || !panel || !gb.isConnected) return;
+    var gr = gb.getBoundingClientRect();
+    panel.style.position = 'fixed';
+    panel.style.top = (gr.bottom + 4) + 'px';
+    panel.style.right = (window.innerWidth - gr.right) + 'px';
+    panel.style.left = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.transform = 'none';
   }
-  wire();
+
+  /* MutationObserver: catch popover body re-insertion during fragment rerun */
+  var obs = new MutationObserver(function() {
+    var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+    if (panel && !panel.hasAttribute('data-rp')) {
+      panel.setAttribute('data-rp', '1');
+      reposition();
+    }
+  });
+  obs.observe(document.body, { childList: true, subtree: true });
+
+  document.body.addEventListener('click', function(e){
+    /* Gear icon → open popover + reposition */
+    var gb = e.target.closest('._gear-btn');
+    if (gb) {
+      e.preventDefault();
+      var pb = document.querySelector('button[data-testid="stPopoverButton"]');
+      if (!pb) return;
+      if (document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]')) return;
+      pb.click();
+      requestAnimationFrame(reposition);
+      return;
+    }
+
+    /* Model card click — update selected card + bucket */
+    var card = e.target.closest('.mc');
+    if (!card) return;
+    var k = card.getAttribute('data-key');
+    if (!k) return;
+
+    var freshBd = document.querySelector('#bucket-data');
+    var data = freshBd ? JSON.parse(freshBd.textContent) : {};
+
+    document.querySelectorAll('.mc').forEach(function(c){
+      c.classList.remove('mc-active');
+      c.classList.remove('mc-pulse');
+    });
+    card.classList.add('mc-active');
+    card.classList.add('mc-pulse');
+    setTimeout(function(){ card.classList.remove('mc-pulse'); }, 200);
+
+    var bc = document.querySelector('#bucket-content');
+    var bl = document.querySelector('#bucket-model-label');
+    if (data[k]) {
+      if (bc) bc.innerHTML = data[k].html;
+      if (bl) bl.textContent = data[k].label;
+    }
+  });
 })();
 </script>"""
 
@@ -259,30 +259,23 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     )
 
     # ── Popover (hidden trigger — repositioned by JS before opening) ──
-    _selected_removed = False
     with st.popover("⚙", use_container_width=False):
         avail = _model_options(ar)
         cur = set(sm)
         for m in avail:
             is_on = m in cur
             label = MODEL_LABELS.get(m, m)
-            new_val = st.toggle(
-                f"{label}  [{m}]", value=is_on, key=f"mtg_{m}"
+            st.session_state[f"toggle_{m}"] = is_on
+            st.toggle(
+                f"{label}  [{m}]",
+                key=f"toggle_{m}",
+                on_change=_on_model_toggle,
+                args=(m,),
             )
-            if new_val != is_on:
-                if new_val:
-                    sm.append(m)
-                else:
-                    sm.remove(m)
-                st.session_state[_MODELS_KEY] = list(sm)
-                cur_sel = st.session_state.get(_SELECTED_KEY)
-                if cur_sel not in sm:
-                    st.session_state[_SELECTED_KEY] = sm[0] if sm else None
-                    _selected_removed = True
 
-    # If the selected model was toggled off, the bucket section (outside this
-    # fragment) needs a full rerun to show the fallback model's data.
-    if _selected_removed:
+    # If the selected model was toggled off, full rerun so bucket section and
+    # model cards update (fragment alone can't update components outside it).
+    if st.session_state.pop("_trigger_full_rerun", False):
         st.rerun()
 
     # ── Model cards ──────────────────────────────────────────
