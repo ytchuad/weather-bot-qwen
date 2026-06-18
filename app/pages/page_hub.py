@@ -181,6 +181,22 @@ _JS_BRIDGE = """<script>
     } catch(e){}
 
     document.body.addEventListener('click', function(e){
+      /* Gear icon → reposition hidden trigger below it, then open popover */
+      var gb = e.target.closest('._gear-btn');
+      if (gb) {
+        e.preventDefault();
+        var pb = document.querySelector('button[data-testid="stPopoverButton"]');
+        if (!pb) return;
+        /* If popover is already open, just let the click-through close it */
+        var isOpen = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+        if (isOpen) return;
+        var r = gb.getBoundingClientRect();
+        pb.style.left = r.left + 'px';
+        pb.style.top = r.bottom + 'px';
+        pb.click();
+        return;
+      }
+
       var card = e.target.closest('.mc');
       if (!card) return;
       var k = card.getAttribute('data-key');
@@ -220,34 +236,39 @@ _JS_BRIDGE = """<script>
 @st.fragment
 def _render_model_cards(ar: dict, markets: list) -> None:
     sm = list(st.session_state.get(_MODELS_KEY, []))
-    # ── Section title + gear popover (columns, gear at right) ──
-    cols = st.columns([10, 1], gap="small")
-    with cols[0]:
-        st.markdown(
-            '<div class="section-title" id="mp-title" style="margin-top:24px;">Model Predictions</div>',
-            unsafe_allow_html=True,
-        )
+    # ── Section title (single markdown flexbox row, gear at far right) ──
+    st.markdown(
+        '<div class="_mpr" style="display:flex;justify-content:space-between;'
+        'align-items:center;margin-top:24px;">'
+        '<div class="section-title" style="margin:0;">Model Predictions</div>'
+        '<button class="_gear-btn" type="button" '
+        'style="background:none;border:none;cursor:pointer;font-size:18px;'
+        'color:#8F9BB7;padding:0;line-height:1;">⚙</button>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Popover (hidden trigger — repositioned by JS before opening) ──
     _selected_removed = False
-    with cols[1]:
-        with st.popover("⚙", use_container_width=False):
-            avail = _model_options(ar)
-            cur = set(sm)
-            for m in avail:
-                is_on = m in cur
-                label = MODEL_LABELS.get(m, m)
-                new_val = st.toggle(
-                    f"{label}  [{m}]", value=is_on, key=f"mtg_{m}"
-                )
-                if new_val != is_on:
-                    if new_val:
-                        sm.append(m)
-                    else:
-                        sm.remove(m)
-                    st.session_state[_MODELS_KEY] = list(sm)
-                    cur_sel = st.session_state.get(_SELECTED_KEY)
-                    if cur_sel not in sm:
-                        st.session_state[_SELECTED_KEY] = sm[0] if sm else None
-                        _selected_removed = True
+    with st.popover("⚙", use_container_width=False):
+        avail = _model_options(ar)
+        cur = set(sm)
+        for m in avail:
+            is_on = m in cur
+            label = MODEL_LABELS.get(m, m)
+            new_val = st.toggle(
+                f"{label}  [{m}]", value=is_on, key=f"mtg_{m}"
+            )
+            if new_val != is_on:
+                if new_val:
+                    sm.append(m)
+                else:
+                    sm.remove(m)
+                st.session_state[_MODELS_KEY] = list(sm)
+                cur_sel = st.session_state.get(_SELECTED_KEY)
+                if cur_sel not in sm:
+                    st.session_state[_SELECTED_KEY] = sm[0] if sm else None
+                    _selected_removed = True
 
     # If the selected model was toggled off, the bucket section (outside this
     # fragment) needs a full rerun to show the fallback model's data.
