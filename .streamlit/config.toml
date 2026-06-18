@@ -10,6 +10,11 @@ font = "sans serif"
 maxUploadSize = 10
 port = 7860
 address = "0.0.0.0"
+enableCORS = false
+enableXsrfProtection = false
+enableWebsocketCompression = false
+maxUploadSize = 200
+headless = true
 
 [browser]
 gatherUsageStats = false
