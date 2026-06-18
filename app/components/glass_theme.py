@@ -94,53 +94,18 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Collapse the model-preds gear column to 32px, right edge of page */
-div[data-testid="stHorizontalBlock"]:has(div#mp-title)
-  > div[data-testid="column"]:last-child {
-  flex: 0 0 auto !important;
-  width: auto !important;
-  min-width: 32px !important;
-  align-items: flex-end !important;
-}
-/* Make the popover button look like a bare clickable gear icon — no button chrome */
+/* Popover trigger — invisible, zero-size, programmatic only */
 button[data-testid="stPopoverButton"] {
-    width: 32px !important; height: 32px !important;
-    padding: 0 !important; min-height: 0 !important;
-    min-width: 0 !important;
-    /* Strip all button chrome */
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    cursor: pointer !important;
-    transition: opacity 0.2s ease !important;
-    position: relative !important;
-    overflow: hidden !important;
-    font-size: 0 !important;
-    line-height: 0 !important;
-    color: transparent !important;
+  position: fixed !important;
+  opacity: 0 !important;
+  width: 0 !important; height: 0 !important;
+  padding: 0 !important; margin: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+  pointer-events: none !important;
+  font-size: 0 !important; line-height: 0 !important;
 }
-/* Hide the label container and expansion icon (both are child divs) */
-button[data-testid="stPopoverButton"] > div {
-    display: none !important;
-}
-/* Render gear icon via pseudo-element */
-button[data-testid="stPopoverButton"]::before {
-    content: "\2699";
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: 100% !important; height: 100% !important;
-    font-size: 18px !important;
-    line-height: 1 !important;
-    font-family: 'Inter', sans-serif !important;
-    color: #8F9BB7 !important;
-    transition: color 0.2s ease, transform 0.2s ease;
-}
-button[data-testid="stPopoverButton"]:hover::before {
-    color: #E6E9EF !important;
-    transform: rotate(30deg);
-}
+
 /* Popover body (dropdown panel)
    Use opacity animation to mask the brief flash while baseweb positions it. */
 div[data-testid="stPopoverBody"] {
@@ -157,29 +122,7 @@ div[data-testid="stPopoverBody"] {
     0% { opacity: 0; }
     100% { opacity: 1; }
 }
-/* Legacy fallback selectors for older Streamlit */
-div[data-testid="stPopover"] > button:first-child {
-    width: 32px !important; height: 32px !important;
-    padding: 0 !important; min-height: 0 !important;
-    min-width: 0 !important;
-    background: transparent !important;
-    border: none !important; box-shadow: none !important;
-    cursor: pointer !important; transition: opacity 0.2s ease !important;
-    position: relative; overflow: hidden;
-    font-size: 0 !important; line-height: 0 !important;
-    color: transparent !important;
-}
-div[data-testid="stPopover"] > button:first-child > * { display: none !important; }
-div[data-testid="stPopover"] > button:first-child::before {
-    content: "\2699"; font-size: 18px !important; line-height: 1 !important;
-    font-family: 'Inter', sans-serif !important; color: #8F9BB7 !important;
-    display: flex !important; align-items: center !important;
-    justify-content: center !important; width: 100% !important; height: 100% !important;
-    transition: color 0.2s ease, transform 0.2s ease;
-}
-div[data-testid="stPopover"] > button:first-child:hover::before {
-    color: #E6E9EF !important; transform: rotate(30deg);
-}
+
 div[data-testid="stPopoverBody"],
 div[data-testid="stPopoverPanel"] {
     background: rgba(20,19,50,0.96) !important;
