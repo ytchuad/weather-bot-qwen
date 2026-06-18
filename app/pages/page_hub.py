@@ -230,7 +230,7 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     )
 
     # ── Popover (hidden trigger — repositioned by JS before opening) ──
-    _did_toggle = False
+    _selected_removed = False
     with st.popover("⚙", use_container_width=False):
         avail = _model_options(ar)
         cur = set(sm)
@@ -243,7 +243,6 @@ def _render_model_cards(ar: dict, markets: list) -> None:
                 key=f"mtg_{m}",
             )
             if new_val != is_on:
-                _did_toggle = True
                 if new_val:
                     sm.append(m)
                 else:
@@ -252,10 +251,11 @@ def _render_model_cards(ar: dict, markets: list) -> None:
                 cur_sel = st.session_state.get(_SELECTED_KEY)
                 if cur_sel not in sm:
                     st.session_state[_SELECTED_KEY] = sm[0] if sm else None
+                    _selected_removed = True
 
-    # Rerun full page when a toggle happened so model cards + bucket update.
-    # (run_all_models is cached — no recompute on full rerun.)
-    if _did_toggle:
+    # If the selected model was toggled off, full rerun so bucket section
+    # updates (run_all_models is cached — no recompute on full rerun).
+    if _selected_removed:
         st.rerun()
 
     # ── Model cards ──────────────────────────────────────────
