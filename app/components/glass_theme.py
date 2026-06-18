@@ -94,15 +94,16 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Popover trigger — hidden, JS repositions it below _gear-btn before opening */
+/* Popover trigger — invisible, stays in natural flow (right after title).
+   JS repositions the panel itself below the gear icon before first paint. */
 button[data-testid="stPopoverButton"] {
-  position: fixed !important;
   opacity: 0 !important;
-  width: 1px !important; height: 1px !important;
+  width: 0 !important; height: 0 !important;
   padding: 0 !important; margin: 0 !important;
   border: none !important;
   overflow: hidden !important;
   pointer-events: none !important;
+  font-size: 0 !important; line-height: 0 !important;
 }
 
 /* Popover body (dropdown panel)

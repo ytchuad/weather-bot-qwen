@@ -190,10 +190,20 @@ _JS_BRIDGE = """<script>
         /* If popover is already open, just let the click-through close it */
         var isOpen = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
         if (isOpen) return;
-        var r = gb.getBoundingClientRect();
-        pb.style.left = r.left + 'px';
-        pb.style.top = r.bottom + 'px';
+        /* Open popover at trigger's natural position, then reposition panel */
         pb.click();
+        requestAnimationFrame(function() {
+          var panel = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+          if (panel && gb.isConnected) {
+            var gr = gb.getBoundingClientRect();
+            panel.style.position = 'fixed';
+            panel.style.top = (gr.bottom + 4) + 'px';
+            panel.style.right = (window.innerWidth - gr.right) + 'px';
+            panel.style.left = 'auto';
+            panel.style.bottom = 'auto';
+            panel.style.transform = 'none';
+          }
+        });
         return;
       }
 
