@@ -124,40 +124,25 @@ div[data-testid="stPopoverPanel"] {
     100% { opacity: 1; }
 }
 
-/* Toggle styling inside popover panel */
-div[data-testid="stPopoverBody"] [data-testid="stToggleButton"],
-div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"],
-div[data-testid="stPopoverBody"] .stToggle,
-div[data-testid="stPopoverPanel"] .stToggle {
-    padding: 6px 0 !important;
-    border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
+/* Hide the model-toggle bridge text input in the popover */
+div[data-testid="stPopoverBody"] div[data-testid="stTextInput"],
+div[data-testid="stPopoverPanel"] div[data-testid="stTextInput"] {
+    display: none !important;
 }
-div[data-testid="stPopoverBody"] [data-testid="stToggleButton"]:last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"]:last-child,
-div[data-testid="stPopoverBody"] .stToggle:last-child,
-div[data-testid="stPopoverPanel"] .stToggle:last-child {
+/* Clickable model toggle labels in popover */
+div[data-testid="stPopoverBody"] ._mt:last-child,
+div[data-testid="stPopoverPanel"] ._mt:last-child {
     border-bottom: none !important;
 }
-div[data-testid="stPopoverBody"] [data-testid="stToggleButton"] label,
-div[data-testid="stPopoverPanel"] [data-testid="stToggleButton"] label,
-div[data-testid="stPopoverBody"] .stToggle label,
-div[data-testid="stPopoverPanel"] .stToggle label {
-    font-family: 'Inter', sans-serif !important;
-    font-size: 12px !important; color: #D1D5E0 !important;
-    font-weight: 500 !important; flex: 1 !important;
+div[data-testid="stPopoverBody"] ._mt:hover,
+div[data-testid="stPopoverPanel"] ._mt:hover {
+    opacity: 0.85;
 }
-/* Popover body inner text & general styling */
+/* Popover body inner text */
 div[data-testid="stPopoverBody"] *,
 div[data-testid="stPopoverPanel"] * {
     font-family: 'Inter', sans-serif !important;
-}
-div[data-testid="stPopoverBody"] span,
-div[data-testid="stPopoverPanel"] span,
-div[data-testid="stPopoverBody"] p,
-div[data-testid="stPopoverPanel"] p,
-div[data-testid="stPopoverBody"] label,
-div[data-testid="stPopoverPanel"] label {
-    color: #D1D5E0 !important;
+    font-size: 13px !important;
 }
 
 .weather-bg {

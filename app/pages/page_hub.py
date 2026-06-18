@@ -181,6 +181,24 @@ _JS_BRIDGE = """<script>
     } catch(e){}
 
     document.body.addEventListener('click', function(e){
+      /* Model toggle in popover → write to hidden bridge input */
+      var mt = e.target.closest('._mt');
+      if (mt) {
+        var model = mt.getAttribute('data-model');
+        if (model) {
+          var popover = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+          var inp = popover ? popover.querySelector('input[data-testid="stTextInput"]') : null;
+          if (inp) {
+            var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            nativeSetter.call(inp, 't:' + model);
+            inp.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        }
+        /* Don't let the click close the popover */
+        e.stopPropagation();
+        return;
+      }
+
       /* Gear icon → reposition hidden trigger below it, then open popover */
       var gb = e.target.closest('._gear-btn');
       if (gb) {
@@ -263,22 +281,35 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     with st.popover("⚙", use_container_width=False):
         avail = _model_options(ar)
         cur = set(sm)
+        items = []
         for m in avail:
             is_on = m in cur
             label = MODEL_LABELS.get(m, m)
-            new_val = st.toggle(
-                f"{label}  [{m}]", value=is_on, key=f"mtg_{m}"
+            color = "#FFFFFF" if is_on else "#8F9BB7"
+            style = "normal" if is_on else "italic"
+            items.append(
+                f'<div class="_mt" data-model="{m}" '
+                f'style="color:{color};font-style:{style};'
+                f'padding:8px 0;font-family:Inter,sans-serif;font-size:13px;'
+                f'cursor:pointer;border-bottom:0.5px solid rgba(255,255,255,0.04);'
+                f'transition:color 0.15s;">{label} [{m}]</div>'
             )
-            if new_val != is_on:
-                if new_val:
-                    sm.append(m)
+        if items:
+            st.markdown('<div style="padding:2px 0;">' + "".join(items) + '</div>', unsafe_allow_html=True)
+        _bridge_val = st.text_input("###", key="_mt_bridge", label_visibility="collapsed")
+        if _bridge_val and _bridge_val.startswith("t:"):
+            target = _bridge_val[2:]
+            if target in avail:
+                if target in cur:
+                    sm.remove(target)
                 else:
-                    sm.remove(m)
+                    sm.append(target)
                 st.session_state[_MODELS_KEY] = list(sm)
                 cur_sel = st.session_state.get(_SELECTED_KEY)
                 if cur_sel not in sm:
                     st.session_state[_SELECTED_KEY] = sm[0] if sm else None
                     _selected_removed = True
+                st.session_state["_mt_bridge"] = ""
 
     # If the selected model was toggled off, the bucket section (outside this
     # fragment) needs a full rerun to show the fallback model's data.
