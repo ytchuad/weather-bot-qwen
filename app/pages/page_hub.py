@@ -237,17 +237,16 @@ def _render_model_cards(ar: dict, markets: list) -> None:
         for m in avail:
             is_on = m in cur
             label = MODEL_LABELS.get(m, m)
-            indicator = "●" if is_on else "○"
-            clicked = st.button(
-                f"{indicator}  {label}  [{m}]",
+            new_val = st.checkbox(
+                f"{label}  [{m}]",
+                value=is_on,
                 key=f"mtg_{m}",
-                use_container_width=True,
             )
-            if clicked:
-                if is_on:
-                    sm.remove(m)
-                else:
+            if new_val != is_on:
+                if new_val:
                     sm.append(m)
+                else:
+                    sm.remove(m)
                 st.session_state[_MODELS_KEY] = list(sm)
                 cur_sel = st.session_state.get(_SELECTED_KEY)
                 if cur_sel not in sm:

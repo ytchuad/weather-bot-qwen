@@ -122,37 +122,43 @@ div[data-testid="stPopoverPanel"] {
     100% { opacity: 1; }
 }
 
-/* Model toggle buttons inside popover — rendered as clickable text */
-div[data-testid="stPopoverBody"] button[kind="secondary"],
-div[data-testid="stPopoverPanel"] button[kind="secondary"],
-div[data-testid="stPopoverBody"] [data-testid="baseButton-secondary"],
-div[data-testid="stPopoverPanel"] [data-testid="baseButton-secondary"] {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
+/* Model toggle checkboxes inside popover — no checkbox box, clickable label text */
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"],
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] {
     padding: 8px 0 !important;
-    min-height: 0 !important;
-    height: auto !important;
+    border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
+    background: transparent !important;
+}
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:last-child,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:last-child {
+    border-bottom: none !important;
+}
+/* Hide the checkbox visual (first child of label — could be div, span, or svg) */
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label > :first-child,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label > :first-child {
+    display: none !important;
+}
+/* Off state (unchecked) — grey + italic */
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label,
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label > :last-child,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label > :last-child {
+    color: #8F9BB7 !important;
+    font-style: italic !important;
     font-family: 'Inter', sans-serif !important;
     font-size: 13px !important;
     font-weight: 500 !important;
-    text-align: left !important;
     cursor: pointer !important;
-    width: 100% !important;
-    color: #D1D5E0 !important;
-    border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
-    transition: color 0.15s;
+    gap: 0 !important;
+    padding-left: 0 !important;
 }
-div[data-testid="stPopoverBody"] button[kind="secondary"]:last-child,
-div[data-testid="stPopoverPanel"] button[kind="secondary"]:last-child,
-div[data-testid="stPopoverBody"] [data-testid="baseButton-secondary"]:last-child,
-div[data-testid="stPopoverPanel"] [data-testid="baseButton-secondary"]:last-child {
-    border-bottom: none !important;
-}
-div[data-testid="stPopoverBody"] button[kind="secondary"]:hover,
-div[data-testid="stPopoverPanel"] button[kind="secondary"]:hover {
+/* On state (checked via input or aria-checked) — white, normal */
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label,
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label > :last-child,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label > :last-child {
     color: #FFFFFF !important;
+    font-style: normal !important;
 }
 /* Popover body inner text */
 div[data-testid="stPopoverBody"] *,
