@@ -94,16 +94,21 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Popover trigger — invisible, zero-size, programmatic only */
+/* Popover trigger — tiny & invisible, in normal flow right below title row
+   so the popover opens near the gear icon */
 button[data-testid="stPopoverButton"] {
-  position: fixed !important;
-  opacity: 0 !important;
-  width: 0 !important; height: 0 !important;
-  padding: 0 !important; margin: 0 !important;
+  display: block !important;
+  margin-left: auto !important;
+  margin-top: 0 !important;
+  opacity: 0.01 !important;
+  width: 2px !important;
+  height: 2px !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
   border: none !important;
-  overflow: hidden !important;
   pointer-events: none !important;
-  font-size: 0 !important; line-height: 0 !important;
+  cursor: default !important;
 }
 
 /* Popover body (dropdown panel)
