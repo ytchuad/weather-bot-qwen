@@ -159,7 +159,7 @@ _JS_BRIDGE = """<script>
   document.body.setAttribute('data-mc-wired', '1');
 
   document.body.addEventListener('click', function(e){
-    /* Gear icon → position hidden trigger below gear, then click to open popover */
+    /* ---- Gear icon ---- */
     var gb = e.target.closest('._gear-btn');
     if (gb) {
       e.preventDefault();
@@ -183,7 +183,76 @@ _JS_BRIDGE = """<script>
       return;
     }
 
-    /* Model card click — needs bucket data in DOM */
+    /* ---- Model toggle in popover ---- */
+    var mt = e.target.closest('._mt');
+    if (mt) {
+      e.stopPropagation();
+      var model = mt.getAttribute('data-model');
+      if (!model) return;
+
+      // Toggle on/off class (instant visual)
+      var isNowOn = !mt.classList.contains('_mt-on');
+      mt.classList.toggle('_mt-on', isNowOn);
+      mt.classList.toggle('_mt-off', !isNowOn);
+
+      // Get card HTML from card-data JSON
+      var cdScript = document.querySelector('#card-data');
+      var cardData = cdScript ? JSON.parse(cdScript.textContent) : {};
+      var grid = document.querySelector('#_mc-grid');
+
+      if (isNowOn) {
+        // Add card to grid
+        if (grid && cardData[model]) {
+          var div = document.createElement('div');
+          div.innerHTML = cardData[model];
+          var newCard = div.firstElementChild;
+          if (newCard) grid.appendChild(newCard);
+          // Update grid columns
+          var cnt = grid.querySelectorAll('.mc').length;
+          grid.style.gridTemplateColumns = 'repeat(' + cnt + ',1fr)';
+        }
+      } else {
+        // Remove card from grid
+        if (grid) {
+          var oldCard = grid.querySelector('.mc[data-key="' + model + '"]');
+          if (oldCard) {
+            // Check if this was the active (selected) card
+            var wasActive = oldCard.classList.contains('mc-active');
+            oldCard.remove();
+            var cnt = grid.querySelectorAll('.mc').length;
+            grid.style.gridTemplateColumns = 'repeat(' + cnt + ',1fr)';
+            if (wasActive && cnt > 0) {
+              // Select the first remaining card
+              var firstCard = grid.querySelector('.mc');
+              if (firstCard) {
+                firstCard.classList.add('mc-active');
+                var bk = firstCard.getAttribute('data-key');
+                var bdScript = document.querySelector('#bucket-data');
+                var bd = bdScript ? JSON.parse(bdScript.textContent) : {};
+                var bc = document.querySelector('#bucket-content');
+                var bl = document.querySelector('#bucket-model-label');
+                if (bd[bk]) {
+                  if (bc) bc.innerHTML = bd[bk].html;
+                  if (bl) bl.textContent = bd[bk].label;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Write to hidden bridge text input → triggers server rerun
+      var popover = document.querySelector('div[data-testid="stPopoverBody"], div[data-testid="stPopoverPanel"]');
+      var inp = popover ? popover.querySelector('input[data-testid="stTextInput"]') : null;
+      if (inp) {
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(inp, 't:' + model);
+        inp.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      return;
+    }
+
+    /* ---- Model card click (change selected card + bucket) ---- */
     var card = e.target.closest('.mc');
     if (!card) return;
     var k = card.getAttribute('data-key');
@@ -234,59 +303,72 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     with st.popover("⚙", use_container_width=False):
         avail = _model_options(ar)
         cur = set(sm)
+        items = []
         for m in avail:
             is_on = m in cur
+            cls = "_mt-on" if is_on else "_mt-off"
             label = MODEL_LABELS.get(m, m)
-            new_val = st.checkbox(
-                f"{label}  [{m}]",
-                value=is_on,
-                key=f"mtg_{m}",
+            items.append(
+                f'<div class="_mt {cls}" data-model="{m}">'
+                f'{label}&nbsp;&nbsp;[{m}]</div>'
             )
-            if new_val != is_on:
-                if new_val:
-                    sm.append(m)
+        if items:
+            st.markdown(
+                '<div style="padding:2px 0;">' + "".join(items) + '</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Hidden text input bridge — JS writes toggle actions here
+        _bridge_val = st.text_input("###", key="_mt_bridge", label_visibility="collapsed")
+        if _bridge_val and _bridge_val.startswith("t:"):
+            target = _bridge_val[2:]
+            if target in avail:
+                if target in cur:
+                    sm.remove(target)
                 else:
-                    sm.remove(m)
+                    sm.append(target)
                 st.session_state[_MODELS_KEY] = list(sm)
                 cur_sel = st.session_state.get(_SELECTED_KEY)
                 if cur_sel not in sm:
                     st.session_state[_SELECTED_KEY] = sm[0] if sm else None
                     _selected_removed = True
+                st.session_state["_mt_bridge"] = ""
 
-    # If the selected model was toggled off, full rerun so bucket section
-    # updates (run_all_models is cached — no recompute on full rerun).
     if _selected_removed:
         st.rerun()
 
     # ── Model cards ──────────────────────────────────────────
+    # Pre-compute card HTML for ALL models (JS bridge uses for instant add)
+    sel_key_local = st.session_state.get(_SELECTED_KEY)
+    _card_data = {}
+    for mk in _model_options(ar):
+        pred = ar.get(mk, {})
+        mv = pred.get("mean") if pred else None
+        sv = pred.get("std") if pred else None
+        lb = MODEL_LABELS.get(mk, mk)
+        ms = f"{mv:.1f}&deg;C" if mv is not None else "--"
+        ss = f"&plusmn;{sv:.2f}" if sv is not None else "&plusmn;--"
+        is_sel = sel_key_local == mk
+        active_cls = " mc-active" if is_sel else ""
+        _card_data[mk] = (
+            '<div class="mc' + active_cls + '" data-key="' + mk + '">'
+            '<div style="font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.1em;'
+            'text-transform:uppercase;color:#8F9BB7;margin-bottom:6px;">' + lb + '</div>'
+            '<div style="font-family:Space Mono,monospace;font-size:32px;font-weight:700;'
+            'color:#fff;line-height:1.2;margin-top:2px;">' + ms + '</div>'
+            '<div style="font-family:Space Mono,monospace;font-size:11px;color:#8F9BB7;'
+            'margin-top:1px;">' + ss + '</div>'
+            '</div>'
+        )
+
     if sm:
-        sel_key = st.session_state.get(_SELECTED_KEY)
-
-        # Glass cards — rendered via st.markdown so they land in the main DOM
         n = len(sm)
-        cards_h = '<div style="display:grid;grid-template-columns:repeat(' + str(n) + ',1fr);gap:12px;">'
+        rows = '<div id="_mc-grid" style="display:grid;grid-template-columns:repeat(' + str(n) + ',1fr);gap:12px;">'
         for mk in sm:
-            pred = ar.get(mk, {})
-            mv = pred.get("mean") if pred else None
-            sv = pred.get("std") if pred else None
-            lb = MODEL_LABELS.get(mk, mk)
-            ms = f"{mv:.1f}&deg;C" if mv is not None else "--"
-            ss = f"&plusmn;{sv:.2f}" if sv is not None else "&plusmn;--"
-            is_sel = sel_key == mk
-            active_cls = " mc-active" if is_sel else ""
-            cards_h += (
-                '<div class="mc' + active_cls + '" data-key="' + mk + '">'
-                '<div style="font-family:Inter,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.1em;'
-                'text-transform:uppercase;color:#8F9BB7;margin-bottom:6px;">' + lb + '</div>'
-                '<div style="font-family:Space Mono,monospace;font-size:32px;font-weight:700;'
-                'color:#fff;line-height:1.2;margin-top:2px;">' + ms + '</div>'
-                '<div style="font-family:Space Mono,monospace;font-size:11px;color:#8F9BB7;'
-                'margin-top:1px;">' + ss + '</div>'
-                '</div>'
-            )
-        cards_h += '</div>'
+            rows += _card_data.get(mk, "")
+        rows += '</div>'
 
-        # Pre-render bucket data for ALL selected models (consumed by JS bridge)
+        # Bucket data for all selected models (consumed by JS bridge)
         _bucket_json = {}
         for mk in sm:
             _mk_probs = ar.get(mk, {}).get("probs", {})
@@ -294,8 +376,11 @@ def _render_model_cards(ar: dict, markets: list) -> None:
                 "html": _bucket_rows_html(markets, _mk_probs),
                 "label": MODEL_LABELS.get(mk, mk),
             }
-        cards_h += '<script type="application/json" id="bucket-data">' + _json.dumps(_bucket_json) + '</script>'
-        st.markdown(cards_h, unsafe_allow_html=True)
+        rows += '<script type="application/json" id="bucket-data">' + _json.dumps(_bucket_json) + '</script>'
+
+        # Card data for ALL models (consumed by JS bridge for instant add/remove)
+        rows += '<script type="application/json" id="card-data">' + _json.dumps(_card_data) + '</script>'
+        st.markdown(rows, unsafe_allow_html=True)
 
 
 def run() -> None:

@@ -233,7 +233,6 @@ def compute_bucket_probs(
 
 # ── orchestration ────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300, show_spinner=False)
 def run_all_models(
     target_date: date,
     target_date_str: str,
