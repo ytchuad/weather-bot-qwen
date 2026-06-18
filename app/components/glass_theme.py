@@ -122,64 +122,24 @@ div[data-testid="stPopoverPanel"] {
     100% { opacity: 1; }
 }
 
-/* Model toggle checkboxes inside popover — no checkbox box, clickable label text */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"],
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] {
-    padding: 8px 0 !important;
-    border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
-    background: transparent !important;
-}
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:last-child {
-    border-bottom: none !important;
-}
-/* Hide ALL checkbox visuals — the .st-cb box, its children, any wrapper */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] .st-cb,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] .st-cb {
-    display: none !important;
-    visibility: hidden !important;
-    opacity: 0 !important;
-    width: 0 !important; height: 0 !important;
-    overflow: hidden !important;
-    position: absolute !important;
-    pointer-events: none !important;
-}
-/* Nuke ANY black background from the entire checkbox tree */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] *,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] * {
-    background: transparent !important;
-    background-color: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-}
-/* Also nuke the containing stElementContainer */
-div[data-testid="stPopoverBody"] div[data-testid="stElementContainer"],
-div[data-testid="stPopoverPanel"] div[data-testid="stElementContainer"] {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-}
-/* Off state (unchecked) — grey + italic */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label,
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label > :last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label > :last-child {
-    color: #8F9BB7 !important;
-    font-style: italic !important;
+/* Model toggle items in popover — clickable label with on/off styling */
+._mt {
+    padding: 8px 0;
     font-family: 'Inter', sans-serif !important;
     font-size: 13px !important;
     font-weight: 500 !important;
     cursor: pointer !important;
-    gap: 0 !important;
-    padding-left: 0 !important;
+    border-bottom: 0.5px solid rgba(255,255,255,0.04);
+    transition: color 0.15s, font-style 0.15s;
+    user-select: none;
 }
-/* On state (checked via input or aria-checked) — white, normal */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label,
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label > :last-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:has(input:checked, [aria-checked="true"]) label > :last-child {
-    color: #FFFFFF !important;
-    font-style: normal !important;
+._mt:last-child { border-bottom: none; }
+._mt-on { color: #FFFFFF !important; font-style: normal !important; }
+._mt-off { color: #8F9BB7 !important; font-style: italic !important; }
+/* Hide the bridge text input — it sits in the popover but should not be visible */
+div[data-testid="stPopoverBody"] input[data-testid="stTextInput"],
+div[data-testid="stPopoverPanel"] input[data-testid="stTextInput"] {
+    display: none !important;
 }
 /* Popover body inner text */
 div[data-testid="stPopoverBody"] *,
