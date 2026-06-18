@@ -40,6 +40,9 @@ tmp_eval_*.py
 pit_histogram_*.html
 reliability_diagram.png
 *.egg-info/
+node_modules/
+app/frontend/node_modules/
+app/frontend/dist/
 
 TECHNICAL_DOCUMENT.md
 README-AI.md
