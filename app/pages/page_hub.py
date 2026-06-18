@@ -241,7 +241,32 @@ def _render_model_cards(ar: dict, markets: list) -> None:
         '</div>',
         unsafe_allow_html=True,
     )
+    # ── Popover (right after title, near gear — before cards) ──
     _selected_removed = False
+    with st.popover("⚙", use_container_width=False):
+        avail = _model_options(ar)
+        cur = set(sm)
+        for m in avail:
+            is_on = m in cur
+            label = MODEL_LABELS.get(m, m)
+            new_val = st.toggle(
+                f"{label}  [{m}]", value=is_on, key=f"mtg_{m}"
+            )
+            if new_val != is_on:
+                if new_val:
+                    sm.append(m)
+                else:
+                    sm.remove(m)
+                st.session_state[_MODELS_KEY] = list(sm)
+                cur_sel = st.session_state.get(_SELECTED_KEY)
+                if cur_sel not in sm:
+                    st.session_state[_SELECTED_KEY] = sm[0] if sm else None
+                    _selected_removed = True
+
+    # If the selected model was toggled off, the bucket section (outside this
+    # fragment) needs a full rerun to show the fallback model's data.
+    if _selected_removed:
+        st.rerun()
 
     # ── Model cards ──────────────────────────────────────────
     if sm:
@@ -281,32 +306,6 @@ def _render_model_cards(ar: dict, markets: list) -> None:
             }
         cards_h += '<script type="application/json" id="bucket-data">' + _json.dumps(_bucket_json) + '</script>'
         st.markdown(cards_h, unsafe_allow_html=True)
-
-    # ── Popover (hidden trigger — opens when gear icon is clicked) ──
-    with st.popover("⚙", use_container_width=False):
-        avail = _model_options(ar)
-        cur = set(sm)
-        for m in avail:
-            is_on = m in cur
-            label = MODEL_LABELS.get(m, m)
-            new_val = st.toggle(
-                f"{label}  [{m}]", value=is_on, key=f"mtg_{m}"
-            )
-            if new_val != is_on:
-                if new_val:
-                    sm.append(m)
-                else:
-                    sm.remove(m)
-                st.session_state[_MODELS_KEY] = list(sm)
-                cur_sel = st.session_state.get(_SELECTED_KEY)
-                if cur_sel not in sm:
-                    st.session_state[_SELECTED_KEY] = sm[0] if sm else None
-                    _selected_removed = True
-
-    # If the selected model was toggled off, the bucket section (outside this
-    # fragment) needs a full rerun to show the fallback model's data.
-    if _selected_removed:
-        st.rerun()
 
 
 def run() -> None:
