@@ -94,8 +94,8 @@ body, p, span, div, label, h1, h2, h3, h4, h5, h6 { font-family: 'Inter', sans-s
 }
 
 /* ---- Popover (gear dropdown) ---- */
-/* Popover trigger — invisible, stays in natural flow (right after title).
-   JS repositions the panel itself below the gear icon before first paint. */
+/* Popover trigger — invisible, sits in natural flow.
+   JS temporarily sets position:fixed at gear-icon location before clicking. */
 button[data-testid="stPopoverButton"] {
   opacity: 0 !important;
   width: 0 !important; height: 0 !important;
@@ -103,11 +103,9 @@ button[data-testid="stPopoverButton"] {
   border: none !important;
   overflow: hidden !important;
   pointer-events: none !important;
-  font-size: 0 !important; line-height: 0 !important;
 }
 
-/* Popover body (dropdown panel)
-   Use opacity animation to mask the brief flash while baseweb positions it. */
+/* Popover body (dropdown panel) */
 div[data-testid="stPopoverBody"],
 div[data-testid="stPopoverPanel"] {
     background: rgba(20,19,50,0.96) !important;
@@ -124,29 +122,37 @@ div[data-testid="stPopoverPanel"] {
     100% { opacity: 1; }
 }
 
-/* Hide the model-toggle bridge text input in the popover */
-div[data-testid="stPopoverBody"] [data-testid="stTextInput"],
-div[data-testid="stPopoverPanel"] [data-testid="stTextInput"] {
-    display: none !important;
-}
-div[data-testid="stPopoverBody"] div[data-testid="stElementContainer"]:has([data-testid="stTextInput"]),
-div[data-testid="stPopoverPanel"] div[data-testid="stElementContainer"]:has([data-testid="stTextInput"]) {
-    display: none !important;
-    margin: 0 !important; padding: 0 !important;
-    height: 0 !important; min-height: 0 !important;
-}
-/* Clickable model toggle labels in popover — no default background */
-div[data-testid="stPopoverBody"] ._mt,
-div[data-testid="stPopoverPanel"] ._mt {
+/* Model toggle buttons inside popover — rendered as clickable text */
+div[data-testid="stPopoverBody"] button[kind="secondary"],
+div[data-testid="stPopoverPanel"] button[kind="secondary"],
+div[data-testid="stPopoverBody"] [data-testid="baseButton-secondary"],
+div[data-testid="stPopoverPanel"] [data-testid="baseButton-secondary"] {
     background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 8px 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    font-family: 'Inter', sans-serif !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    text-align: left !important;
+    cursor: pointer !important;
+    width: 100% !important;
+    color: #D1D5E0 !important;
+    border-bottom: 0.5px solid rgba(255,255,255,0.04) !important;
+    transition: color 0.15s;
 }
-div[data-testid="stPopoverBody"] ._mt:last-child,
-div[data-testid="stPopoverPanel"] ._mt:last-child {
+div[data-testid="stPopoverBody"] button[kind="secondary"]:last-child,
+div[data-testid="stPopoverPanel"] button[kind="secondary"]:last-child,
+div[data-testid="stPopoverBody"] [data-testid="baseButton-secondary"]:last-child,
+div[data-testid="stPopoverPanel"] [data-testid="baseButton-secondary"]:last-child {
     border-bottom: none !important;
 }
-div[data-testid="stPopoverBody"] ._mt:hover,
-div[data-testid="stPopoverPanel"] ._mt:hover {
-    opacity: 0.85;
+div[data-testid="stPopoverBody"] button[kind="secondary"]:hover,
+div[data-testid="stPopoverPanel"] button[kind="secondary"]:hover {
+    color: #FFFFFF !important;
 }
 /* Popover body inner text */
 div[data-testid="stPopoverBody"] *,
