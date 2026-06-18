@@ -18,4 +18,6 @@ COPY --chown=user . .
 
 EXPOSE 7860
 
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port=7860", "--server.address=0.0.0.0"]
+ENV APP_MODE=streamlit
+
+CMD ["sh", "-c", "if [ \"$APP_MODE\" = \"api\" ]; then uvicorn app.api.server:app --host 0.0.0.0 --port 7860; else streamlit run streamlit_app.py --server.port=7860 --server.address=0.0.0.0; fi"]
