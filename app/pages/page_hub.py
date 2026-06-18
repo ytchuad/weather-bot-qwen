@@ -230,7 +230,6 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     )
 
     # ── Popover (hidden trigger — repositioned by JS before opening) ──
-    _selected_removed = False
     with st.popover("⚙", use_container_width=False):
         avail = _model_options(ar)
         cur = set(sm)
@@ -251,12 +250,10 @@ def _render_model_cards(ar: dict, markets: list) -> None:
                 cur_sel = st.session_state.get(_SELECTED_KEY)
                 if cur_sel not in sm:
                     st.session_state[_SELECTED_KEY] = sm[0] if sm else None
-                    _selected_removed = True
 
-    # If the selected model was toggled off, the bucket section (outside this
-    # fragment) needs a full rerun to show the fallback model's data.
-    if _selected_removed:
-        st.rerun()
+    # Always rerun so model cards and bucket section update immediately
+    # (run_all_models is cached, so this is fast even for full page rerun)
+    st.rerun()
 
     # ── Model cards ──────────────────────────────────────────
     if sm:
