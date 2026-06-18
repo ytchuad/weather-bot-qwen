@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import backtest, health, markets, predictions, strategies, weather
 
@@ -40,7 +43,11 @@ app.include_router(markets.router)
 app.include_router(strategies.router)
 app.include_router(backtest.router)
 
+_frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 
-@app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse(url="/docs")
+if _frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend")
+else:
+    @app.get("/", include_in_schema=False)
+    def root():
+        return RedirectResponse(url="/docs")
