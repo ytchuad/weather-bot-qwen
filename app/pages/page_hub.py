@@ -154,44 +154,12 @@ def _chart(df_today: pd.DataFrame) -> go.Figure:
 
 
 _JS_BRIDGE = """<script>
-(function(){
-  /* Register click handler immediately (gear + model toggle don't need bucket data).
-     Guard: only once across fragment & full reruns. */
+(function S(){
   if (document.body.hasAttribute('data-mc-wired')) return;
   document.body.setAttribute('data-mc-wired', '1');
 
-  /* Hide bridge inputs (label starting with non-alphanum shortcuts like "###") */
-  try {
-    document.querySelectorAll('div[data-testid="stElementContainer"]').forEach(function(div){
-      var vis = div.querySelector('input');
-      var txt = div.querySelector('textarea');
-      if (!vis && !txt) return;
-      var label = div.querySelector('label') || div.querySelector('[data-baseweb="label"]');
-      var text = label ? label.textContent.trim() : '';
-      if (text === '###' || text.charAt(0) === '_') div.style.display = 'none';
-    });
-  } catch(e){}
-
   document.body.addEventListener('click', function(e){
-    /* Model toggle in popover → write to hidden bridge input */
-    var mt = e.target.closest('._mt');
-    if (mt) {
-      var model = mt.getAttribute('data-model');
-      if (model) {
-        /* data-testid="stTextInput" is on the CONTAINER div, not the <input> */
-        var container = document.querySelector('div[data-testid="stPopoverBody"] [data-testid="stTextInput"], div[data-testid="stPopoverPanel"] [data-testid="stTextInput"]');
-        var inp = container ? container.querySelector('input') : null;
-        if (inp) {
-          var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-          nativeSetter.call(inp, 't:' + model);
-          inp.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-      }
-      e.stopPropagation();
-      return;
-    }
-
-    /* Gear icon → reposition hidden trigger below it, then open popover */
+    /* Gear icon → position hidden trigger below gear, then click to open popover */
     var gb = e.target.closest('._gear-btn');
     if (gb) {
       e.preventDefault();
@@ -215,7 +183,7 @@ _JS_BRIDGE = """<script>
       return;
     }
 
-    /* Model card click — needs bucket data */
+    /* Model card click — needs bucket data in DOM */
     var card = e.target.closest('.mc');
     if (!card) return;
     var k = card.getAttribute('data-key');
@@ -266,35 +234,25 @@ def _render_model_cards(ar: dict, markets: list) -> None:
     with st.popover("⚙", use_container_width=False):
         avail = _model_options(ar)
         cur = set(sm)
-        items = []
         for m in avail:
             is_on = m in cur
             label = MODEL_LABELS.get(m, m)
-            color = "#FFFFFF" if is_on else "#8F9BB7"
-            style = "normal" if is_on else "italic"
-            items.append(
-                f'<div class="_mt" data-model="{m}" '
-                f'style="color:{color};font-style:{style};'
-                f'padding:8px 0;font-family:Inter,sans-serif;font-size:13px;'
-                f'cursor:pointer;border-bottom:0.5px solid rgba(255,255,255,0.04);'
-                f'transition:color 0.15s;">{label} [{m}]</div>'
+            indicator = "●" if is_on else "○"
+            clicked = st.button(
+                f"{indicator}  {label}  [{m}]",
+                key=f"mtg_{m}",
+                use_container_width=True,
             )
-        if items:
-            st.markdown('<div style="padding:2px 0;">' + "".join(items) + '</div>', unsafe_allow_html=True)
-        _bridge_val = st.text_input("###", key="_mt_bridge", label_visibility="collapsed")
-        if _bridge_val and _bridge_val.startswith("t:"):
-            target = _bridge_val[2:]
-            if target in avail:
-                if target in cur:
-                    sm.remove(target)
+            if clicked:
+                if is_on:
+                    sm.remove(m)
                 else:
-                    sm.append(target)
+                    sm.append(m)
                 st.session_state[_MODELS_KEY] = list(sm)
                 cur_sel = st.session_state.get(_SELECTED_KEY)
                 if cur_sel not in sm:
                     st.session_state[_SELECTED_KEY] = sm[0] if sm else None
                     _selected_removed = True
-            st.session_state["_mt_bridge"] = "x"
 
     # If the selected model was toggled off, the bucket section (outside this
     # fragment) needs a full rerun to show the fallback model's data.
