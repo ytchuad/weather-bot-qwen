@@ -133,10 +133,31 @@ div[data-testid="stPopoverBody"] [data-testid="stCheckbox"]:last-child,
 div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"]:last-child {
     border-bottom: none !important;
 }
-/* Hide the checkbox visual (first child of label — could be div, span, or svg) */
-div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label > :first-child,
-div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] label > :first-child {
+/* Hide ALL checkbox visuals — the .st-cb box, its children, any wrapper */
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] .st-cb,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] .st-cb {
     display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important; height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    pointer-events: none !important;
+}
+/* Nuke ANY black background from the entire checkbox tree */
+div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] *,
+div[data-testid="stPopoverPanel"] [data-testid="stCheckbox"] * {
+    background: transparent !important;
+    background-color: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+/* Also nuke the containing stElementContainer */
+div[data-testid="stPopoverBody"] div[data-testid="stElementContainer"],
+div[data-testid="stPopoverPanel"] div[data-testid="stElementContainer"] {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 /* Off state (unchecked) — grey + italic */
 div[data-testid="stPopoverBody"] [data-testid="stCheckbox"] label,
