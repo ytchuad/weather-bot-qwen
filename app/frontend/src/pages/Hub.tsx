@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
+import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow } from "../api/client"
 import ModelGrid, { LABEL_MAP } from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
 import type { ModelPrediction } from "../types"
@@ -12,21 +12,38 @@ export default function Hub() {
   const [date, setDate] = useState(TODAY)
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [order, setOrder] = useState<string[] | null>(null)
-  const [isMinTemp, setIsMinTemp] = useState(false)
-  const [dropdownOpen, setDropdownOpen] = useState(false)
-  
-  const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
-    try {
-      const saved = localStorage.getItem("visibleModelKeys");
-      return saved ? new Set(JSON.parse(saved)) : null;
-    } catch {
-      return null;
-    }
-  });
+const [isMinTemp, setIsMinTemp] = useState(false)
+   const [dropdownOpen, setDropdownOpen] = useState(false)
+   const [weatherDropdownOpen, setWeatherDropdownOpen] = useState(false)
+
+   const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
+     try {
+       const saved = localStorage.getItem("visibleModelKeys");
+       return saved ? new Set(JSON.parse(saved)) : null;
+     } catch {
+       return null;
+     }
+   });
+
+   const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
+     try {
+       const saved = localStorage.getItem("weatherElements");
+       return saved ? new Set(JSON.parse(saved)) : new Set(["current_temp", "max_so_far", "min_so_far"]);
+     } catch {
+       return new Set(["current_temp", "max_so_far", "min_so_far"]);
+     }
+   });
 
   const { data, isLoading } = useQuery({
     queryKey: ["predictions", date],
     queryFn: () => fetchPredictions(date, false),
+    refetchInterval: 120_000,
+  })
+
+  const { data: weatherData } = useQuery({
+    queryKey: ["weather", date],
+    queryFn: () => fetchWeatherNow(date),
+    enabled: !!date,
     refetchInterval: 120_000,
   })
 
@@ -108,6 +125,24 @@ export default function Hub() {
     if (!eventData?.title) return "Weather predictions"
     return eventData.title.replace("highest", "TMAX").replace("lowest", "TMIN")
   }, [eventData?.title])
+
+  const weatherElems = {
+    current_temp: { label: "Current", value: `${weatherData?.temp?.toFixed(1) ?? "--"}°C`, color: "text-cyan-400", border: "border-cyan-500/50" },
+    max_so_far: { label: "Max Today", value: `${weatherData?.max_today?.toFixed(1) ?? "--"}°C`, color: "text-rose-400", border: "border-rose-500/50" },
+    min_so_far: { label: "Min Today", value: `${weatherData?.min_today?.toFixed(1) ?? "--"}°C`, color: "text-blue-400", border: "border-blue-500/50" },
+    humidity: { label: "Humidity", value: `${weatherData?.humidity ?? "--"}%`, color: "text-emerald-400", border: "border-emerald-500/50" },
+    rainfall: { label: "Rainfall", value: "--", color: "text-indigo-400", border: "border-indigo-500/50" },
+  }
+
+  const handleToggleWeatherElement = (key: string) => {
+    setWeatherElements((prev) => {
+      const current = new Set(prev)
+      if (current.has(key)) current.delete(key)
+      else current.add(key)
+      localStorage.setItem("weatherElements", JSON.stringify(Array.from(current)))
+      return current
+    })
+  }
 
   const allBuckets = useMemo(() => {
     const set = new Set<string>()
@@ -225,6 +260,54 @@ export default function Hub() {
             </div>
           </div>
         </header>
+
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Current Weather</h2>
+            <div className="relative">
+              <button
+                onClick={() => setWeatherDropdownOpen(!weatherDropdownOpen)}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700"
+              >
+                <Eye size={12} />
+                Elements
+                <ChevronDown size={12} />
+              </button>
+              {weatherDropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setWeatherDropdownOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 p-2">
+                    <div className="text-xs text-slate-500 px-2 py-1 border-b border-slate-700 mb-1">Show Elements</div>
+                    {Object.entries(weatherElems).map(([key, { label }]) => {
+                      const isVisible = weatherElements.has(key)
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => handleToggleWeatherElement(key)}
+                          className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-slate-700 text-sm text-slate-300"
+                        >
+                          {isVisible ? <Eye size={14} className="text-cyan-400" /> : <EyeOff size={14} className="text-slate-500" />}
+                          {label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            {Object.entries(weatherElems).map(([key, { label, value, color, border }]) => {
+              if (!weatherElements.has(key)) return null
+              return (
+                <div key={key} className={`bg-slate-900/40 border-t-2 ${border} rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1`}>
+                  <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
+                  <div className={`text-2xl font-bold ${color} tabular-nums`}>{value}</div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
 
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="bg-slate-900/40 border-t-2 border-cyan-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
