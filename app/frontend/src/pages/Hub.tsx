@@ -109,6 +109,24 @@ export default function Hub() {
     return eventData.title.replace("highest", "TMAX").replace("lowest", "TMIN")
   }, [eventData?.title])
 
+  const allBuckets = useMemo(() => {
+    const set = new Set<string>()
+    entries.forEach(([_, pred]) => {
+      Object.keys(pred.probs ?? {}).forEach(b => set.add(b))
+    })
+    Object.keys(marketPrices ?? {}).forEach(b => set.add(b))
+    return Array.from(set).sort((a, b) => {
+      const parse = (s: string) => {
+        if (s.startsWith("<")) return -999
+        if (s.startsWith(">=")) return 999
+        if (s.startsWith(">")) return 999
+        const num = parseFloat(s.split("-")[0])
+        return isNaN(num) ? 0 : num
+      }
+      return parse(a) - parse(b)
+    })
+  }, [entries, marketPrices])
+
   return (
     <div className="flex h-full w-full overflow-hidden">
       <aside className="w-1/3 min-w-[300px] max-w-[400px] h-full flex flex-col border-r border-slate-800 bg-slate-950/50 backdrop-blur-sm">
@@ -246,6 +264,7 @@ export default function Hub() {
             <BucketChart
               modelProbs={activeModel.probs}
               marketPrices={marketPrices}
+              allBuckets={allBuckets}
             />
           ) : (
             <div className="h-80 flex items-center justify-center text-slate-500">
