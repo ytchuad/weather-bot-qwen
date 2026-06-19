@@ -410,3 +410,39 @@ def fetch_hko_aws_forecast() -> tuple[float | None, float | None, list]:
         return forecast_max, forecast_min, daily
     except Exception:
         return None, None, []
+
+
+# ── rainfall live compute ────────────────────────────────────────────
+
+from cachetools import TTLCache, cached
+
+_rain_live_cache = TTLCache(maxsize=2, ttl=300)
+
+
+@cached(_rain_live_cache)
+def compute_rain_kwargs_live() -> dict:
+    """Compute rainfall features from live i-lens data only."""
+    rain_df = fetch_rainfall_live()
+
+    if rain_df is None or rain_df.empty:
+        return {"rain_60m": 0.0, "rain_120m": 0.0, "rain_data_ok": False}
+
+    rain_df = rain_df.sort_values("datetime")
+
+    now_rain = float(rain_df["rainfall"].iloc[-1])
+    now_dt = rain_df["datetime"].iloc[-1]
+
+    t60 = now_dt - pd.Timedelta(minutes=60)
+    t120 = now_dt - pd.Timedelta(minutes=120)
+
+    prev_60 = rain_df[rain_df["datetime"] <= t60]
+    prev_120 = rain_df[rain_df["datetime"] <= t120]
+
+    rain_60m = max(0.0, now_rain - (float(prev_60["rainfall"].iloc[-1]) if not prev_60.empty else 0.0))
+    rain_120m = max(0.0, now_rain - (float(prev_120["rainfall"].iloc[-1]) if not prev_120.empty else 0.0))
+
+    return {
+        "rain_60m": round(rain_60m, 1),
+        "rain_120m": round(rain_120m, 1),
+        "rain_data_ok": True,
+    }
