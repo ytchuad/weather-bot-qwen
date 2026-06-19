@@ -3,8 +3,9 @@ import { useQuery } from "@tanstack/react-query"
 import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow, fetchWeatherRain } from "../api/client"
 import ModelGrid, { LABEL_MAP } from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
+import ComparisonChart from "../components/ComparisonChart"
 import type { ModelPrediction } from "../types"
-import { Eye, EyeOff, ChevronDown } from "lucide-react"
+import { Eye, EyeOff, ChevronDown, GitCompare } from "lucide-react"
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -12,9 +13,10 @@ export default function Hub() {
   const [date, setDate] = useState(TODAY)
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [order, setOrder] = useState<string[] | null>(null)
-const [isMinTemp, setIsMinTemp] = useState(false)
-   const [dropdownOpen, setDropdownOpen] = useState(false)
-   const [weatherDropdownOpen, setWeatherDropdownOpen] = useState(false)
+  const [isMinTemp, setIsMinTemp] = useState(false)
+    const [dropdownOpen, setDropdownOpen] = useState(false)
+    const [weatherDropdownOpen, setWeatherDropdownOpen] = useState(false)
+    const [compareMode, setCompareMode] = useState(false)
 
    const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
      try {
@@ -169,7 +171,7 @@ const [isMinTemp, setIsMinTemp] = useState(false)
     })
   }, [entries, marketPrices])
 
-  return (
+return (
     <div className="flex h-full w-full overflow-hidden">
       <aside className="w-1/3 min-w-[300px] max-w-[400px] h-full flex flex-col border-r border-slate-800 bg-slate-950/50 backdrop-blur-sm">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between relative">
@@ -208,26 +210,37 @@ const [isMinTemp, setIsMinTemp] = useState(false)
               </>
             )}
           </div>
+          
+          <button
+            onClick={() => setCompareMode(!compareMode)}
+            className={["flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors",
+              compareMode ? "bg-cyan-500/20 text-cyan-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+            ].join(" ")}
+            title="Compare multiple models"
+          >
+            <GitCompare size={12} />
+            <span className="hidden sm:inline">Compare</span>
+          </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
-          {isLoading ? (
-            <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-24 rounded-lg bg-slate-800/50 animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <ModelGrid
-              models={visibleModels}
-              activeKey={finalActiveKey}
-              visibleKeys={visibleKeys}
-              onSelect={(k) => setActiveKey(k)}
-              onReorder={(keys) => setOrder(keys)}
-              onToggleVisible={handleToggleVisible}
-            />
-          )}
-        </div>
+           {isLoading ? (
+             <div className="space-y-3">
+               {[1, 2, 3].map((i) => (
+                 <div key={i} className="h-24 rounded-lg shimmer-card" />
+               ))}
+             </div>
+           ) : (
+             <ModelGrid
+               models={visibleModels}
+               activeKey={finalActiveKey}
+               visibleKeys={visibleKeys}
+               onSelect={(k) => setActiveKey(k)}
+               onReorder={(keys) => setOrder(keys)}
+               onToggleVisible={handleToggleVisible}
+             />
+           )}
+         </div>
       </aside>
 
       <main className="flex-1 h-full overflow-y-auto p-8">
@@ -337,7 +350,19 @@ const [isMinTemp, setIsMinTemp] = useState(false)
 
         <section className="bg-slate-900/40 rounded-2xl border border-slate-800 p-6 backdrop-blur-md shadow-[0_0_30px_-5px_rgba(6,182,212,0.1)] transition-all duration-300">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-lg font-semibold text-slate-100">Probability by Bucket</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-slate-100">
+                {compareMode ? "Model Comparison" : "Probability by Bucket"}
+              </h2>
+              {compareMode && (
+                <button
+                  onClick={() => setCompareMode(false)}
+                  className="text-xs text-slate-400 hover:text-slate-200 mt-1"
+                >
+                  Exit Compare
+                </button>
+              )}
+            </div>
             <div className="flex gap-4 text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-sm bg-cyan-500"></span>
@@ -350,7 +375,13 @@ const [isMinTemp, setIsMinTemp] = useState(false)
             </div>
           </div>
           
-          {activeModel && activeModel.probs ? (
+          {compareMode ? (
+            <ComparisonChart
+              models={visibleModels}
+              marketPrices={marketPrices}
+              allBuckets={allBuckets}
+            />
+          ) : activeModel && activeModel.probs ? (
             <BucketChart
               modelProbs={activeModel.probs}
               marketPrices={marketPrices}
