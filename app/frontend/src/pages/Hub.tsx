@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
-import ModelGrid from "../components/ModelGrid"
+import ModelGrid, { LABEL_MAP } from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
 import type { ModelPrediction } from "../types"
+import { Eye, EyeOff, ChevronDown } from "lucide-react"
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -12,6 +13,16 @@ export default function Hub() {
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [order, setOrder] = useState<string[] | null>(null)
   const [isMinTemp, setIsMinTemp] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  
+  const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
+    try {
+      const saved = localStorage.getItem("visibleModelKeys");
+      return saved ? new Set(JSON.parse(saved)) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["predictions", date],
@@ -64,14 +75,81 @@ export default function Hub() {
     [order],
   )(entries)
 
-  const activeModel = activeKey && models?.[activeKey] ? models[activeKey] : entries[0]?.[1]
+  const visibleModels = useMemo(() => {
+    if (!visibleKeys) return sorted
+    return sorted.filter(([k]) => visibleKeys.has(k))
+  }, [sorted, visibleKeys])
+
+  const currentActiveIsVisible = activeKey && (visibleKeys?.has(activeKey) ?? true);
+  const finalActiveKey = currentActiveIsVisible ? activeKey : visibleModels[0]?.[0] ?? null;
+  const activeModel = finalActiveKey && models?.[finalActiveKey] ? models[finalActiveKey] : undefined;
+
+  const handleToggleVisible = (key: string) => {
+    setVisibleKeys((prev) => {
+      const current = prev ? new Set(prev) : new Set(entries.map(([k]) => k))
+      if (current.has(key)) {
+        current.delete(key)
+      } else {
+        current.add(key)
+      }
+      localStorage.setItem("visibleModelKeys", JSON.stringify(Array.from(current)));
+      return current
+    })
+  }
+
+  const expectedValue = activeModel?.mean?.toFixed(1) ?? "--"
+  const marketAvg = useMemo(() => {
+    const vals = Object.values(marketPrices ?? {})
+    if (vals.length === 0) return "--"
+    return (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2)
+  }, [marketPrices])
+
+  const subtitle = useMemo(() => {
+    if (!eventData?.title) return "Weather predictions"
+    return eventData.title.replace("highest", "TMAX").replace("lowest", "TMIN")
+  }, [eventData?.title])
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-full w-full overflow-hidden">
       <aside className="w-1/3 min-w-[300px] max-w-[400px] h-full flex flex-col border-r border-slate-800 bg-slate-950/50 backdrop-blur-sm">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between relative">
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Model Matrix</h2>
+          
+          <div className="relative">
+            <button 
+              onClick={() => setDropdownOpen(!dropdownOpen)}
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700"
+            >
+              <Eye size={12} />
+              Models
+              <ChevronDown size={12} />
+            </button>
+            
+            {dropdownOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
+                
+                <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 p-2">
+                  <div className="text-xs text-slate-500 px-2 py-1 border-b border-slate-700 mb-1">Show on Dashboard</div>
+                  {entries.map(([k, _]) => {
+                    const isVisible = visibleKeys ? visibleKeys.has(k) : true;
+                    return (
+                      <button
+                        key={k}
+                        onClick={() => handleToggleVisible(k)}
+                        className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-slate-700 text-sm text-slate-300"
+                      >
+                        {isVisible ? <Eye size={14} className="text-cyan-400" /> : <EyeOff size={14} className="text-slate-500" />}
+                        {LABEL_MAP[k] ?? k}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
         </div>
+        
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
           {isLoading ? (
             <div className="space-y-3">
@@ -81,10 +159,12 @@ export default function Hub() {
             </div>
           ) : (
             <ModelGrid
-              models={sorted}
-              activeKey={activeKey ?? (activeModel ? entries[0]?.[0] : null)}
+              models={visibleModels}
+              activeKey={finalActiveKey}
+              visibleKeys={visibleKeys}
               onSelect={(k) => setActiveKey(k)}
               onReorder={(keys) => setOrder(keys)}
+              onToggleVisible={handleToggleVisible}
             />
           )}
         </div>
@@ -94,7 +174,7 @@ export default function Hub() {
         <header className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-2xl font-bold text-slate-50">Weather Hub</h1>
-            <p className="text-sm text-slate-500">{eventData?.title?.replace("highest", "TMAX Prediction").replace("TMAX", "") ?? "Weather predictions"}</p>
+            <p className="text-sm text-slate-500">{subtitle}</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="relative">
@@ -128,12 +208,52 @@ export default function Hub() {
           </div>
         </header>
 
-        {activeModel && activeModel.probs && (
-          <BucketChart
-            modelProbs={activeModel.probs}
-            marketPrices={marketPrices}
-          />
-        )}
+        <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-slate-900/40 border-t-2 border-cyan-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Expected Value</div>
+            <div className="text-2xl font-bold text-cyan-400 tabular-nums">{expectedValue}°C</div>
+          </div>
+          <div className="bg-slate-900/40 border-t-2 border-violet-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Market Avg</div>
+            <div className="text-2xl font-bold text-violet-400 tabular-nums">${marketAvg}</div>
+          </div>
+          <div className="bg-slate-900/40 border-t-2 border-emerald-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Edge</div>
+            <div className="text-2xl font-bold text-emerald-400 tabular-nums">--</div>
+          </div>
+          <div className="bg-slate-900/40 border-t-2 border-slate-600/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
+            <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Kelly Bet</div>
+            <div className="text-2xl font-bold text-slate-100 tabular-nums">--</div>
+          </div>
+        </section>
+
+        <section className="bg-slate-900/40 rounded-2xl border border-slate-800 p-6 backdrop-blur-md shadow-[0_0_30px_-5px_rgba(6,182,212,0.1)] transition-all duration-300">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-lg font-semibold text-slate-100">Probability by Bucket</h2>
+            <div className="flex gap-4 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-sm bg-cyan-500"></span>
+                <span className="text-slate-400">Model Probability</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-sm bg-violet-500"></span>
+                <span className="text-slate-400">Market Price</span>
+              </div>
+            </div>
+          </div>
+          
+          {activeModel && activeModel.probs ? (
+            <BucketChart
+              modelProbs={activeModel.probs}
+              marketPrices={marketPrices}
+            />
+          ) : (
+            <div className="h-80 flex items-center justify-center text-slate-500">
+              Select a model to view probabilities
+            </div>
+          )}
+        </section>
+
       </main>
     </div>
   )
