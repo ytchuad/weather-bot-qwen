@@ -62,7 +62,15 @@ export default function BucketChart({
           tickFormatter={(v) => `${v}%`}
         />
         <Tooltip
-          contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #1e293b", borderRadius: "0.5rem", color: "#e2e8f0" }}
+          contentStyle={{
+            backgroundColor: "rgba(15, 23, 42, 0.8)",
+            border: "1px solid rgba(148, 163, 184, 0.2)",
+            borderRadius: "0.5rem",
+            color: "#e2e8f0",
+            backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+          }}
           cursor={{ fill: "#1e293b50" }}
         />
         <Legend wrapperStyle={{ fontSize: "12px", color: "#94a3b8" }} iconType="circle" />
