@@ -14,20 +14,23 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import streamlit as st
+from cachetools import TTLCache, cached
 
 from ..config import (
     DEFAULT_TMAX_FORECAST_DELTA,
     DEFAULT_TMIN_FORECAST_DELTA,
     MODEL_KEYS,
+    CACHE_TTL_MEDIUM,
 )
 
 logger = logging.getLogger(__name__)
 
+_medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
+
 
 # ── 9-day XGBoost ────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)
+@cached(_medium_cache)
 def predict_9d(
     target_date: date,
     is_min_temp: bool,

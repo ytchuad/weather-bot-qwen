@@ -1,8 +1,7 @@
 # app/services/market_service.py
 """Polymarket event/market data fetching.
 
-All functions use ``@st.cache_data`` for TTL-based caching so the upstream
-API is not hammered on every rerun.
+All functions use cachetools TTLCache for caching.
 """
 
 from __future__ import annotations
@@ -16,7 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import requests
-import streamlit as st
+from cachetools import TTLCache, cached
 
 from ..config import (
     PM_GAMMA_API,
@@ -27,6 +26,11 @@ from ..config import (
     CACHE_TTL_MEDIUM,
     CACHE_TTL_SHORT,
 )
+
+logger = logging.getLogger(__name__)
+
+_medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
+_short_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_SHORT)
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +213,7 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
 
 # ── cached fetchers ───────────────────────────────────────────────────
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+@cached(_medium_cache)
 def search_events(query: str = "hong-kong-temperature") -> list[dict]:
     """Search Polymarket public events. Returns list of {title, slug}."""
     try:
@@ -230,7 +234,7 @@ def search_events(query: str = "hong-kong-temperature") -> list[dict]:
         return []
 
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+@cached(_medium_cache)
 def fetch_event_by_slug(slug: str) -> dict | None:
     """Get full event object from Gamma API by slug."""
     if not slug:
@@ -246,7 +250,7 @@ def fetch_event_by_slug(slug: str) -> dict | None:
     return None
 
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+@cached(_medium_cache)
 def fetch_event_markets(slug: str, is_min_temp: bool = False) -> list[dict]:
     """Return parsed bucket markets [{bucket, name, lower, upper, yes_price, no_price}]."""
     event = fetch_event_by_slug(slug)
@@ -336,7 +340,7 @@ def bucket_for_temp(temp: float, is_min_temp: bool) -> str:
     return ">=34"
 
 
-@st.cache_data(ttl=CACHE_TTL_SHORT)
+@cached(_short_cache)
 def fetch_today_event(target_date_str: str) -> dict | None:
     """Fetch today's temperature event for the given date (YYYY-MM-DD format)."""
     events = search_events("hong-kong-temperature")
