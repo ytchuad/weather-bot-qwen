@@ -26,8 +26,10 @@ function SortableCard({
     isDragging,
   } = useSortable({ id })
 
-  const maxProb = Math.max(...Object.values(pred.probs ?? {}))
-  const maxPct = Math.round(maxProb * 100)
+  // 修正：防止空陣列導致 Math.max 回傳 -Infinity
+  const probs = Object.values(pred.probs ?? {})
+  const maxProb = probs.length > 0 ? Math.max(...probs) : 0
+  const maxPct = Math.min(100, Math.round(maxProb * 100))
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -42,42 +44,42 @@ function SortableCard({
       {...attributes}
       onClick={onClick}
       className={[
-        "model-card group relative bg-slate-900/50 p-4 rounded-lg cursor-pointer border-l-4 transition-all duration-200",
+        "model-card group relative bg-slate-900/50 p-3 rounded-lg cursor-pointer border-l-4 transition-all duration-200",
         active
           ? "border-cyan-500 bg-slate-800/50 shadow-[0_0_15px_rgba(6,182,212,0.1)]"
           : "border-transparent hover:bg-slate-800/50 hover:translate-x-1",
       ].join(" ")}
     >
-      <div className="flex items-center justify-between mb-2">
+      <div className="flex items-center justify-between mb-1.5">
         <span
           className={[
-            "text-sm font-semibold",
+            "text-xs font-semibold",
             active ? "text-slate-100" : "text-slate-300",
           ].join(" ")}
         >
           {label}
         </span>
         <div {...listeners} className="cursor-grab">
-          <GripVertical size={14} className="text-slate-600 group-hover:text-slate-400" />
+          <GripVertical size={12} className="text-slate-600 group-hover:text-slate-400" />
         </div>
       </div>
-      <div className="flex items-baseline gap-2 mb-3">
+      <div className="flex items-baseline gap-2 mb-2">
         <span
           className={[
-            "text-3xl font-bold tabular-nums",
+            "text-2xl font-bold tabular-nums",
             active ? "text-cyan-400" : "text-slate-300",
           ].join(" ")}
         >
           {pred.mean.toFixed(1)}°C
         </span>
-        <span className="text-xs text-slate-500">±{pred.std.toFixed(2)} std</span>
+        <span className="text-[10px] text-slate-500">±{pred.std.toFixed(2)}</span>
       </div>
       <div className="flex items-center gap-2">
-        <span className="text-xs text-slate-500 w-12">Max Prob</span>
-        <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
+        <span className="text-[10px] text-slate-500 w-10">Max Prob</span>
+        <div className="h-1 w-full bg-slate-700 rounded-full overflow-hidden">
           <div className="h-full bg-violet-500 rounded-full" style={{ width: `${maxPct}%` }} />
         </div>
-        <span className="text-xs text-violet-400 font-mono">{maxPct}%</span>
+        <span className="text-[10px] text-violet-400 font-mono w-8 text-right">{maxPct}%</span>
       </div>
     </div>
   )

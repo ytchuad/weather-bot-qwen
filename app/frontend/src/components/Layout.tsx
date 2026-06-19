@@ -1,42 +1,45 @@
 import { Link, useLocation } from "react-router-dom"
-import { CloudSun, LineChart } from "lucide-react"
-import clsx from "clsx"
+import { Cloud, BarChart3 } from "lucide-react"
 import type { ReactNode } from "react"
 
 const navItems = [
-  { to: "/", label: "Hub", icon: CloudSun },
-  { to: "/strategies", label: "Strategies", icon: LineChart },
+  { to: "/", label: "Hub", icon: Cloud },
+  { to: "/strategies", label: "Strategies", icon: BarChart3 },
 ]
 
 export default function Layout({ children }: { children: ReactNode }) {
   const loc = useLocation()
 
   return (
-    <div className="min-h-screen bg-[#0B0E14] text-[#E6E9EF] font-sans">
-      <nav className="flex items-center gap-6 px-6 h-14 border-b border-white/5 bg-[#0B0E14]/80 backdrop-blur-md sticky top-0 z-50">
-        <span className="text-sm font-semibold tracking-wide text-white/70">
-          Weather Quant
-        </span>
-        {navItems.map((item) => {
-          const active = loc.pathname === item.to
-          return (
-            <Link
-              key={item.to}
-              to={item.to}
-              className={clsx(
-                "flex items-center gap-1.5 text-xs font-medium tracking-wider uppercase transition-colors",
-                active
-                  ? "text-[#00E5FF]"
-                  : "text-white/40 hover:text-white/70",
-              )}
-            >
-              <item.icon size={14} />
-              {item.label}
-            </Link>
-          )
-        })}
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-200">
+      <nav className="h-16 flex items-center justify-between px-8 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md z-10">
+        <div className="flex items-center gap-2">
+          <Cloud className="w-5 h-5 text-cyan-500" />
+          <span className="text-lg font-bold text-slate-100">Weather Quant</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {navItems.map((item) => {
+            const active = loc.pathname === item.to
+            const Icon = item.icon
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={[
+                  "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
+                  active
+                    ? "bg-slate-800 text-cyan-400"
+                    : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200",
+                ].join(" ")}
+              >
+                <Icon className="w-4 h-4" />
+                {item.label}
+              </Link>
+            )
+          })}
+        </div>
       </nav>
-      <main className="max-w-7xl mx-auto px-6 py-6">{children}</main>
+      <div className="flex-1 overflow-hidden">{children}</div>
     </div>
   )
 }
