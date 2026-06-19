@@ -287,7 +287,7 @@ def run_all_models(
     output["aws"] = pred_aws
 
     # Intraday
-    if state and markets:
+    if state and isinstance(state, dict) and "time_now" in state and markets:
         intra_preds = predict_intraday_all(
             target_date_str, is_min_temp, state, rain_kwargs,
             forecast_max=None, forecast_min=None,

@@ -21,7 +21,11 @@ def _svc_date(d: str) -> str:
 def _get_intraday_state_for(target_date: str):
     from app.services.weather_service import get_intraday_state
 
-    return get_intraday_state(_svc_date(target_date))
+    state = get_intraday_state(_svc_date(target_date))
+    # Ensure we don't cache None or invalid state
+    if state is None or not isinstance(state, dict):
+        return None
+    return state
 
 
 def _compute_rain_kwargs_for(target_date: str):
