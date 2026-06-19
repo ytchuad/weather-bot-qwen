@@ -425,9 +425,10 @@ _rain_live_cache = TTLCache(maxsize=2, ttl=CACHE_TTL_MEDIUM)
 @cached(_rain_live_cache)
 def compute_rain_kwargs_live() -> dict:
     """Compute rainfall features from live i-lens data only."""
-    rain_df = fetch_rainfall_live()
+    # Force fresh fetch instead of using cached value
+    rain_df = _fetch_rainfall_live_uncached()
 
-    if rain_df is None or rain_df.empty:
+    if rain_df is None or not isinstance(rain_df, pd.DataFrame) or rain_df.empty:
         return {"rain_60m": 0.0, "rain_120m": 0.0, "rain_data_ok": False}
 
     rain_df = rain_df.sort_values("datetime")
@@ -449,3 +450,16 @@ def compute_rain_kwargs_live() -> dict:
         "rain_120m": round(rain_120m, 1),
         "rain_data_ok": True,
     }
+
+
+# Internal uncached version for compute_rain_kwargs_live
+def _fetch_rainfall_live_uncached() -> pd.DataFrame:
+    """Uncached rainfall fetch for compute_rain_kwargs_live to avoid cache pollution."""
+    try:
+        r = requests.get(INSTANT_RAIN_URL, headers=RAIN_HEADERS, timeout=10)
+        r.raise_for_status()
+        records = _parse_rainfall_from_html(r.text)
+        return pd.DataFrame(records) if records else pd.DataFrame()
+    except Exception as e:
+        logger.warning("_fetch_rainfall_live_uncached failed: %s", e)
+        return pd.DataFrame()

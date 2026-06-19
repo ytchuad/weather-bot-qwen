@@ -23,7 +23,9 @@ def with_cache(cache: TTLCache) -> Callable:
         def wrapper(*args, **kwargs):
             key = _make_key(func, args, kwargs)
             if key in cache:
-                return cache[key]
+                cached_result = cache[key]
+                # Return cached result even if it's None or invalid
+                return cached_result
             result = func(*args, **kwargs)
             cache[key] = result
             return result
