@@ -1,14 +1,5 @@
 import { useMemo } from "react"
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts"
+import ReactECharts from "echarts-for-react"
 
 const sortBuckets = (a: string, b: string) => {
   const parseBucket = (s: string) => {
@@ -24,12 +15,17 @@ const sortBuckets = (a: string, b: string) => {
 export default function BucketChart({
   modelProbs,
   marketPrices,
+  allBuckets,
 }: {
   modelProbs: Record<string, number>
   marketPrices: Record<string, number>
+  allBuckets: string[]
 }) {
   const data = useMemo(() => {
-    const buckets = Array.from(new Set([...Object.keys(modelProbs), ...Object.keys(marketPrices)]))
+    const buckets = allBuckets && allBuckets.length > 0
+      ? allBuckets
+      : Array.from(new Set([...Object.keys(modelProbs), ...Object.keys(marketPrices)]))
+
     const sortedBuckets = [...buckets].sort(sortBuckets)
 
     return sortedBuckets.map((bucket) => ({
@@ -37,50 +33,104 @@ export default function BucketChart({
       Model: modelProbs[bucket] != null ? +(modelProbs[bucket] * 100).toFixed(1) : 0,
       Market: marketPrices[bucket] != null ? +(marketPrices[bucket] * 100).toFixed(1) : 0,
     }))
-  }, [modelProbs, marketPrices])
+  }, [modelProbs, marketPrices, allBuckets])
 
-  const BucketChartInner = ({ data }: { data: any[] }) => (
-    <BarChart data={data} margin={{ top: 20, right: 0, left: -10, bottom: 0 }}>
-      <defs>
-        <linearGradient id="modelGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.9} />
-          <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.4} />
-        </linearGradient>
-        <linearGradient id="marketGrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.9} />
-          <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0.4} />
-        </linearGradient>
-      </defs>
-      <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-      <XAxis dataKey="bucket" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-      <YAxis
-        stroke="#64748b"
-        fontSize={12}
-        tickLine={false}
-        axisLine={false}
-        tickFormatter={(v) => `${v}%`}
-      />
-      <Tooltip
-        contentStyle={{
-          backgroundColor: "rgba(15, 23, 42, 0.8)",
-          border: "1px solid rgba(148, 163, 184, 0.2)",
-          borderRadius: "0.5rem",
+  const option = useMemo(() => {
+    return {
+      animation: true,
+      animationDuration: 500,
+      animationDurationUpdate: 500,
+      animationEasing: "cubicOut",
+      animationEasingUpdate: "cubicOut",
+
+      grid: {
+        left: "3%",
+        right: "4%",
+        bottom: "3%",
+        containLabel: true,
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: {
+          type: "shadow",
+        },
+        backgroundColor: "#0f172a",
+        borderColor: "#1e293b",
+        borderRadius: 4,
+        textStyle: {
           color: "#e2e8f0",
-          backdropFilter: "blur(8px)",
-          WebkitBackdropFilter: "blur(8px)",
-          boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
-        }}
-        cursor={{ fill: "#1e293b50" }}
-      />
-      <Legend wrapperStyle={{ fontSize: "12px", color: "#94a3b8" }} iconType="circle" />
-      <Bar dataKey="Model" fill="url(#modelGrad)" radius={[4, 4, 0, 0]} />
-      <Bar dataKey="Market" fill="url(#marketGrad)" radius={[4, 4, 0, 0]} />
-    </BarChart>
-  )
+        },
+        extraCssText: "backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); box-shadow: 0 4px 20px rgba(0,0,0,0.5);",
+      },
+      legend: {
+        data: ["Model Probability", "Market Price"],
+        textStyle: { color: "#94a3b8" },
+        top: 0,
+      },
+      xAxis: {
+        type: "category",
+        data: data.map(d => d.bucket),
+        axisLine: { lineStyle: { color: "#1e293b" } },
+        axisTick: { show: false },
+        axisLabel: { color: "#64748b", fontSize: 12 },
+      },
+      yAxis: {
+        type: "value",
+        axisLabel: {
+          color: "#64748b",
+          fontSize: 12,
+          formatter: "{value}%",
+        },
+        splitLine: { lineStyle: { color: "#1e293b", type: "dashed" } },
+        axisLine: { show: false },
+        axisTick: { show: false },
+      },
+      series: [
+        {
+          name: "Model Probability",
+          type: "bar",
+          data: data.map(d => d.Model),
+          itemStyle: {
+            color: {
+              type: "linear",
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: "rgba(6, 182, 212, 0.9)" },
+                { offset: 1, color: "rgba(6, 182, 212, 0.4)" },
+              ],
+            },
+            borderRadius: [4, 4, 0, 0],
+          },
+        },
+        {
+          name: "Market Price",
+          type: "bar",
+          data: data.map(d => d.Market),
+          itemStyle: {
+            color: {
+              type: "linear",
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: "rgba(139, 92, 246, 0.9)" },
+                { offset: 1, color: "rgba(139, 92, 246, 0.4)" },
+              ],
+            },
+            borderRadius: [4, 4, 0, 0],
+          },
+        },
+      ],
+    }
+  }, [data])
 
   return (
     <div style={{ height: 350 }}>
-      <ResponsiveContainer>{data.length > 0 && <BucketChartInner data={data} />}</ResponsiveContainer>
+      <ReactECharts option={option} style={{ height: "100%", width: "100%" }} />
     </div>
   )
 }
