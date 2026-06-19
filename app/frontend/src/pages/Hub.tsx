@@ -34,7 +34,15 @@ export default function Hub() {
     refetchInterval: 120_000,
   })
 
-  const marketPrices = eventData?.prices ?? {}
+  const marketPrices = useMemo(() => {
+    const p = eventData?.prices ?? {}
+    const decoded: Record<string, number> = {}
+    for (const [k, v] of Object.entries(p)) {
+      const decodedKey = k.replace(/^&lt;/, "<").replace(/^&gt;/, ">").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      decoded[decodedKey] = v
+    }
+    return decoded
+  }, [eventData?.prices])
   const models = data?.models
   const entries = useMemo(() => (models ? Object.entries(models) : []), [models])
 
