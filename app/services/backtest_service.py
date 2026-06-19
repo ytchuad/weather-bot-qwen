@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import streamlit as st
+from cachetools import TTLCache, cached
 
 from ..config import (
     FORWARD_TEST_LOG,
@@ -18,6 +18,8 @@ from ..config import (
 )
 
 logger = logging.getLogger(__name__)
+
+_long_cache = TTLCache(maxsize=32, ttl=CACHE_TTL_LONG)
 
 
 def evaluate_forward_test(
@@ -122,7 +124,7 @@ def evaluate_forward_test(
     return results
 
 
-@st.cache_data(ttl=CACHE_TTL_LONG)
+@cached(_long_cache)
 def load_performance_log() -> pd.DataFrame | None:
     if PERF_LOG_PATH.exists():
         try:
@@ -132,7 +134,7 @@ def load_performance_log() -> pd.DataFrame | None:
     return None
 
 
-@st.cache_data(ttl=CACHE_TTL_LONG)
+@cached(_long_cache)
 def load_forward_test_log() -> pd.DataFrame | None:
     if FORWARD_TEST_LOG.exists():
         try:

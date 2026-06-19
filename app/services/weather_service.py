@@ -1,7 +1,7 @@
 # app/services/weather_service.py
 """HKO weather data fetching — APIs + local parquet.
 
-All functions use ``@st.cache_data`` with appropriate TTLs.
+All functions use cachetools TTLCache for caching.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import requests
-import streamlit as st
+from cachetools import TTLCache, cached
 
 from ..config import (
     HKT_OFFSET,
@@ -31,6 +31,11 @@ from ..config import (
 
 logger = logging.getLogger(__name__)
 
+_short_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_SHORT)
+_medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
+
+logger = logging.getLogger(__name__)
+
 
 def hkt_now() -> datetime:
     """Current time in Hong Kong (UTC+8, naive)."""
@@ -39,7 +44,7 @@ def hkt_now() -> datetime:
 
 # ── live HKO API fetchers ────────────────────────────────────────────
 
-@st.cache_data(ttl=CACHE_TTL_SHORT)
+@cached(_short_cache)
 def fetch_live_hko_temp_rh() -> tuple[datetime | None, float | None, float | None]:
     """Return (datetime, temp_c, rh_pct) from HKO rhrread API."""
     try:
@@ -77,7 +82,7 @@ def fetch_live_hko_temp_rh() -> tuple[datetime | None, float | None, float | Non
         return None, None, None
 
 
-@st.cache_data(ttl=CACHE_TTL_SHORT)
+@cached(_medium_cache)
 def fetch_hko_data(target_date_str: str) -> dict:
     """Return max/min since midnight + forecast max/min + AWS hourly rows."""
     max_since_midnight: float | None = None
@@ -148,7 +153,7 @@ def fetch_hko_data(target_date_str: str) -> dict:
     }
 
 
-@st.cache_data(ttl=CACHE_TTL_SHORT)
+@cached(_short_cache)
 def fetch_hko_intraday_csv(_cache_buster: int = 0) -> pd.DataFrame:
     """Fetch HKO AWS CSV and return DataFrame with datetime, temp, rh columns.
 
@@ -181,7 +186,7 @@ def fetch_hko_intraday_csv(_cache_buster: int = 0) -> pd.DataFrame:
 
 # ── intraday state builder ───────────────────────────────────────────
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+@cached(_medium_cache)
 def get_intraday_state(target_date_str: str) -> dict | None:
     """Build intraday state dict for a given date.
 
@@ -281,7 +286,7 @@ def _parse_rainfall_from_html(html: str) -> list[dict]:
     except Exception:
         return []
 
-@st.cache_data(ttl=CACHE_TTL_SHORT)
+@cached(_short_cache)
 def fetch_rainfall_live() -> pd.DataFrame:
     """Fetch live rainfall data from i-lens; returns DataFrame with datetime/rainfall."""
     try:
@@ -293,7 +298,7 @@ def fetch_rainfall_live() -> pd.DataFrame:
         logger.warning("fetch_rainfall_live failed: %s", e)
         return pd.DataFrame()
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+@cached(_medium_cache)
 def load_rain_15min() -> pd.DataFrame:
     if RAIN_15MIN_PATH.exists():
         try:
@@ -393,7 +398,7 @@ def _extract_at_hour(df: pd.DataFrame, hour: int, minute: int = 0) -> float:
     return float(subset.iloc[0]) if len(subset) > 0 else 0.0
 
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM)
+@cached(_medium_cache)
 def fetch_hko_aws_forecast() -> tuple[float | None, float | None, list]:
     """Return (forecast_max, forecast_min, daily_forecast_list) from HKO AWS."""
     url = HKO_FORECAST_URL_TEMPLATE.format(ts=int(_time.time() * 1000))
@@ -414,9 +419,7 @@ def fetch_hko_aws_forecast() -> tuple[float | None, float | None, list]:
 
 # ── rainfall live compute ────────────────────────────────────────────
 
-from cachetools import TTLCache, cached
-
-_rain_live_cache = TTLCache(maxsize=2, ttl=300)
+_rain_live_cache = TTLCache(maxsize=2, ttl=CACHE_TTL_MEDIUM)
 
 
 @cached(_rain_live_cache)

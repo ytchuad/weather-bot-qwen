@@ -10,10 +10,14 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-import streamlit as st
+from cachetools import TTLCache, cached
 
 from ..config import CACHE_TTL_MEDIUM
 from .market_service import parse_date_from_event, search_events
+
+logger = __import__("logging").getLogger(__name__)
+
+_medium_cache = TTLCache(maxsize=32, ttl=CACHE_TTL_MEDIUM)
 
 
 def _is_min_temp(event: dict) -> bool:
@@ -22,9 +26,9 @@ def _is_min_temp(event: dict) -> bool:
     return "lowest" in title or "lowest" in slug
 
 
-@st.cache_data(ttl=CACHE_TTL_MEDIUM, show_spinner=False)
+@cached(_medium_cache)
 def _cached_search(query: str) -> list[dict]:
-    """Cache-wrapped Polymarket search. 5-minute TTL."""
+    """Cache-wrapped Polymarket search."""
     return search_events(query)
 
 

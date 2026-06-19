@@ -2,9 +2,15 @@ import { useQuery } from "@tanstack/react-query"
 import { Activity, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-react"
 
 export default function Diagnostics() {
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["diagnostics"],
-    queryFn: () => fetch("/api/diagnostics/sources").then((res) => res.json()),
+    queryFn: async () => {
+      const res = await fetch("/api/diagnostics/sources")
+      if (!res.ok) {
+        throw new Error(`API Error: ${res.status}`)
+      }
+      return res.json()
+    },
     refetchInterval: 60_000,
   })
 
@@ -36,9 +42,20 @@ export default function Diagnostics() {
             <div key={i} className="h-20 rounded-xl bg-slate-800/50 animate-pulse" />
           ))}
         </div>
+      ) : isError ? (
+        <div className="p-4 rounded-xl bg-rose-900/20 border border-rose-500/30 text-rose-400">
+          <h3 className="font-semibold flex items-center gap-2">
+            <XCircle className="w-5 h-5" />
+            Failed to load diagnostics
+          </h3>
+          <p className="text-sm mt-1 font-mono">{(error as Error)?.message || "Unknown error"}</p>
+          <p className="text-xs mt-2 text-slate-500">
+            請確認 FastAPI 後端已重新啟動，且 /api/diagnostics 路由已正確註冊。
+          </p>
+        </div>
       ) : (
         <div className="space-y-4">
-          {data?.sources.map((source: any) => (
+          {data?.sources?.map((source: any) => (
             <div
               key={source.name}
               className={`p-4 rounded-xl border backdrop-blur-md flex items-start gap-4 ${
