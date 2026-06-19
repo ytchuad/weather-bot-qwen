@@ -3,8 +3,10 @@
 /* Global background and scrollbar */
 html, body {
   margin: 0;
-  padding: 0;
   background-color: #020617;
+  background-image: 
+    radial-gradient(circle at 15% 15%, rgba(6, 182, 212, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 85% 85%, rgba(139, 92, 246, 0.08) 0%, transparent 40%);
   overflow-x: hidden;
 }
 
