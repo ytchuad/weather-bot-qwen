@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query"
-import { Thermometer, Droplets } from "lucide-react"
+import { Thermometer, Droplets, Calendar } from "lucide-react"
 import { fetchWeatherNow } from "../api/client"
 
-export default function WeatherNow() {
+export default function WeatherNow({ date }: { date: string }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["weatherNow"],
-    queryFn: fetchWeatherNow,
+    queryKey: ["weatherNow", date],
+    queryFn: () => fetchWeatherNow(date),
     refetchInterval: 60_000,
   })
 
@@ -16,6 +16,17 @@ export default function WeatherNow() {
 
   return (
     <div className="flex flex-wrap gap-6 rounded-xl bg-white/[0.03] border border-white/5 px-5 py-4">
+      <div className="flex items-center gap-3">
+        <Calendar size={20} className="text-[#00E5FF]" />
+        <div>
+          <div className="text-xs text-white/40 uppercase tracking-wider">
+            Date
+          </div>
+          <div className="text-sm font-semibold tabular-nums">
+            {data.date ?? date}
+          </div>
+        </div>
+      </div>
       <div className="flex items-center gap-3">
         <Thermometer size={20} className="text-[#F43F5E]" />
         <div>

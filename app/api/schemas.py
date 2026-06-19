@@ -86,6 +86,7 @@ class HealthResponse(BaseModel):
 
 
 class WeatherNow(BaseModel):
+    date: str | None = None
     temp: float | None
     humidity: float | None
     max_today: float | None
