@@ -20,16 +20,18 @@ router = APIRouter(prefix="/api/weather", tags=["Weather"])
 
 @router.get("/now", response_model=WeatherNow)
 @weather_cache
-def weather_now():
+def weather_now(date: str | None = None):
     hkt = hkt_now()
+    target_date = date or hkt.date()
     temp_rh = fetch_live_hko_temp_rh()
-    hko = fetch_hko_data(hkt.date())
+    hko = fetch_hko_data(str(target_date).replace("-", ""))
 
     temp = rh = None
     if temp_rh:
         _, temp, rh = temp_rh
 
     return WeatherNow(
+        date=str(target_date),
         temp=temp,
         humidity=rh,
         max_today=hko.get("max_so_far"),

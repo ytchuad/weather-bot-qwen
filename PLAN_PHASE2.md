@@ -90,10 +90,13 @@ When built, `APP_MODE=api` serves:
 
 ### `/` Hub
 
-- Current weather card (`/api/weather/now`)
+- Date selector (`input[type="date"]`)
+- Current weather card (`/api/weather/now?date=...`)
+- Event lookup (`/api/markets/events?date=...`)
+- Event market prices (`/api/markets/event/{slug}`)
 - Model prediction cards (`/api/predictions?date=TODAY&is_min_temp=false`)
 - Drag/reorder model cards with @dnd-kit
-- Bucket chart placeholder for the active model
+- Bucket chart with Model vs Market probabilities
 
 ### `/strategies`
 
@@ -103,8 +106,7 @@ When built, `APP_MODE=api` serves:
 
 ## Known Gaps / Next Iteration
 
-1. **Bucket market prices** — Hub currently passes empty `marketPrices` to `BucketChart`; should fetch `/api/markets/event/{slug}` and merge market prices.
-2. **Selected model state** — Drag reorder currently stores only local order; should persist/order sync via API if desired.
-3. **Strategy inputs** — Capital and Kelly fraction are hardcoded in the UI; should be editable.
-4. **Backtest UI** — Not yet implemented; API endpoints exist.
-5. **Event/date selector** — Today is hardcoded; should let user choose event/date and TMAX/TMIN.
+1. **Strategy inputs** — Capital and Kelly fraction are hardcoded in the UI; should be editable.
+2. **Backtest UI** — Not yet implemented; API endpoints exist.
+3. **Selected model persistence** — Drag reorder currently stores only local order; should persist/order sync via API if desired.
+4. **TMAX/TMIN selector** — Hub currently uses TMAX (`is_min_temp=false`); should let user switch market type.

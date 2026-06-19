@@ -11,6 +11,7 @@ export interface ModelPrediction {
 }
 
 export interface WeatherNow {
+  date?: string
   temp: number | null
   humidity: number | null
   max_today: number | null
@@ -44,5 +45,9 @@ export interface EventMarket {
   slug: string
   title: string
   markets: Record<string, unknown>[]
-  prices: Record<string, number>
+  prices?: Record<string, number>
+}
+
+export interface EventSearchResponse {
+  events: Array<{ slug: string; title: string }>
 }

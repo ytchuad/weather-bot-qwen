@@ -22,6 +22,7 @@ import type {
   SuggestResponse,
   BucketDef,
   EventMarket,
+  EventSearchResponse,
 } from "../types"
 
 export function fetchPredictions(
@@ -33,8 +34,9 @@ export function fetchPredictions(
   )
 }
 
-export function fetchWeatherNow(): Promise<WeatherNow> {
-  return get("/weather/now")
+export function fetchWeatherNow(date?: string): Promise<WeatherNow> {
+  const q = date ? `?date=${encodeURIComponent(date)}` : ""
+  return get(`/weather/now${q}`)
 }
 
 export function fetchWeatherIntraday(date: string) {
@@ -49,7 +51,7 @@ export function fetchBuckets(type = "tmax"): Promise<BucketDef> {
   return get(`/markets/buckets?type=${type}`)
 }
 
-export function fetchEvents(date?: string) {
+export function fetchEvents(date?: string): Promise<EventSearchResponse> {
   const q = date ? `?date=${encodeURIComponent(date)}` : ""
   return get(`/markets/events${q}`)
 }
