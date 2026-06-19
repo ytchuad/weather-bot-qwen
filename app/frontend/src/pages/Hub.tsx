@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { fetchEvent, fetchEvents, fetchPredictions } from "../api/client"
+import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
 import WeatherNow from "../components/WeatherNow"
 import ModelGrid from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
@@ -19,14 +19,14 @@ export default function Hub() {
     refetchInterval: 120_000,
   })
 
-  const { data: eventsData } = useQuery({
-    queryKey: ["events", date],
-    queryFn: () => fetchEvents(date),
+  const { data: todayEventData } = useQuery({
+    queryKey: ["today-event", date],
+    queryFn: () => fetchTodayEvent(date),
     enabled: !!date,
     refetchInterval: 120_000,
   })
 
-  const eventSlug = eventsData?.events?.[0]?.slug ?? null
+  const eventSlug = todayEventData?.event?.slug ?? null
   const { data: eventData } = useQuery({
     queryKey: ["event", eventSlug],
     queryFn: () => fetchEvent(eventSlug!, false),
