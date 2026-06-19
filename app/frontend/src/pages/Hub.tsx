@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
-import WeatherNow from "../components/WeatherNow"
 import ModelGrid from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
 import type { ModelPrediction } from "../types"
@@ -12,6 +11,7 @@ export default function Hub() {
   const [date, setDate] = useState(TODAY)
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [order, setOrder] = useState<string[] | null>(null)
+  const [isMinTemp, setIsMinTemp] = useState(false)
 
   const { data, isLoading } = useQuery({
     queryKey: ["predictions", date],
@@ -29,7 +29,7 @@ export default function Hub() {
   const eventSlug = todayEventData?.event?.slug ?? null
   const { data: eventData } = useQuery({
     queryKey: ["event", eventSlug],
-    queryFn: () => fetchEvent(eventSlug!, false),
+    queryFn: () => fetchEvent(eventSlug!, isMinTemp),
     enabled: !!eventSlug,
     refetchInterval: 120_000,
   })
@@ -43,6 +43,7 @@ export default function Hub() {
     }
     return decoded
   }, [eventData?.prices])
+
   const models = data?.models
   const entries = useMemo(() => (models ? Object.entries(models) : []), [models])
 
@@ -64,61 +65,76 @@ export default function Hub() {
   )(entries)
 
   const activeModel = activeKey && models?.[activeKey] ? models[activeKey] : entries[0]?.[1]
-  const activeModelKey = activeKey && models?.[activeKey] ? activeKey : entries[0]?.[0]
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-xs font-semibold tracking-wider uppercase text-white/40">
-            Hub
-          </div>
-          <div className="text-sm text-white/30 mt-0.5">
-            {eventData?.title ?? "Weather predictions"}
-          </div>
+    <div className="flex h-screen w-screen overflow-hidden">
+      <aside className="w-1/3 min-w-[300px] max-w-[400px] h-full flex flex-col border-r border-slate-800 bg-slate-950/50 backdrop-blur-sm">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Model Matrix</h2>
         </div>
-        <label className="flex items-center gap-2 text-xs text-white/50">
-          <span>Date</span>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2 text-sm text-white outline-none focus:border-[#00E5FF]/50"
-          />
-        </label>
-      </div>
-
-      <WeatherNow date={date} />
-
-      <div>
-        <div className="text-xs font-semibold tracking-wider uppercase text-white/40 mb-3">
-          Model Predictions
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {isLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-24 rounded-lg bg-slate-800/50 animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <ModelGrid
+              models={sorted}
+              activeKey={activeKey ?? (activeModel ? entries[0]?.[0] : null)}
+              onSelect={(k) => setActiveKey(k)}
+              onReorder={(keys) => setOrder(keys)}
+            />
+          )}
         </div>
-        {isLoading ? (
-          <div className="grid grid-cols-3 gap-3">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="h-24 rounded-xl bg-white/[0.03] animate-pulse"
+      </aside>
+
+      <main className="flex-1 h-full overflow-y-auto p-8">
+        <header className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-50">Weather Hub</h1>
+            <p className="text-sm text-slate-500">{eventData?.title?.replace("highest", "TMAX Prediction").replace("TMAX", "") ?? "Weather predictions"}</p>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <input
+                type="date"
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                className="bg-slate-900/50 border border-slate-700 text-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-cyan-500 transition-colors"
               />
-            ))}
+            </div>
+            <div className="flex gap-1 bg-slate-900/50 p-1 rounded-full border border-slate-800">
+              <button
+                className={[
+                  "px-4 py-1.5 rounded-full text-xs font-semibold transition-all",
+                  !isMinTemp ? "bg-cyan-500 text-slate-950" : "text-slate-400 hover:text-slate-200",
+                ].join(" ")}
+                onClick={() => setIsMinTemp(false)}
+              >
+                TMAX
+              </button>
+              <button
+                className={[
+                  "px-4 py-1.5 rounded-full text-xs font-semibold transition-all",
+                  isMinTemp ? "bg-cyan-500 text-slate-950" : "text-slate-400 hover:text-slate-200",
+                ].join(" ")}
+                onClick={() => setIsMinTemp(true)}
+              >
+                TMIN
+              </button>
+            </div>
           </div>
-        ) : (
-          <ModelGrid
-            models={sorted}
-            activeKey={activeModelKey ?? null}
-            onSelect={(k) => setActiveKey(k)}
-            onReorder={(keys) => setOrder(keys)}
+        </header>
+
+        {activeModel && activeModel.probs && (
+          <BucketChart
+            modelProbs={activeModel.probs}
+            marketPrices={marketPrices}
           />
         )}
-      </div>
-
-      {activeModel && activeModel.probs && (
-        <BucketChart
-          modelProbs={activeModel.probs}
-          marketPrices={marketPrices}
-        />
-      )}
+      </main>
     </div>
   )
 }

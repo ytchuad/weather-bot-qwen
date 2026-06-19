@@ -26,6 +26,9 @@ function SortableCard({
     isDragging,
   } = useSortable({ id })
 
+  const maxProb = Math.max(...Object.values(pred.probs ?? {}))
+  const maxPct = Math.round(maxProb * 100)
+
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -37,29 +40,44 @@ function SortableCard({
       ref={setNodeRef}
       style={style}
       {...attributes}
+      onClick={onClick}
       className={[
-        "rounded-xl border px-4 py-3 cursor-pointer select-none transition-all duration-150 relative",
+        "model-card group relative bg-slate-900/50 p-4 rounded-lg cursor-pointer border-l-4 transition-all duration-200",
         active
-          ? "border-[#00E5FF]/50 bg-[#00E5FF]/5 shadow-[0_0_12px_rgba(0,229,255,0.15)]"
-          : "border-white/5 bg-white/[0.02] hover:bg-white/[0.04]",
+          ? "border-cyan-500 bg-slate-800/50 shadow-[0_0_15px_rgba(6,182,212,0.1)]"
+          : "border-transparent hover:bg-slate-800/50 hover:translate-x-1",
       ].join(" ")}
     >
-      <div
-        {...listeners}
-        className="absolute top-2 left-2 cursor-grab hover:text-white/60"
-      >
-        <GripVertical size={14} className="text-white/20" />
-      </div>
-      <div className="pl-6" onClick={onClick}>
-        <div className="text-[11px] font-semibold tracking-wider uppercase text-white/40 mb-1">
+      <div className="flex items-center justify-between mb-2">
+        <span
+          className={[
+            "text-sm font-semibold",
+            active ? "text-slate-100" : "text-slate-300",
+          ].join(" ")}
+        >
           {label}
+        </span>
+        <div {...listeners} className="cursor-grab">
+          <GripVertical size={14} className="text-slate-600 group-hover:text-slate-400" />
         </div>
-        <div className="font-mono text-2xl font-bold tabular-nums">
+      </div>
+      <div className="flex items-baseline gap-2 mb-3">
+        <span
+          className={[
+            "text-3xl font-bold tabular-nums",
+            active ? "text-cyan-400" : "text-slate-300",
+          ].join(" ")}
+        >
           {pred.mean.toFixed(1)}°C
+        </span>
+        <span className="text-xs text-slate-500">±{pred.std.toFixed(2)} std</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-slate-500 w-12">Max Prob</span>
+        <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden">
+          <div className="h-full bg-violet-500 rounded-full" style={{ width: `${maxPct}%` }} />
         </div>
-        <div className="text-[11px] text-white/30 font-mono mt-0.5">
-          ±{pred.std.toFixed(2)}
-        </div>
+        <span className="text-xs text-violet-400 font-mono">{maxPct}%</span>
       </div>
     </div>
   )
@@ -104,7 +122,7 @@ export default function ModelGrid({
       }}
     >
       <SortableContext items={keys} strategy={rectSortingStrategy}>
-        <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.max(keys.length, 1)}, 1fr)` }}>
+        <div className="space-y-3">
           {models.map(([k, pred]) => (
             <SortableCard
               key={k}
