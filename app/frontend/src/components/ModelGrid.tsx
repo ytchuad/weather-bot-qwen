@@ -2,6 +2,7 @@ import type { ModelPrediction } from "../types"
 import { DndContext, closestCenter } from "@dnd-kit/core"
 import { SortableContext, useSortable, rectSortingStrategy } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+import { GripVertical } from "lucide-react"
 
 function SortableCard({
   id,
@@ -16,8 +17,14 @@ function SortableCard({
   active: boolean
   onClick: () => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id })
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -30,23 +37,29 @@ function SortableCard({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      {...listeners}
-      onClick={onClick}
       className={[
-        "rounded-xl border px-4 py-3 cursor-pointer select-none transition-all duration-150",
+        "rounded-xl border px-4 py-3 cursor-pointer select-none transition-all duration-150 relative",
         active
           ? "border-[#00E5FF]/50 bg-[#00E5FF]/5 shadow-[0_0_12px_rgba(0,229,255,0.15)]"
           : "border-white/5 bg-white/[0.02] hover:bg-white/[0.04]",
       ].join(" ")}
     >
-      <div className="text-[11px] font-semibold tracking-wider uppercase text-white/40 mb-1">
-        {label}
+      <div
+        {...listeners}
+        className="absolute top-2 left-2 cursor-grab hover:text-white/60"
+      >
+        <GripVertical size={14} className="text-white/20" />
       </div>
-      <div className="font-mono text-2xl font-bold tabular-nums">
-        {pred.mean.toFixed(1)}°C
-      </div>
-      <div className="text-[11px] text-white/30 font-mono mt-0.5">
-        ±{pred.std.toFixed(2)}
+      <div className="pl-6" onClick={onClick}>
+        <div className="text-[11px] font-semibold tracking-wider uppercase text-white/40 mb-1">
+          {label}
+        </div>
+        <div className="font-mono text-2xl font-bold tabular-nums">
+          {pred.mean.toFixed(1)}°C
+        </div>
+        <div className="text-[11px] text-white/30 font-mono mt-0.5">
+          ±{pred.std.toFixed(2)}
+        </div>
       </div>
     </div>
   )
