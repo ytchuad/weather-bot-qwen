@@ -257,6 +257,42 @@ def get_intraday_state(target_date_str: str) -> dict | None:
 
 # ── rainfall ─────────────────────────────────────────────────────────
 
+INSTANT_RAIN_URL = "https://i-lens.hk/hkweather/instant_chart.php?chart_type=STATION_ACCUM_RAIN"
+RAIN_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+}
+
+def _parse_rainfall_from_html(html: str) -> list[dict]:
+    """Parse rainfall data from i-lens HTML for King's Park station."""
+    import re
+    import json
+    pattern = r"\{name:\s*'香港天文台'\s*,\s*data:\s*(\[.*?\])\s*\}"
+    match = re.search(pattern, html, re.DOTALL)
+    if not match:
+        return []
+    data_str = match.group(1)
+    def replace_utc(m):
+        y, mo, d, h, mi = int(m.group(1)), int(m.group(2)) + 1, int(m.group(3)), int(m.group(4)), int(m.group(5))
+        return f'"{y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}"'
+    data_str = re.sub(r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)", replace_utc, data_str)
+    try:
+        data = json.loads(data_str)
+        return [{'datetime': pd.to_datetime(item[0]), 'rainfall': float(item[1])} for item in data if len(item) == 2 and item[1] is not None]
+    except Exception:
+        return []
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def fetch_rainfall_live() -> pd.DataFrame:
+    """Fetch live rainfall data from i-lens; returns DataFrame with datetime/rainfall."""
+    try:
+        r = requests.get(INSTANT_RAIN_URL, headers=RAIN_HEADERS, timeout=10)
+        r.raise_for_status()
+        records = _parse_rainfall_from_html(r.text)
+        return pd.DataFrame(records) if records else pd.DataFrame()
+    except Exception as e:
+        logger.warning("fetch_rainfall_live failed: %s", e)
+        return pd.DataFrame()
+
 @st.cache_data(ttl=CACHE_TTL_MEDIUM)
 def load_rain_15min() -> pd.DataFrame:
     if RAIN_15MIN_PATH.exists():
@@ -282,7 +318,10 @@ def compute_rain_kwargs(
     rain_data_ok = False
 
     try:
+        # Try parquet first (for historical continuity)
         rain_df = load_rain_15min()
+        if rain_df.empty:
+            rain_df = fetch_rainfall_live()
         if not rain_df.empty:
             rain_df = rain_df[rain_df["datetime"] <= now_dt]
             if not rain_df.empty:

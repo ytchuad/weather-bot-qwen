@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow } from "../api/client"
+import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow, fetchWeatherRain } from "../api/client"
 import ModelGrid, { LABEL_MAP } from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
 import type { ModelPrediction } from "../types"
@@ -43,6 +43,13 @@ const [isMinTemp, setIsMinTemp] = useState(false)
   const { data: weatherData } = useQuery({
     queryKey: ["weather", date],
     queryFn: () => fetchWeatherNow(date),
+    enabled: !!date,
+    refetchInterval: 120_000,
+  })
+
+  const { data: rainData } = useQuery({
+    queryKey: ["weather", "rain", date],
+    queryFn: () => fetchWeatherRain(date),
     enabled: !!date,
     refetchInterval: 120_000,
   })
@@ -131,7 +138,7 @@ const [isMinTemp, setIsMinTemp] = useState(false)
     max_so_far: { label: "Max Today", value: `${weatherData?.max_today?.toFixed(1) ?? "--"}°C`, color: "text-rose-400", border: "border-rose-500/50" },
     min_so_far: { label: "Min Today", value: `${weatherData?.min_today?.toFixed(1) ?? "--"}°C`, color: "text-blue-400", border: "border-blue-500/50" },
     humidity: { label: "Humidity", value: `${weatherData?.humidity ?? "--"}%`, color: "text-emerald-400", border: "border-emerald-500/50" },
-    rainfall: { label: "Rainfall", value: "--", color: "text-indigo-400", border: "border-indigo-500/50" },
+    rainfall: { label: "Rainfall", value: (rainData as any)?.rain_60m != null ? `${(rainData as any).rain_60m.toFixed(1)}mm` : "--", color: "text-indigo-400", border: "border-indigo-500/50" },
   }
 
   const handleToggleWeatherElement = (key: string) => {
