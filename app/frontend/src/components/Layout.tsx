@@ -1,10 +1,11 @@
 import { Link, useLocation } from "react-router-dom"
-import { Cloud, BarChart3 } from "lucide-react"
+import { Cloud, BarChart3, Activity } from "lucide-react"
 import type { ReactNode } from "react"
 
 const navItems = [
   { to: "/", label: "Hub", icon: Cloud },
   { to: "/strategies", label: "Strategies", icon: BarChart3 },
+  { to: "/diagnostics", label: "Diagnostics", icon: Activity },
 ]
 
 export default function Layout({ children }: { children: ReactNode }) {

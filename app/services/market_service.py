@@ -334,3 +334,16 @@ def bucket_for_temp(temp: float, is_min_temp: bool) -> str:
     if temp < 33: return "32-33"
     if temp < 34: return "33-34"
     return ">=34"
+
+
+@st.cache_data(ttl=CACHE_TTL_SHORT)
+def fetch_today_event(target_date_str: str) -> dict | None:
+    """Fetch today's temperature event for the given date (YYYY-MM-DD format)."""
+    events = search_events("hong-kong-temperature")
+    if not events:
+        return None
+    for ev in events:
+        ev_date = parse_date_from_event(ev["title"], ev["slug"])
+        if ev_date and ev_date.strftime("%Y-%m-%d") == target_date_str:
+            return {"slug": ev["slug"], "title": ev["title"]}
+    return None
