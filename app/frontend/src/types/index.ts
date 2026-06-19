@@ -22,6 +22,15 @@ export interface WeatherNow {
   fetched_at: string
 }
 
+export interface RainfallData {
+  date: string
+  rain_60m: number
+  rain_120m: number
+  rain_data_ok: boolean
+  rainfall_60m_missing_flag: number
+  rainfall_120m_missing_flag: number
+}
+
 export interface Suggestion {
   bucket: string
   market_price: number
