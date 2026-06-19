@@ -47,11 +47,23 @@ def get_event(slug: str, is_min_temp: bool = False):
     for m in markets:
         name = m.get("name", "")
         bucket = m.get("bucket", name)
-        if m.get("yes_price") is not None:
-            prices[bucket] = m["yes_price"]
+        price = m.get("yes_price")
+        if price is not None:
+            price = float(price)
+            if price == float("-inf") or price == float("inf"):
+                price = 0.0
+            prices[bucket] = price
+
+    safe_markets = []
+    for m in markets:
+        safe_m = dict(m)
+        for k, v in list(safe_m.items()):
+            if isinstance(v, float) and (v == float("-inf") or v == float("inf")):
+                safe_m[k] = 0.0
+        safe_markets.append(safe_m)
 
     return {
         "slug": slug,
-        "markets": markets,
+        "markets": safe_markets,
         "prices": prices,
     }
