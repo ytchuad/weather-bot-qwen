@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { Thermometer, Droplets, Calendar, CloudRain, Eye, EyeOff } from "lucide-react"
+import { Thermometer, Droplets, Calendar, CloudRain } from "lucide-react"
 import { fetchWeatherNow } from "../api/client"
 
 type VisibilityState = {
