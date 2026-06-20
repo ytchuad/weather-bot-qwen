@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow, fetchWeatherRain } from "../api/client"
+import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow } from "../api/client"
 import ModelGrid, { LABEL_MAP } from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
 import ComparisonChart from "../components/ComparisonChart"
+import WeatherCards from "../components/WeatherCards"
 import type { ModelPrediction } from "../types"
 import { Eye, EyeOff, ChevronDown, GitCompare } from "lucide-react"
 
@@ -27,14 +28,14 @@ export default function Hub() {
      }
    });
 
-   const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
-     try {
-       const saved = localStorage.getItem("weatherElements");
-       return saved ? new Set(JSON.parse(saved)) : new Set(["current_temp", "max_so_far", "min_so_far"]);
-     } catch {
-       return new Set(["current_temp", "max_so_far", "min_so_far"]);
-     }
-   });
+const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
+      try {
+        const saved = localStorage.getItem("weatherElements");
+        return saved ? new Set(JSON.parse(saved)) : new Set(["current_temp", "max_so_far", "min_so_far", "rain_60m", "rain_120m", "rain_accumulated", "rain_nowcast"]);
+      } catch {
+        return new Set(["current_temp", "max_so_far", "min_so_far", "rain_60m", "rain_120m", "rain_accumulated", "rain_nowcast"]);
+      }
+    });
 
   const { data, isLoading } = useQuery({
     queryKey: ["predictions", date],
@@ -49,12 +50,7 @@ export default function Hub() {
     refetchInterval: 120_000,
   })
 
-  const { data: rainData } = useQuery({
-    queryKey: ["weather", "rain", date],
-    queryFn: () => fetchWeatherRain(date),
-    enabled: !!date,
-    refetchInterval: 120_000,
-  })
+
 
   const { data: todayEventData } = useQuery({
     queryKey: ["today-event", date],
@@ -140,7 +136,10 @@ export default function Hub() {
     max_so_far: { label: "Max Today", value: `${weatherData?.max_today?.toFixed(1) ?? "--"}°C`, color: "text-rose-400", border: "border-rose-500/50" },
     min_so_far: { label: "Min Today", value: `${weatherData?.min_today?.toFixed(1) ?? "--"}°C`, color: "text-blue-400", border: "border-blue-500/50" },
     humidity: { label: "Humidity", value: `${weatherData?.humidity ?? "--"}%`, color: "text-emerald-400", border: "border-emerald-500/50" },
-    rainfall: { label: "Rainfall", value: (rainData as any)?.rain_60m != null ? `${(rainData as any).rain_60m.toFixed(1)}mm` : "--", color: "text-indigo-400", border: "border-indigo-500/50" },
+    rain_60m: { label: "Rain 60m", value: weatherData?.rain_60m != null ? `${weatherData.rain_60m.toFixed(1)}mm` : "--", color: "text-sky-400", border: "border-sky-500/50" },
+    rain_120m: { label: "Rain 120m", value: weatherData?.rain_120m != null ? `${weatherData.rain_120m.toFixed(1)}mm` : "--", color: "text-sky-400", border: "border-sky-500/50" },
+    rain_accumulated: { label: "Rain Today", value: weatherData?.rain_accumulated_today != null ? `${weatherData.rain_accumulated_today.toFixed(1)}mm` : "--", color: "text-sky-400", border: "border-sky-500/50" },
+    rain_nowcast: { label: "Nowcast", value: weatherData?.rain_nowcast != null ? `${weatherData.rain_nowcast.toFixed(1)}mm` : "--", color: "text-sky-400", border: "border-sky-500/50" },
   }
 
   const handleToggleWeatherElement = (key: string) => {
@@ -316,17 +315,17 @@ return (
               )}
             </div>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            {Object.entries(weatherElems).map(([key, { label, value, color, border }]) => {
-              if (!weatherElements.has(key)) return null
-              return (
-                <div key={key} className={`bg-slate-900/40 border-t-2 ${border} rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1`}>
-                  <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
-                  <div className={`text-2xl font-bold ${color} tabular-nums`}>{value}</div>
-                </div>
-              )
-            })}
-          </div>
+<div className="grid grid-cols-2 md:grid-cols-8 gap-4">
+             {Object.entries(weatherElems).map(([key, { label, value, color, border }]) => {
+               if (!weatherElements.has(key)) return null
+               return (
+                 <div key={key} className={`bg-slate-900/40 border-t-2 ${border} rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1`}>
+                   <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
+                   <div className={`text-2xl font-bold ${color} tabular-nums`}>{value}</div>
+                 </div>
+               )
+             })}
+           </div>
         </section>
 
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
