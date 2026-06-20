@@ -16,7 +16,7 @@ RUN useradd -m -u 1000 user
 USER user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH \
-    APP_MODE=streamlit
+    APP_MODE=api
 WORKDIR $HOME/app
 
 COPY --chown=user requirements.txt .
