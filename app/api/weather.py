@@ -11,6 +11,9 @@ from app.services.weather_service import (
     fetch_hko_data,
     fetch_live_hko_temp_rh,
     hkt_now,
+    compute_rain_kwargs_live,
+    get_accumulated_rain_today,
+    get_nowcast_rainfall,
 )
 
 logger = logging.getLogger(__name__)
@@ -25,6 +28,17 @@ def weather_now(date: str | None = None):
     target_date = date or hkt.date()
     temp_rh = fetch_live_hko_temp_rh()
     hko = fetch_hko_data(str(target_date).replace("-", ""))
+    
+    # Fetch rainfall data
+    rain_kwargs = compute_rain_kwargs_live()
+    rain_60m = rain_kwargs.get("rain_60m", 0.0)
+    rain_120m = rain_kwargs.get("rain_120m", 0.0)
+    
+    # Get accumulated rainfall today from i-lens
+    rain_accumulated = get_accumulated_rain_today()
+    
+    # Get nowcast rainfall
+    rain_nowcast_val = get_nowcast_rainfall()
 
     temp = rh = None
     if temp_rh:
@@ -40,6 +54,10 @@ def weather_now(date: str | None = None):
         aws_temp=hko.get("aws_temp"),
         source="HKO API",
         fetched_at=datetime.now(timezone.utc).isoformat(),
+        rain_60m=rain_60m if rain_kwargs.get("rain_data_ok") else None,
+        rain_120m=rain_120m if rain_kwargs.get("rain_data_ok") else None,
+        rain_accumulated_today=rain_accumulated,
+        rain_nowcast=rain_nowcast_val,
     )
 
 

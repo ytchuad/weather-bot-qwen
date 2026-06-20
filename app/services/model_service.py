@@ -246,7 +246,9 @@ def run_all_models(
     rain_kwargs: dict,
     markets: list[dict],
     forecast_aws_val: float | None,
-    is_today: bool,
+    forecast_max: float | None = None,
+    forecast_min: float | None = None,
+    is_today: bool = True,
 ) -> dict[str, dict]:
     """Run all models and compute bucket probabilities for each.
 
@@ -290,7 +292,7 @@ def run_all_models(
     if state and isinstance(state, dict) and "time_now" in state and markets:
         intra_preds = predict_intraday_all(
             target_date_str, is_min_temp, state, rain_kwargs,
-            forecast_max=None, forecast_min=None,
+            forecast_max=forecast_max, forecast_min=forecast_min,
         )
         if intra_preds:
             if "_error" in intra_preds:

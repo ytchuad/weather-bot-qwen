@@ -95,3 +95,7 @@ class WeatherNow(BaseModel):
     aws_temp: float | None
     source: str
     fetched_at: str
+    rain_60m: float | None = None
+    rain_120m: float | None = None
+    rain_accumulated_today: float | None = None
+    rain_nowcast: float | None = None

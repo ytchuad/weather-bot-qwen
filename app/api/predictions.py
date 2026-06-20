@@ -65,7 +65,7 @@ def get_predictions(
 
     markets = fetch_event_markets(target_date_str, is_min_temp=is_min_temp)
 
-    forecast_aws = hko.get("forecast") if hko else None
+    forecast_aws = hko.get("forecast_max") if hko else None
 
     results = run_all_models(
         target_date=target_date,
@@ -77,6 +77,8 @@ def get_predictions(
         rain_kwargs=rain_kwargs,
         markets=markets,
         forecast_aws_val=forecast_aws,
+        forecast_max=hko.get("forecast_max") if hko else None,
+        forecast_min=hko.get("forecast_min") if hko else None,
         is_today=is_today,
     )
 

@@ -20,6 +20,10 @@ export interface WeatherNow {
   aws_temp: number | null
   source: string
   fetched_at: string
+  rain_60m: number | null
+  rain_120m: number | null
+  rain_accumulated_today: number | null
+  rain_nowcast: number | null
 }
 
 export interface RainfallData {

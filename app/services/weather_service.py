@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 _short_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_SHORT)
 _medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
+_intraday_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
 
 logger = logging.getLogger(__name__)
 
@@ -84,31 +85,36 @@ def fetch_live_hko_temp_rh() -> tuple[datetime | None, float | None, float | Non
 
 @cached(_medium_cache)
 def fetch_hko_data(target_date_str: str) -> dict:
-    """Return max/min since midnight + forecast max/min + AWS hourly rows."""
+    """Return max/min since midnight + forecast max/min + AWS hourly rows.
+    
+    Args:
+        target_date_str: Date in YYYYMMDD or YYYY-MM-DD format
+    """
+    # Normalize to YYYYMMDD format
+    if "-" in target_date_str:
+        target_date_str = target_date_str.replace("-", "")
+    
     max_since_midnight: float | None = None
     min_since_midnight: float | None = None
     forecast_max: float | None = None
     forecast_min: float | None = None
     aws_hourly: list[dict] = []
 
-    # 1) since-midnight CSV
+    # 1) AWS CSV - last 24 hours, calculate max/min since midnight
     try:
-        r = requests.get(HKO_MAXMIN_URL, timeout=10)
+        r = requests.get(HKO_AWS_CSV_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         r.raise_for_status()
-        df = pd.read_csv(io.StringIO(r.content.decode("utf-8-sig")))
-        max_col = next((c for c in df.columns if "maximum" in c.lower()), None)
-        min_col = next((c for c in df.columns if "minimum" in c.lower()), None)
-        station_col = next((c for c in df.columns if "station" in c.lower() or "place" in c.lower()), None)
-        if max_col and min_col and station_col:
-            for _, row in df.iterrows():
-                if "observatory" in str(row[station_col]).lower() or "天文台" in str(row[station_col]):
-                    if pd.notna(row[max_col]):
-                        max_since_midnight = float(row[max_col])
-                    if pd.notna(row[min_col]):
-                        min_since_midnight = float(row[min_col])
-                    break
+        df = pd.read_csv(io.StringIO(r.text))
+        df["datetime"] = pd.to_datetime(df["Date"], format="%Y/%m/%d %H:%M")
+        # Filter for today (since midnight)
+        today_date = pd.to_datetime(target_date_str, format="%Y%m%d")
+        today_mask = df["datetime"].dt.date == today_date.date()
+        today_data = df[today_mask]
+        if not today_data.empty:
+            max_since_midnight = float(today_data["Temp"].max())
+            min_since_midnight = float(today_data["Temp"].min())
     except Exception as e:
-        logger.debug("maxmin CSV fetch: %s", e)
+        logger.debug("AWS CSV fetch: %s", e)
 
     # 2) AWS forecast JSON
     try:
@@ -186,7 +192,7 @@ def fetch_hko_intraday_csv(_cache_buster: int = 0) -> pd.DataFrame:
 
 # ── intraday state builder ───────────────────────────────────────────
 
-@cached(_medium_cache)
+@cached(_intraday_cache)
 def get_intraday_state(target_date_str: str) -> dict | None:
     """Build intraday state dict for a given date.
 
@@ -463,3 +469,45 @@ def _fetch_rainfall_live_uncached() -> pd.DataFrame:
     except Exception as e:
         logger.warning("_fetch_rainfall_live_uncached failed: %s", e)
         return pd.DataFrame()
+
+
+def get_accumulated_rain_today() -> float | None:
+    """Get accumulated rainfall for today from i-lens STATION_ACCUM_RAIN."""
+    try:
+        r = requests.get(INSTANT_RAIN_URL, headers=RAIN_HEADERS, timeout=10)
+        r.raise_for_status()
+        df = _parse_rainfall_from_html(r.text)
+        if not df:
+            return None
+        df = pd.DataFrame(df)
+        today = hkt_now().date()
+        today_mask = df["datetime"].dt.date == today
+        today_data = df[today_mask]
+        if today_data.empty:
+            return 0.0
+        # Accumulated rainfall is the latest value (total from midnight)
+        return float(today_data["rainfall"].iloc[-1])
+    except Exception:
+        return None
+
+
+def get_nowcast_rainfall() -> float | None:
+    """Get rainfall nowcast from HKO Gridded_rainfall_nowcast.csv."""
+    NOWCAST_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/F3/Gridded_rainfall_nowcast.csv"
+    try:
+        r = requests.get(NOWCAST_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        lines = r.text.strip().split("\n")
+        if len(lines) < 2:
+            return None
+        # Parse last non-empty line for latest nowcast value
+        for line in reversed(lines):
+            parts = line.strip().split(",")
+            if len(parts) >= 2 and parts[-1]:
+                try:
+                    return float(parts[-1])
+                except ValueError:
+                    continue
+        return None
+    except Exception:
+        return None
