@@ -4,7 +4,6 @@ import { fetchEvent, fetchTodayEvent, fetchPredictions, fetchWeatherNow } from "
 import ModelGrid, { LABEL_MAP } from "../components/ModelGrid"
 import BucketChart from "../components/BucketChart"
 import ComparisonChart from "../components/ComparisonChart"
-import WeatherCards from "../components/WeatherCards"
 import type { ModelPrediction } from "../types"
 import { Eye, EyeOff, ChevronDown, GitCompare } from "lucide-react"
 
