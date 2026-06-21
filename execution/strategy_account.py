@@ -243,6 +243,7 @@ def migrate_from_portfolios(
                 label=pdef.get("label", sk),
                 model=model,
                 capital=cap_per,
+                initial_capital=cap_per,
                 market_template="hk-tmax",
                 status="paused",
                 scheduler_on=False,
