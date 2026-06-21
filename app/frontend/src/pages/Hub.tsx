@@ -14,27 +14,27 @@ export default function Hub() {
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [order, setOrder] = useState<string[] | null>(null)
   const [isMinTemp, setIsMinTemp] = useState(false)
-    const [dropdownOpen, setDropdownOpen] = useState(false)
-    const [weatherDropdownOpen, setWeatherDropdownOpen] = useState(false)
-    const [compareMode, setCompareMode] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [weatherDropdownOpen, setWeatherDropdownOpen] = useState(false)
+  const [compareMode, setCompareMode] = useState(false)
 
-   const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
-     try {
-       const saved = localStorage.getItem("visibleModelKeys");
-       return saved ? new Set(JSON.parse(saved)) : null;
-     } catch {
-       return null;
-     }
-   });
+  const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
+    try {
+      const saved = localStorage.getItem("visibleModelKeys");
+      return saved ? new Set(JSON.parse(saved)) : null;
+    } catch {
+      return null;
+    }
+  });
 
-const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
-      try {
-        const saved = localStorage.getItem("weatherElements");
-        return saved ? new Set(JSON.parse(saved)) : new Set(["current_temp", "max_so_far", "min_so_far", "rain_60m", "rain_120m", "rain_accumulated", "rain_nowcast"]);
-      } catch {
-        return new Set(["current_temp", "max_so_far", "min_so_far", "rain_60m", "rain_120m", "rain_accumulated", "rain_nowcast"]);
-      }
-    });
+  const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("weatherElements");
+      return saved ? new Set(JSON.parse(saved)) : new Set(["current_temp", "max_so_far", "min_so_far", "rain_60m", "rain_120m", "rain_accumulated", "rain_nowcast"]);
+    } catch {
+      return new Set(["current_temp", "max_so_far", "min_so_far", "rain_60m", "rain_120m", "rain_accumulated", "rain_nowcast"]);
+    }
+  });
 
   const { data, isLoading } = useQuery({
     queryKey: ["predictions", date],
@@ -48,8 +48,6 @@ const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
     enabled: !!date,
     refetchInterval: 120_000,
   })
-
-
 
   const { data: todayEventData } = useQuery({
     queryKey: ["today-event", date],
@@ -169,94 +167,99 @@ const [weatherElements, setWeatherElements] = useState<Set<string>>(() => {
     })
   }, [entries, marketPrices])
 
-return (
-    <div className="flex h-full w-full overflow-hidden">
-      <aside className="w-1/3 min-w-[300px] max-w-[400px] h-full flex flex-col border-r border-slate-800 bg-slate-950/50 backdrop-blur-sm">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between relative">
-          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Model Matrix</h2>
+  return (
+    // 響應式主容器：手機垂直排列，桌面水平排列
+    <div className="flex flex-col md:flex-row h-screen w-full overflow-hidden">
+      
+      {/* 左側欄：手機時寬度 100% 且高度受限，桌面時固定寬度且填滿高度 */}
+      <aside className="w-full md:w-1/3 md:min-w-[300px] md:max-w-[400px] flex flex-col border-b md:border-b-0 md:border-r border-slate-800 bg-slate-950/50 backdrop-blur-sm max-h-[40vh] md:max-h-none">
+        <div className="p-4 border-b border-slate-800 flex items-center justify-between relative gap-2 shrink-0">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider whitespace-nowrap">Model Matrix</h2>
           
-          <div className="relative">
-            <button 
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700"
-            >
-              <Eye size={12} />
-              Models
-              <ChevronDown size={12} />
-            </button>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <button 
+                onClick={() => setDropdownOpen(!dropdownOpen)}
+                className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700 whitespace-nowrap"
+              >
+                <Eye size={12} />
+                <span className="hidden sm:inline">Models</span>
+                <ChevronDown size={12} />
+              </button>
+              
+              {dropdownOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 p-2 max-h-[60vh] overflow-y-auto">
+                    <div className="text-xs text-slate-500 px-2 py-1 border-b border-slate-700 mb-1">Show on Dashboard</div>
+                    {entries.map(([k, _]) => {
+                      const isVisible = visibleKeys ? visibleKeys.has(k) : true;
+                      return (
+                        <button
+                          key={k}
+                          onClick={() => handleToggleVisible(k)}
+                          className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-slate-700 text-sm text-slate-300"
+                        >
+                          {isVisible ? <Eye size={14} className="text-cyan-400" /> : <EyeOff size={14} className="text-slate-500" />}
+                          {LABEL_MAP[k] ?? k}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
             
-            {dropdownOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
-                
-                <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 p-2">
-                  <div className="text-xs text-slate-500 px-2 py-1 border-b border-slate-700 mb-1">Show on Dashboard</div>
-                  {entries.map(([k, _]) => {
-                    const isVisible = visibleKeys ? visibleKeys.has(k) : true;
-                    return (
-                      <button
-                        key={k}
-                        onClick={() => handleToggleVisible(k)}
-                        className="flex items-center gap-2 w-full text-left px-2 py-1.5 rounded hover:bg-slate-700 text-sm text-slate-300"
-                      >
-                        {isVisible ? <Eye size={14} className="text-cyan-400" /> : <EyeOff size={14} className="text-slate-500" />}
-                        {LABEL_MAP[k] ?? k}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+            <button
+              onClick={() => setCompareMode(!compareMode)}
+              className={["flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors whitespace-nowrap",
+                compareMode ? "bg-cyan-500/20 text-cyan-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
+              ].join(" ")}
+              title="Compare multiple models"
+            >
+              <GitCompare size={12} />
+              <span className="hidden sm:inline">Compare</span>
+            </button>
           </div>
-          
-          <button
-            onClick={() => setCompareMode(!compareMode)}
-            className={["flex items-center gap-1 text-xs px-2 py-1 rounded-md transition-colors",
-              compareMode ? "bg-cyan-500/20 text-cyan-400" : "bg-slate-800 text-slate-400 hover:bg-slate-700"
-            ].join(" ")}
-            title="Compare multiple models"
-          >
-            <GitCompare size={12} />
-            <span className="hidden sm:inline">Compare</span>
-          </button>
         </div>
         
         <div className="flex-1 overflow-y-auto p-3 space-y-3">
-           {isLoading ? (
-             <div className="space-y-3">
-               {[1, 2, 3].map((i) => (
-                 <div key={i} className="h-24 rounded-lg shimmer-card" />
-               ))}
-             </div>
-           ) : (
-             <ModelGrid
-               models={visibleModels}
-               activeKey={finalActiveKey}
-               visibleKeys={visibleKeys}
-               onSelect={(k) => setActiveKey(k)}
-               onReorder={(keys) => setOrder(keys)}
-               onToggleVisible={handleToggleVisible}
-             />
-           )}
-         </div>
+          {isLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-24 rounded-lg shimmer-card" />
+              ))}
+            </div>
+          ) : (
+            <ModelGrid
+              models={visibleModels}
+              activeKey={finalActiveKey}
+              visibleKeys={visibleKeys}
+              onSelect={(k) => setActiveKey(k)}
+              onReorder={(keys) => setOrder(keys)}
+              onToggleVisible={handleToggleVisible}
+            />
+          )}
+        </div>
       </aside>
 
-      <main className="flex-1 h-full overflow-y-auto p-8">
-        <header className="flex justify-between items-center mb-8">
+      {/* 右側主舞台：手機時 padding 較小 */}
+      <main className="flex-1 w-full h-full overflow-y-auto p-4 md:p-8">
+        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-50">Weather Hub</h1>
             <p className="text-sm text-slate-500">{subtitle}</p>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="relative">
+          <div className="flex items-center gap-4 w-full sm:w-auto">
+            <div className="relative flex-1 sm:flex-none">
               <input
                 type="date"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
-                className="bg-slate-900/50 border border-slate-700 text-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-cyan-500 transition-colors"
+                className="w-full bg-slate-900/50 border border-slate-700 text-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-cyan-500 transition-colors"
               />
             </div>
-            <div className="flex gap-1 bg-slate-900/50 p-1 rounded-full border border-slate-800">
+            <div className="flex gap-1 bg-slate-900/50 p-1 rounded-full border border-slate-800 shrink-0">
               <button
                 className={[
                   "px-4 py-1.5 rounded-full text-xs font-semibold transition-all",
@@ -279,6 +282,7 @@ return (
           </div>
         </header>
 
+        {/* Current Weather 區塊 */}
         <section className="mb-8">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Current Weather</h2>
@@ -288,13 +292,13 @@ return (
                 className="flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-slate-800 text-slate-300 hover:bg-slate-700"
               >
                 <Eye size={12} />
-                Elements
+                <span className="hidden sm:inline">Elements</span>
                 <ChevronDown size={12} />
               </button>
               {weatherDropdownOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setWeatherDropdownOpen(false)} />
-                  <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 p-2">
+                  <div className="absolute right-0 top-full mt-2 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-20 p-2 max-h-[60vh] overflow-y-auto">
                     <div className="text-xs text-slate-500 px-2 py-1 border-b border-slate-700 mb-1">Show Elements</div>
                     {Object.entries(weatherElems).map(([key, { label }]) => {
                       const isVisible = weatherElements.has(key)
@@ -314,39 +318,43 @@ return (
               )}
             </div>
           </div>
-<div className="grid grid-cols-2 md:grid-cols-8 gap-4">
-             {Object.entries(weatherElems).map(([key, { label, value, color, border }]) => {
-               if (!weatherElements.has(key)) return null
-               return (
-                 <div key={key} className={`bg-slate-900/40 border-t-2 ${border} rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1`}>
-                   <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
-                   <div className={`text-2xl font-bold ${color} tabular-nums`}>{value}</div>
-                 </div>
-               )
-             })}
-           </div>
+          
+          {/* 天氣卡片網格：手機 2 欄，平板 3 欄，桌面 4 欄，大螢幕 5 欄 */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            {Object.entries(weatherElems).map(([key, { label, value, color, border }]) => {
+              if (!weatherElements.has(key)) return null
+              return (
+                <div key={key} className={`bg-slate-900/40 border-t-2 ${border} rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1`}>
+                  <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">{label}</div>
+                  <div className={`text-xl md:text-2xl font-bold ${color} tabular-nums`}>{value}</div>
+                </div>
+              )
+            })}
+          </div>
         </section>
 
+        {/* KPI 區塊 */}
         <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <div className="bg-slate-900/40 border-t-2 border-cyan-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
             <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Expected Value</div>
-            <div className="text-2xl font-bold text-cyan-400 tabular-nums">{expectedValue}°C</div>
+            <div className="text-xl md:text-2xl font-bold text-cyan-400 tabular-nums">{expectedValue}°C</div>
           </div>
           <div className="bg-slate-900/40 border-t-2 border-violet-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
             <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Market Avg</div>
-            <div className="text-2xl font-bold text-violet-400 tabular-nums">${marketAvg}</div>
+            <div className="text-xl md:text-2xl font-bold text-violet-400 tabular-nums">${marketAvg}</div>
           </div>
           <div className="bg-slate-900/40 border-t-2 border-emerald-500/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
             <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Edge</div>
-            <div className="text-2xl font-bold text-emerald-400 tabular-nums">--</div>
+            <div className="text-xl md:text-2xl font-bold text-emerald-400 tabular-nums">--</div>
           </div>
           <div className="bg-slate-900/40 border-t-2 border-slate-600/50 rounded-xl p-4 backdrop-blur-sm transition-all duration-300 hover:bg-slate-800/40 hover:-translate-y-1">
             <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Kelly Bet</div>
-            <div className="text-2xl font-bold text-slate-100 tabular-nums">--</div>
+            <div className="text-xl md:text-2xl font-bold text-slate-100 tabular-nums">--</div>
           </div>
         </section>
 
-        <section className="bg-slate-900/40 rounded-2xl border border-slate-800 p-6 backdrop-blur-md shadow-[0_0_30px_-5px_rgba(6,182,212,0.1)] transition-all duration-300">
+        {/* 圖表區塊 */}
+        <section className="bg-slate-900/40 rounded-2xl border border-slate-800 p-4 md:p-6 backdrop-blur-md shadow-[0_0_30px_-5px_rgba(6,182,212,0.1)] transition-all duration-300">
           <div className="flex justify-between items-center mb-6">
             <div>
               <h2 className="text-lg font-semibold text-slate-100">
@@ -364,11 +372,11 @@ return (
             <div className="flex gap-4 text-xs">
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-sm bg-cyan-500"></span>
-                <span className="text-slate-400">Model Probability</span>
+                <span className="text-slate-400">Model</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-sm bg-violet-500"></span>
-                <span className="text-slate-400">Market Price</span>
+                <span className="text-slate-400">Market</span>
               </div>
             </div>
           </div>
