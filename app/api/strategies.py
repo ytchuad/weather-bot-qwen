@@ -24,6 +24,7 @@ class StrategyCreate(BaseModel):
     label: str
     model: str = "baseline"
     capital: float = 10000.0
+    initial_capital: float | None = None
     market_template: str = "hk-tmax"
     from_strategy_key: str | None = None
 
@@ -56,13 +57,15 @@ def get_portfolio():
     accounts = store.list()
     
     total_capital = sum(a.capital for a in accounts)
-    total_pnl = sum(a.capital - 10000 for a in accounts)  # Simplified - actual would need historical tracking
+    total_initial = sum(a.initial_capital for a in accounts)
+    total_pnl = total_capital - total_initial
+    total_return_pct = (total_pnl / total_initial * 100) if total_initial > 0 else 0
     active_count = len([a for a in accounts if a.status == "running" and a.scheduler_on])
     
     return {
         "total_capital": total_capital,
         "total_pnl": total_pnl,
-        "total_return_pct": (total_pnl / 10000) * 100 if total_capital > 0 else 0,
+        "total_return_pct": total_return_pct,
         "active_strategies": active_count,
         "count": len(accounts),
     }
@@ -86,11 +89,13 @@ def create_strategy(req: StrategyCreate):
     if store.load(req.id):
         raise HTTPException(status_code=400, detail="Strategy already exists")
     
+    initial = req.initial_capital if req.initial_capital is not None else req.capital
     acct = StrategyAccount(
         id=req.id,
         label=req.label,
         model=req.model,
         capital=req.capital,
+        initial_capital=initial,
         market_template=req.market_template,
         from_strategy_key=req.from_strategy_key,
     )
@@ -123,6 +128,30 @@ def get_strategy_trades(sid: str, limit: int = 50):
     """Get recent trades for a strategy."""
     # This would integrate with paper_trade_audit.parquet in real implementation
     return {"trades": []}
+
+
+@router.post("/{sid}/reset")
+def reset_strategy(sid: str):
+    """Reset strategy capital to initial value, clear trade history."""
+    store = StrategyAccountStore()
+    acct = store.load(sid)
+    if not acct:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    
+    acct.capital = acct.initial_capital
+    acct.last_run = None
+    store.save(acct)
+    return {"status": "reset", "strategy": acct.to_dict()}
+
+
+@router.delete("/{sid}")
+def delete_strategy(sid: str):
+    """Delete a strategy account."""
+    store = StrategyAccountStore()
+    if not store.load(sid):
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    store.delete(sid)
+    return {"status": "deleted", "id": sid}
 
 
 @router.post("/suggest", response_model=SuggestResponse)

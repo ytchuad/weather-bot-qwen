@@ -12,11 +12,10 @@ self-contained:
 
 from __future__ import annotations
 
-import copy
 import json
 import logging
 from dataclasses import dataclass, field, asdict
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +59,8 @@ class StrategyAccount:
         Model key to use (e.g. ``"baseline"``, ``"rain_nowcast"``, ``"model_a"``).
     capital : float
         Virtual capital allocated to this strategy.
+    initial_capital : float
+        Starting capital for ROI tracking.
     market_template : str
         Market template (e.g. ``"hk-tmax"``) resolved to a daily Polymarket
         event slug at runtime.
@@ -82,6 +83,7 @@ class StrategyAccount:
     label: str = ""
     model: str = "baseline"
     capital: float = 10_000.0
+    initial_capital: float = 10_000.0
     market_template: str = "hk-tmax"
     status: str = "paused"
     scheduler_on: bool = False
@@ -97,10 +99,17 @@ class StrategyAccount:
         self.params = merged
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        # Ensure initial_capital is included
+        if "initial_capital" not in d:
+            d["initial_capital"] = self.initial_capital
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> StrategyAccount:
+        # Backward compatibility: if initial_capital missing, use capital
+        if "initial_capital" not in d and "capital" in d:
+            d["initial_capital"] = d["capital"]
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 

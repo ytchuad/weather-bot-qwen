@@ -5,7 +5,9 @@ import {
   getPortfolio, 
   getStrategies, 
   createStrategy, 
-  updateStrategy
+  updateStrategy,
+  resetStrategy,
+  deleteStrategy
 } from "../api/client"
 import type { Suggestion, StrategyCreate, Strategy } from "../types"
 import { TrendingUp, Wallet, Percent, Activity, Plus, Beaker, Settings2 } from "lucide-react"
@@ -58,9 +60,19 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strategies"] }),
   })
 
+  const resetMutation = useMutation({
+    mutationFn: (id: string) => resetStrategy(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strategies"] }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => deleteStrategy(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strategies"] }),
+  })
+
   const isRunning = strategy.status === "running"
-  const pnl = strategy.capital - 10000 // 假設初始 10000，需與後端對齊
-  const roi = (pnl / 10000) * 100
+  const pnl = strategy.capital - strategy.initial_capital
+  const roi = strategy.initial_capital > 0 ? (pnl / strategy.initial_capital) * 100 : 0
 
   return (
     <div className="bg-slate-900/40 rounded-xl border border-slate-800 p-5 backdrop-blur-md transition-all duration-300 hover:bg-slate-800/40">
@@ -77,7 +89,7 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
         </button>
       </div>
       
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 mb-4">
         <div>
           <div className="text-xs text-slate-500 uppercase tracking-wider mb-1">Capital</div>
           <div className="text-xl font-bold text-slate-100 tabular-nums">${strategy.capital.toLocaleString()}</div>
@@ -90,9 +102,30 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
         </div>
       </div>
       
-      <div className="mt-4 pt-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-500">
-        <span>Kelly: {(strategy.params.kelly_fraction * 100).toFixed(0)}%</span>
-        <span>Market: {strategy.market_template}</span>
+      <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
+        <span className="text-xs text-slate-500">
+          Init: ${strategy.initial_capital.toLocaleString()} | Kelly: {(strategy.params.kelly_fraction * 100).toFixed(0)}%
+        </span>
+        <div className="flex gap-2">
+          <button 
+            onClick={() => resetMutation.mutate(strategy.id)}
+            className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-cyan-400"
+            title="Reset to initial capital"
+          >
+            Reset
+          </button>
+          <button 
+            onClick={() => {
+              if (confirm(`Delete strategy "${strategy.label}"?`)) {
+                deleteMutation.mutate(strategy.id)
+              }
+            }}
+            className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-rose-400"
+            title="Delete strategy"
+          >
+            Delete
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -71,6 +71,7 @@ export interface Strategy {
   label: string
   model: string
   capital: number
+  initial_capital: number
   market_template: string
   status: string
   scheduler_on: boolean
@@ -89,6 +90,7 @@ export interface StrategyCreate {
   label: string
   model?: string
   capital?: number
+  initial_capital?: number
   market_template?: string
   from_strategy_key?: string | null
 }

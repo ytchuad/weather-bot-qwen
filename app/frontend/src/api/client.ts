@@ -132,4 +132,15 @@ export function updateStrategy(
   })
 }
 
+export function resetStrategy(id: string): Promise<{ status: string; strategy: Strategy }> {
+  return post(`/strategies/${id}/reset`, {})
+}
+
+export function deleteStrategy(id: string): Promise<{ status: string; id: string }> {
+  return fetch(`${BASE}/strategies/${id}`, { method: "DELETE" }).then((res) => {
+    if (!res.ok) throw new Error(`DELETE strategies/${id}: ${res.status}`)
+    return res.json()
+  })
+}
+
 
