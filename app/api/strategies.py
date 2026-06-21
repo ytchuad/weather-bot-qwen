@@ -34,7 +34,8 @@ def suggest_strategy(req: SuggestRequest):
     rain_kwargs = compute_rain_kwargs(_sd, hkt_now())
     markets = fetch_event_markets(target_date_str, is_min_temp=req.is_min_temp)
 
-    forecast_aws = hko.get("forecast") if hko else None
+    forecast_key = "forecast_min" if req.is_min_temp else "forecast_max"
+    forecast_aws = hko.get(forecast_key) if hko else None
 
     results = run_all_models(
         target_date=target_date,
