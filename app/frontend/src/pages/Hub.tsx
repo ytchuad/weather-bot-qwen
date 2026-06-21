@@ -81,6 +81,13 @@ export default function Hub() {
   const models = data?.models
   const entries = useMemo(() => (models ? Object.entries(models) : []), [models])
 
+  // 初始化：當 visibleKeys 為 null 時，設定預設值為所有模型
+  useEffect(() => {
+    if (visibleKeys === null && entries.length > 0) {
+      setVisibleKeys(new Set(entries.map(([k]) => k)))
+    }
+  }, [entries, visibleKeys])
+
   useEffect(() => {
     if (activeKey && models && !models[activeKey]) setActiveKey(null)
   }, [activeKey, models])
