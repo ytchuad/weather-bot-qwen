@@ -64,8 +64,8 @@ export function fetchEvent(slug: string, isMinTemp = false): Promise<EventMarket
   return get(`/markets/event/${slug}?is_min_temp=${isMinTemp}`)
 }
 
-export function fetchTodayEvent(date?: string): Promise<{ event: EventSearchResponse["events"][number] }> {
-  const q = date ? `?date=${encodeURIComponent(date)}` : ""
+export function fetchTodayEvent(date?: string, isMinTemp = false): Promise<{ event: EventSearchResponse["events"][number] }> {
+  const q = date ? `?date=${encodeURIComponent(date)}&is_min_temp=${isMinTemp}` : ""
   return get(`/markets/today-event${q}`)
 }
 

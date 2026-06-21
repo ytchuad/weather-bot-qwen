@@ -58,6 +58,7 @@ export default function ComparisonChart({
       },
       yAxis: {
         type: "value",
+        max: 100, // 關鍵修正：強制 Y 軸最大值為 100
         axisLabel: { color: "#64748b", fontSize: 12, formatter: "{value}%" },
         splitLine: { lineStyle: { color: "#1e293b", type: "dashed" } },
       },
@@ -67,7 +68,11 @@ export default function ComparisonChart({
 
   return (
     <div style={{ height: 350 }}>
-      <ReactECharts option={option} style={{ height: "100%", width: "100%" }} />
+      <ReactECharts 
+        option={option} 
+        notMerge={true} 
+        style={{ height: "100%", width: "100%" }} 
+      />
     </div>
   )
 }

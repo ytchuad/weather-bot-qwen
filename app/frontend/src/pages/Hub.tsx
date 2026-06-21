@@ -41,8 +41,8 @@ export default function Hub() {
   });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["predictions", date],
-    queryFn: () => fetchPredictions(date, false),
+    queryKey: ["predictions", date, isMinTemp],
+    queryFn: () => fetchPredictions(date, isMinTemp),
     refetchInterval: 120_000,
   })
 
@@ -54,8 +54,8 @@ export default function Hub() {
   })
 
   const { data: todayEventData } = useQuery({
-    queryKey: ["today-event", date],
-    queryFn: () => fetchTodayEvent(date),
+    queryKey: ["today-event", date, isMinTemp],
+    queryFn: () => fetchTodayEvent(date, isMinTemp),
     enabled: !!date,
     refetchInterval: 120_000,
   })

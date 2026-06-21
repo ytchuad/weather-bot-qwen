@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
 
 from app.api.cache import market_cache
@@ -69,7 +67,7 @@ def get_event(slug: str, is_min_temp: bool = False):
     }
 
 
-def _resolve_today_event(date_str: str | None = None):
+def _resolve_today_event(date_str: str | None = None, is_min_temp: bool = False):
     """Resolve an HK temperature event for the given date, without Streamlit."""
     from datetime import date as date_type
     from app.services.market_service import search_events, parse_date_from_event
@@ -87,7 +85,7 @@ def _resolve_today_event(date_str: str | None = None):
     except Exception:
         return None
 
-    def is_min_temp(ev):
+    def is_min_temp_fn(ev):
         title = (ev.get("title") or "").lower()
         slug = (ev.get("slug") or "").lower()
         return "lowest" in title or "lowest" in slug
@@ -97,27 +95,32 @@ def _resolve_today_event(date_str: str | None = None):
         d = parse_date_from_event(ev.get("title", ""), ev.get("slug", ""))
         if d is None:
             continue
-        kind = "tmin" if is_min_temp(ev) else "tmax"
+        kind = "tmin" if is_min_temp_fn(ev) else "tmax"
         by_date.setdefault(d, {})[kind] = ev
 
     bucket = by_date.get(target_date, {})
-    ev = bucket.get("tmax") or bucket.get("tmin")
+    if is_min_temp:
+        ev = bucket.get("tmin") or bucket.get("tmax")
+    else:
+        ev = bucket.get("tmax") or bucket.get("tmin")
     if ev is None:
         future_dates = sorted([d for d in by_date if d > target_date])
         if future_dates:
-            ev = by_date[future_dates[0]].get("tmax") or by_date[future_dates[0]].get("tmin")
+            future_bucket = by_date[future_dates[0]]
+            ev = future_bucket.get("tmin" if is_min_temp else "tmax") or future_bucket.get("tmax" if is_min_temp else "tmin")
         if ev is None:
             past_dates = sorted([d for d in by_date if d < target_date], reverse=True)
             if past_dates:
-                ev = by_date[past_dates[0]].get("tmax") or by_date[past_dates[0]].get("tmin")
+                past_bucket = by_date[past_dates[0]]
+                ev = past_bucket.get("tmin" if is_min_temp else "tmax") or past_bucket.get("tmax" if is_min_temp else "tmin")
     return ev
 
 
 @router.get("/today-event")
 @market_cache
-def get_today_event(date: str | None = None):
-    """Return today's HK temperature event (Tmax preferred) with event details."""
-    ev = _resolve_today_event(date)
+def get_today_event(date: str | None = None, is_min_temp: bool = False):
+    """Return today's HK temperature event with event details. Prefers tmin when is_min_temp=True."""
+    ev = _resolve_today_event(date, is_min_temp)
     if ev is None:
         raise HTTPException(status_code=404, detail="No temperature event found for date")
     return {"event": ev}
