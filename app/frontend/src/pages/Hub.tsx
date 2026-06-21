@@ -21,7 +21,11 @@ export default function Hub() {
   const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
     try {
       const saved = localStorage.getItem("visibleModelKeys");
-      return saved ? new Set(JSON.parse(saved)) : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.length > 0 ? new Set(parsed) : null;
+      }
+      return null;
     } catch {
       return null;
     }
