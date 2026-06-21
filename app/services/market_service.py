@@ -10,15 +10,11 @@ import json
 import logging
 import re
 from datetime import date, datetime
-from typing import Any
-
 import numpy as np
-import pandas as pd
 import requests
 from cachetools import TTLCache, cached
 
 from ..config import (
-    PM_GAMMA_API,
     PM_SEARCH_URL,
     PM_EVENTS_URL,
     TMAX_BUCKETS,
@@ -39,10 +35,6 @@ logger = logging.getLogger(__name__)
 
 def parse_date_from_event(title: str, slug: str) -> date | None:
     """Extract a target date from event title / slug strings."""
-    months = (
-        "January|February|March|April|May|June|"
-        "July|August|September|October|November|December"
-    )
     # numeric "6-13" / "6/13" style
     m = re.search(r"(\d{1,2})[—\-/](\d{1,2})", title.replace("'", ""))
     if m:
@@ -316,23 +308,39 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
 def bucket_for_temp(temp: float, is_min_temp: bool) -> str:
     """Return bucket label for a given temperature value."""
     if is_min_temp:
-        if temp < 22: return "<22"
-        if temp < 24: return "22-24"
-        if temp < 26: return "24-26"
-        if temp < 28: return "26-28"
+        if temp < 22:
+            return "<22"
+        if temp < 24:
+            return "22-24"
+        if temp < 26:
+            return "24-26"
+        if temp < 28:
+            return "26-28"
         return ">=28"
-    if temp < 23: return "<23"
-    if temp < 24: return "23-24"
-    if temp < 25: return "24-25"
-    if temp < 26: return "25-26"
-    if temp < 27: return "26-27"
-    if temp < 28: return "27-28"
-    if temp < 29: return "28-29"
-    if temp < 30: return "29-30"
-    if temp < 31: return "30-31"
-    if temp < 32: return "31-32"
-    if temp < 33: return "32-33"
-    if temp < 34: return "33-34"
+    if temp < 23:
+        return "<23"
+    if temp < 24:
+        return "23-24"
+    if temp < 25:
+        return "24-25"
+    if temp < 26:
+        return "25-26"
+    if temp < 27:
+        return "26-27"
+    if temp < 28:
+        return "27-28"
+    if temp < 29:
+        return "28-29"
+    if temp < 30:
+        return "29-30"
+    if temp < 31:
+        return "30-31"
+    if temp < 32:
+        return "31-32"
+    if temp < 33:
+        return "32-33"
+    if temp < 34:
+        return "33-34"
     return ">=34"
 
 
