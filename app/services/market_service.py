@@ -134,7 +134,7 @@ def _parse_outcome_prices(market: dict) -> tuple[float | None, float | None]:
 def _bucket_bounds(bucket_label: str) -> tuple[float, float]:
     """Map canonical bucket label to (lower, upper) float bounds.
 
-    Tmin: <12 → (-inf, 12), 12-14 → (12, 14), …, >=28 → (28, inf)
+    Tmin: <22 → (-inf, 22), 22-24 → (22, 24), …, >=28 → (28, inf)
     Tmax: <23 → (-inf, 23), 23-24 → (23, 24), …, >=34 → (34, inf)
     """
     stripped = bucket_label.strip()
@@ -165,10 +165,11 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
     upper = any(kw in source.lower() for kw in ["or higher", "greater than", "higher", "above"])
 
     if is_min_temp:
+        # Polymarket TMIN uses 22-24, 24-26, 26-28, >=28 buckets
         if lower:
-            if temp_val <= 12:
-                return "<12"
-            for lo in range(12, 28, 2):
+            if temp_val <= 22:
+                return "22-24"  # or could be <22 if bucket exists
+            for lo in range(22, 28, 2):
                 hi = lo + 2
                 if temp_val <= hi:
                     return f"{lo}-{hi}"
@@ -176,18 +177,18 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
         if upper:
             if temp_val >= 28:
                 return ">=28"
-            for lo in range(12, 28, 2):
+            for lo in range(22, 28, 2):
                 hi = lo + 2
                 if temp_val >= lo:
                     return f"{lo}-{hi}"
-            return "<12"
-        for lo in range(12, 28, 2):
+            return "22-24"
+        for lo in range(22, 28, 2):
             hi = lo + 2
             if lo <= temp_val < hi:
                 return f"{lo}-{hi}"
         if temp_val >= 28:
             return ">=28"
-        return "<12"
+        return "22-24"
     else:
         if lower:
             if temp_val <= 23:
@@ -315,12 +316,7 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
 def bucket_for_temp(temp: float, is_min_temp: bool) -> str:
     """Return bucket label for a given temperature value."""
     if is_min_temp:
-        if temp < 12: return "<12"
-        if temp < 14: return "12-14"
-        if temp < 16: return "14-16"
-        if temp < 18: return "16-18"
-        if temp < 20: return "18-20"
-        if temp < 22: return "20-22"
+        if temp < 22: return "<22"
         if temp < 24: return "22-24"
         if temp < 26: return "24-26"
         if temp < 28: return "26-28"
