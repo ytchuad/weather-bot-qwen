@@ -5,8 +5,8 @@ from datetime import date as date_type
 
 from fastapi import APIRouter, HTTPException
 
-from app.api.cache import prediction_cache, weather_cache
-from app.api.schemas import ModelPrediction, PredictionRequest, PredictionResponse
+from app.api.cache import prediction_cache
+from app.api.schemas import ModelPrediction, PredictionResponse
 
 logger = logging.getLogger(__name__)
 
