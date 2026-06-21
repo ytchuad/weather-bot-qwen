@@ -2,16 +2,127 @@ from __future__ import annotations
 
 import logging
 from datetime import date as date_type
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from app.api.cache import prediction_cache
 from app.api.schemas import Suggestion, SuggestRequest, SuggestResponse
 from app.services.model_service import calculate_kelly, run_all_models
+from execution.strategy_account import StrategyAccount, StrategyAccountStore
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/strategies", tags=["Strategies"])
+
+
+# ── Strategy Schemas ───────────────────────────────────────────────────────────
+
+class StrategyCreate(BaseModel):
+    id: str
+    label: str
+    model: str = "baseline"
+    capital: float = 10000.0
+    market_template: str = "hk-tmax"
+    from_strategy_key: str | None = None
+
+
+class StrategyUpdate(BaseModel):
+    status: str | None = None
+    scheduler_on: bool | None = None
+    capital: float | None = None
+    params: dict[str, Any] | None = None
+
+
+class StrategyTrade(BaseModel):
+    bucket: str
+    entry_time: str
+    exit_time: str | None
+    side: str
+    entry_price: float
+    exit_price: float | None
+    quantity: float
+    pnl: float | None
+    reason: str | None
+
+
+# ── Portfolio Endpoint ───────────────────────────────────────────────────────
+
+@router.get("/portfolio")
+def get_portfolio():
+    """Get aggregate portfolio statistics."""
+    store = StrategyAccountStore()
+    accounts = store.list()
+    
+    total_capital = sum(a.capital for a in accounts)
+    total_pnl = sum(a.capital - 10000 for a in accounts)  # Simplified - actual would need historical tracking
+    active_count = len([a for a in accounts if a.status == "running" and a.scheduler_on])
+    
+    return {
+        "total_capital": total_capital,
+        "total_pnl": total_pnl,
+        "total_return_pct": (total_pnl / 10000) * 100 if total_capital > 0 else 0,
+        "active_strategies": active_count,
+        "count": len(accounts),
+    }
+
+
+# ── Strategy Account Endpoints ────────────────────────────────────────────────
+
+@router.get("")
+def list_strategies():
+    """List all strategy accounts."""
+    store = StrategyAccountStore()
+    return {"strategies": [a.to_dict() for a in store.list()]}
+
+
+@router.post("")
+def create_strategy(req: StrategyCreate):
+    """Create a new strategy account."""
+    store = StrategyAccountStore()
+    
+    # Check if already exists
+    if store.load(req.id):
+        raise HTTPException(status_code=400, detail="Strategy already exists")
+    
+    acct = StrategyAccount(
+        id=req.id,
+        label=req.label,
+        model=req.model,
+        capital=req.capital,
+        market_template=req.market_template,
+        from_strategy_key=req.from_strategy_key,
+    )
+    store.save(acct)
+    return {"status": "created", "strategy": acct.to_dict()}
+
+
+@router.patch("/{sid}")
+def update_strategy(sid: str, req: StrategyUpdate):
+    """Update strategy account status or parameters."""
+    store = StrategyAccountStore()
+    acct = store.load(sid)
+    if not acct:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    
+    if req.status:
+        acct.status = req.status
+        acct.scheduler_on = req.status == "running"
+    if req.capital:
+        acct.capital = req.capital
+    if req.params:
+        acct.params.update(req.params)
+    
+    store.save(acct)
+    return {"status": "updated", "strategy": acct.to_dict()}
+
+
+@router.get("/{sid}/trades")
+def get_strategy_trades(sid: str, limit: int = 50):
+    """Get recent trades for a strategy."""
+    # This would integrate with paper_trade_audit.parquet in real implementation
+    return {"trades": []}
 
 
 @router.post("/suggest", response_model=SuggestResponse)

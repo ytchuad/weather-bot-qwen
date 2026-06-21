@@ -23,6 +23,10 @@ import type {
   BucketDef,
   EventMarket,
   EventSearchResponse,
+  Strategy,
+  StrategyCreate,
+  StrategyUpdate,
+  StrategyTrade,
 } from "../types"
 
 export function fetchPredictions(
@@ -99,4 +103,35 @@ export function getBacktestResult(taskId: string) {
 
 export function checkHealth() {
   return get("/health")
+}
+
+// Strategy endpoints
+export function getPortfolio(): Promise<PortfolioStats> {
+  return get("/strategies/portfolio")
+}
+
+export function getStrategies(): Promise<{ strategies: Strategy[] }> {
+  return get("/strategies")
+}
+
+export function createStrategy(req: StrategyCreate): Promise<{ status: string; strategy: Strategy }> {
+  return post("/strategies", req)
+}
+
+export function updateStrategy(
+  id: string,
+  req: StrategyUpdate,
+): Promise<{ status: string; strategy: Strategy }> {
+  return fetch(`${BASE}/strategies/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  }).then((res) => {
+    if (!res.ok) throw new Error(`PATCH strategies/${id}: ${res.status}`)
+    return res.json()
+  })
+}
+
+export function getStrategyTrades(id: string, limit = 50): Promise<{ trades: StrategyTrade[] }> {
+  return get(`/strategies/${id}/trades?limit=${limit}`)
 }

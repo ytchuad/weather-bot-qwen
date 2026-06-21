@@ -64,3 +64,58 @@ export interface EventMarket {
 export interface EventSearchResponse {
   events: Array<{ slug: string; title: string }>
 }
+
+// Strategy Types
+export interface Strategy {
+  id: string
+  label: string
+  model: string
+  capital: number
+  market_template: string
+  status: string
+  scheduler_on: boolean
+  last_run: string | null
+  params: {
+    bias: number
+    std_mult: number
+    kelly_fraction: number
+  }
+  from_strategy_key?: string | null
+  gate_config_override?: Record<string, unknown> | null
+}
+
+export interface StrategyCreate {
+  id: string
+  label: string
+  model?: string
+  capital?: number
+  market_template?: string
+  from_strategy_key?: string | null
+}
+
+export interface StrategyUpdate {
+  status?: string
+  scheduler_on?: boolean
+  capital?: number
+  params?: Record<string, unknown>
+}
+
+export interface PortfolioStats {
+  total_capital: number
+  total_pnl: number
+  total_return_pct: number
+  active_strategies: number
+  count: number
+}
+
+export interface StrategyTrade {
+  bucket: string
+  entry_time: string
+  exit_time: string | null
+  side: string
+  entry_price: number
+  exit_price: number | null
+  quantity: number
+  pnl: number | null
+  reason: string | null
+}
