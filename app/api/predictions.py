@@ -49,7 +49,7 @@ def get_predictions(
     bias: float = 0.0,
     std_mult: float = 1.0,
 ):
-    from app.services.market_service import fetch_event_markets
+    from app.services.market_service import fetch_event_markets, _resolve_today_event
     from app.services.model_service import run_all_models
     from app.services.weather_service import fetch_hko_data, hkt_now
 
@@ -63,7 +63,10 @@ def get_predictions(
     state = _get_intraday_state_for(target_date_str)
     rain_kwargs = _compute_rain_kwargs_for(target_date_str)
 
-    markets = fetch_event_markets(target_date_str, is_min_temp=is_min_temp)
+    markets = []
+    ev = _resolve_today_event(target_date_str, is_min_temp)
+    if ev and "slug" in ev:
+        markets = fetch_event_markets(ev["slug"], is_min_temp=is_min_temp)
 
     forecast_key = "forecast_min" if is_min_temp else "forecast_max"
     forecast_aws = hko.get(forecast_key) if hko else None
