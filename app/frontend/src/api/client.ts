@@ -26,7 +26,7 @@ import type {
   Strategy,
   StrategyCreate,
   StrategyUpdate,
-  StrategyTrade,
+  PortfolioStats,
 } from "../types"
 
 export function fetchPredictions(
@@ -132,6 +132,4 @@ export function updateStrategy(
   })
 }
 
-export function getStrategyTrades(id: string, limit = 50): Promise<{ trades: StrategyTrade[] }> {
-  return get(`/strategies/${id}/trades?limit=${limit}`)
-}
+

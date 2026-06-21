@@ -5,7 +5,7 @@ from datetime import date as date_type
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.api.cache import prediction_cache
 from app.api.schemas import Suggestion, SuggestRequest, SuggestResponse

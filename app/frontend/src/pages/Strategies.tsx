@@ -5,10 +5,9 @@ import {
   getPortfolio, 
   getStrategies, 
   createStrategy, 
-  updateStrategy,
-  getStrategyTrades 
+  updateStrategy
 } from "../api/client"
-import type { Suggestion, Strategy, StrategyCreate } from "../types"
+import type { Suggestion, StrategyCreate } from "../types"
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
