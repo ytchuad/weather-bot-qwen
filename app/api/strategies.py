@@ -125,9 +125,36 @@ def update_strategy(sid: str, req: StrategyUpdate):
 
 @router.get("/{sid}/trades")
 def get_strategy_trades(sid: str, limit: int = 50):
-    """Get recent trades for a strategy."""
-    # This would integrate with paper_trade_audit.parquet in real implementation
-    return {"trades": []}
+    """Get recent trades and decisions for a strategy."""
+    import pandas as pd
+    from pathlib import Path
+    
+    audit_path = Path("data/paper_trade_audit.parquet")
+    if not audit_path.exists():
+        return {"trades": []}
+    
+    try:
+        df = pd.read_parquet(audit_path)
+        if "strategy_key" in df.columns:
+            df = df[df["strategy_key"] == sid]
+        elif "sid" in df.columns:
+            df = df[df["sid"] == sid]
+        
+        if "timestamp" in df.columns:
+            df = df.sort_values(by="timestamp", ascending=False)
+        
+        records = df.head(limit).to_dict(orient="records")
+        
+        # Convert NaN to None for JSON serialization
+        for r in records:
+            for k, v in list(r.items()):
+                if pd.isna(v):
+                    r[k] = None
+        
+        return {"trades": records}
+    except Exception as e:
+        logger.error(f"Error reading trades for {sid}: {e}")
+        return {"trades": []}
 
 
 @router.post("/{sid}/reset")

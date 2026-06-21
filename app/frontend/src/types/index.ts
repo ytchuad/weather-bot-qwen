@@ -111,13 +111,24 @@ export interface PortfolioStats {
 }
 
 export interface StrategyTrade {
+  timestamp?: string
+  entry_time?: string
+  model_key?: string
+  selected_model?: string
+  slug?: string
   bucket: string
-  entry_time: string
-  exit_time: string | null
-  side: string
-  entry_price: number
-  exit_price: number | null
-  quantity: number
-  pnl: number | null
-  reason: string | null
+  action?: string
+  side?: string
+  side_after?: string
+  qty_after?: number
+  target_price?: number
+  market_prices?: string
+  entry_reason?: string
+  exit_reason?: string
+  entry_price?: number
+  exit_price?: number | null
+  quantity?: number
+  pnl?: number | null
+  reason?: string | null
+  reason_code?: string
 }

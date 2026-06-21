@@ -9,7 +9,7 @@ import {
   resetStrategy,
   deleteStrategy
 } from "../api/client"
-import type { Suggestion, StrategyCreate, Strategy } from "../types"
+import type { Suggestion, StrategyCreate, Strategy, StrategyTrade } from "../types"
 import { TrendingUp, Wallet, Percent, Activity, Plus, Beaker, Settings2 } from "lucide-react"
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -53,6 +53,7 @@ function PortfolioOverview() {
 // ── 子元件：單一策略卡片 ─────────────────────────────────────────────────────
 function StrategyCard({ strategy }: { strategy: Strategy }) {
   const queryClient = useQueryClient()
+  const [isExpanded, setIsExpanded] = useState(false)
   
   const toggleMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) => 
@@ -70,18 +71,30 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["strategies"] }),
   })
 
+  // 修正：Auto 模型顯示
+  const displayModel = strategy.from_strategy_key?.startsWith("enhanced_v") 
+    ? "Auto (C→B→A)" 
+    : strategy.model
+
   const isRunning = strategy.status === "running"
   const pnl = strategy.capital - strategy.initial_capital
   const roi = strategy.initial_capital > 0 ? (pnl / strategy.initial_capital) * 100 : 0
+
+  // 取得交易紀錄
+  const { data: tradesData, isLoading: tradesLoading } = useQuery({
+    queryKey: ["strategyTrades", strategy.id],
+    queryFn: () => fetch(`/api/strategies/${strategy.id}/trades`).then(r => r.json()),
+    enabled: isExpanded,
+  })
 
   return (
     <div className="bg-slate-900/40 rounded-xl border border-slate-800 p-5 backdrop-blur-md transition-all duration-300 hover:bg-slate-800/40">
       <div className="flex justify-between items-start mb-4">
         <div>
           <h3 className="text-lg font-semibold text-slate-100">{strategy.label}</h3>
-          <p className="text-xs text-slate-500 mt-1">Model: {strategy.model}</p>
+          <p className="text-xs text-slate-500 mt-1">Model: {displayModel}</p>
         </div>
-        <button
+        <button 
           onClick={() => toggleMutation.mutate({ id: strategy.id, status: isRunning ? "paused" : "running" })}
           className={`relative w-12 h-6 rounded-full transition-colors ${isRunning ? "bg-emerald-500" : "bg-slate-600"}`}
         >
@@ -108,6 +121,13 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
         </span>
         <div className="flex gap-2">
           <button 
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-violet-400"
+            title="View recent trades"
+          >
+            {isExpanded ? "Hide Trades" : "View Trades"}
+          </button>
+          <button 
             onClick={() => resetMutation.mutate(strategy.id)}
             className="text-xs px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-cyan-400"
             title="Reset to initial capital"
@@ -127,6 +147,37 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
           </button>
         </div>
       </div>
+
+      {/* 交易紀錄展開視圖 */}
+      {isExpanded && (
+        <div className="mt-4 pt-4 border-t border-slate-800 max-h-60 overflow-y-auto">
+          {tradesLoading ? (
+            <div className="text-center text-xs text-slate-500 py-4">Loading...</div>
+          ) : tradesData?.trades?.length > 0 ? (
+            tradesData.trades.map((trade: StrategyTrade, idx: number) => (
+              <div key={idx} className="bg-slate-800/50 p-3 rounded-lg text-xs space-y-1 mb-2">
+                <div className="flex justify-between">
+                  <span className="font-mono text-slate-400">{trade.timestamp || trade.entry_time}</span>
+                  <span className={`font-semibold ${trade.pnl != null && trade.pnl > 0 ? "text-emerald-400" : trade.pnl != null && trade.pnl < 0 ? "text-rose-400" : "text-slate-400"}`}>
+                    {trade.action || trade.side}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-500">
+                  <span>{trade.bucket}</span>
+                  <span>PnL: {trade.pnl != null ? `$${trade.pnl.toFixed(2)}` : "--"}</span>
+                </div>
+                <div className="text-slate-600 italic mt-1 pt-1 border-t border-slate-700 space-y-0.5">
+                  {trade.selected_model && <div>Model Used: {trade.selected_model}</div>}
+                  {trade.entry_reason && <div>Reason: {trade.entry_reason}</div>}
+                  {trade.reason_code && <div>Code: {trade.reason_code}</div>}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center text-xs text-slate-600 py-4">No recent trades</div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
