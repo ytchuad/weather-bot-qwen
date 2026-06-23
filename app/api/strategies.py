@@ -11,6 +11,8 @@ from app.api.cache import prediction_cache
 from app.api.schemas import Suggestion, SuggestRequest, SuggestResponse
 from app.services.model_service import calculate_kelly, run_all_models
 from execution.strategy_account import StrategyAccount, StrategyAccountStore
+from app.services.market_service import fetch_today_event, fetch_event_markets
+from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ class StrategyCreate(BaseModel):
     model: str = "baseline"
     capital: float = 10000.0
     initial_capital: float | None = None
-    market_template: str = "hk-tmax"
+    market_template: str = "hk-tmax" 
     from_strategy_key: str | None = None
 
 
@@ -33,6 +35,7 @@ class StrategyUpdate(BaseModel):
     status: str | None = None
     scheduler_on: bool | None = None
     capital: float | None = None
+    initial_capital: float | None = None
     params: dict[str, Any] | None = None
 
 
@@ -114,8 +117,10 @@ def update_strategy(sid: str, req: StrategyUpdate):
     if req.status:
         acct.status = req.status
         acct.scheduler_on = req.status == "running"
-    if req.capital:
+    if req.capital is not None:  # 建议改为 is not None，防止资金设为0时被跳过
         acct.capital = req.capital
+    if req.initial_capital is not None:  # 新增：处理初始资金更新
+        acct.initial_capital = req.initial_capital
     if req.params:
         acct.params.update(req.params)
     
@@ -184,7 +189,7 @@ def delete_strategy(sid: str):
 @router.post("/suggest", response_model=SuggestResponse)
 @prediction_cache
 def suggest_strategy(req: SuggestRequest):
-    from app.services.market_service import fetch_event_markets
+    from app.services.market_service import fetch_today_event, fetch_event_markets
     from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now
 
     target_date = _parse_date(req.date)
@@ -199,7 +204,14 @@ def suggest_strategy(req: SuggestRequest):
     from app.services.weather_service import compute_rain_kwargs
 
     rain_kwargs = compute_rain_kwargs(_sd, hkt_now())
-    markets = fetch_event_markets(target_date_str, is_min_temp=req.is_min_temp)
+    
+    # 關鍵修正：先將日期轉換為 Event Slug，再抓取市場數據
+    today_event = fetch_today_event(target_date_str)
+    slug = today_event.get("slug") if today_event else None
+    markets = fetch_event_markets(slug, is_min_temp=req.is_min_temp) if slug else []
+    
+    if not markets:
+        logger.warning(f"No Polymarket event found for {target_date_str}. Suggestions will lack market prices.")
 
     forecast_key = "forecast_min" if req.is_min_temp else "forecast_max"
     forecast_aws = hko.get(forecast_key) if hko else None
@@ -222,16 +234,29 @@ def suggest_strategy(req: SuggestRequest):
         if mk == "_intraday_error" or not pred.get("probs"):
             continue
         for bucket_name, model_prob in pred["probs"].items():
+            # 如果找不到市場價格，使用 0.5 作為預設值，並標記為 pass
             market_price = _find_market_price(markets, bucket_name)
             if market_price is None:
-                continue
-            edge = model_prob - market_price
-            if edge > 0.01:
-                kelly = calculate_kelly(model_prob, market_price, req.kelly_fraction)
-                action = "buy_yes" if model_prob > market_price else "buy_no"
-            else:
-                kelly = 0.0
-                action = "pass"
+                market_price = 0.5
+
+            # 計算 YES 和 NO 的 Edge
+            edge_yes = model_prob - market_price
+            edge_no = market_price - model_prob
+
+            action = "pass"
+            kelly = 0.0
+            edge = 0.0
+
+            # 只有在市場價格不是預設值時才計算 Edge
+            if markets:
+                if edge_yes > 0.01:
+                    action = "buy_yes"
+                    edge = edge_yes
+                    kelly = calculate_kelly(model_prob, market_price, req.kelly_fraction)
+                elif edge_no > 0.01:
+                    action = "buy_no"
+                    edge = edge_no
+                    kelly = calculate_kelly(1 - model_prob, 1 - market_price, req.kelly_fraction)
 
             suggestions.append(
                 Suggestion(

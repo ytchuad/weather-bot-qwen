@@ -68,6 +68,9 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
     from execution.strategy_runner import run_single_strategy_cycle
     from execution.strategy_account import StrategyAccountStore
     from execution.market_templates import resolve_slug
+    from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now, compute_rain_kwargs
+    from app.services.market_service import fetch_today_event, fetch_event_markets
+    from app.services.model_service import run_all_models
 
     store = StrategyAccountStore()
 
@@ -92,11 +95,50 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
     capital = acct.get("capital", 10_000.0)
     params = acct.get("params", {})
     template = acct.get("market_template", "hk-tmax")
+    is_min_temp = template == "hk-tmin"
 
     try:
-        event_slug = resolve_slug(template)
+        # --- 資料抓取 ---
+        target_date = hkt_now().date()
+        target_date_str = target_date.strftime("%Y-%m-%d")
+        _sd = target_date_str.replace("-", "")
+        
+        today_event = fetch_today_event(target_date_str)
+        slug = today_event.get("slug") if today_event else resolve_slug(template)
+        markets = fetch_event_markets(slug, is_min_temp=is_min_temp) if slug else []
+        
+        if not markets:
+            logger.error("No markets found for %s", slug)
+            return {"status": "error", "error": "No markets found"}
+            
+        hko = fetch_hko_data(target_date_str)
+        state = get_intraday_state(_sd)
+        rain_kwargs = compute_rain_kwargs(_sd, hkt_now())
+        forecast_key = "forecast_min" if is_min_temp else "forecast_max"
+        forecast_aws = hko.get(forecast_key) if hko else None
+        
+        results = run_all_models(
+            target_date=target_date,
+            target_date_str=target_date_str,
+            is_min_temp=is_min_temp,
+            bias=params.get("bias", 0.0),
+            std_mult=params.get("std_mult", 1.0),
+            state=state,
+            rain_kwargs=rain_kwargs,
+            markets=markets,
+            forecast_aws_val=forecast_aws,
+            is_today=True
+        )
+        
+        target_probs = results.get(model, {}).get("probs", {})
+        if not target_probs:
+            logger.error("Model %s produced no probs", model)
+            return {"status": "error", "error": "No model predictions"}
+            
+        prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
+        token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
 
-        # Build context similar to what the Streamlit UI passes
+        # --- 構建 Context ---
         context = dict(
             capital=capital,
             model_key=model,
@@ -104,15 +146,28 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
             bias=params.get("bias", 0.0),
             std_mult=params.get("std_mult", 1.0),
             kelly_fraction=params.get("kelly_fraction", 0.25),
-            portfolio_id=sid,
-            slug=event_slug,
+            slug=slug,
+            target_probs=target_probs,
+            prices_dict=prices_dict,
+            token_ids_dict=token_ids_dict,
+            temp_now=state.get("temp_now") if state else None,
+            max_so_far=state.get("max_so_far") if state else None,
+            rain_regime=rain_kwargs.get("rain_regime", "no_rain"),
+            model_std=1.5,
+            recent_price_volatility=0.0,
+            hours_to_settlement=24.0,
+            nowcast_stale=False,
+            data_missing=False,
+            drawdown_pct=0.0,
+            post_mean=results.get(model, {}).get("mean", 30.0)
         )
 
+        # --- 執行策略 ---
         result = run_single_strategy_cycle(
             strategy_key=sid,
             strategy_config=sdef,
             portfolio_id=sid,
-            event_slug=event_slug,
+            event_slug=slug,
             **context,
         )
 

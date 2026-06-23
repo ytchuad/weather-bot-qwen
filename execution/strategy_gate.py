@@ -715,7 +715,7 @@ def should_rebalance(current_positions: dict, target_positions: dict,
 
 def evaluate_refined_entry(bucket: str, model_prob: float, market_price: float, model_std: float,
                             dt_now, rain_regime: str, model_key: str, adjusted_bet: dict,
-                            drawdown_pct: float, config: dict) -> dict:
+                            drawdown_pct: float, config: dict, post_mean: float = None) -> dict:
     """Full entry gate pipeline with all 7 conditions."""
     # 1. Time gate
     if dt_now.hour < config.get('entry', {}).get('min_hour', 8):
@@ -733,7 +733,9 @@ def evaluate_refined_entry(bucket: str, model_prob: float, market_price: float, 
 
     # 4. Boundary proximity — parse lower/upper from bucket name
     bucket_lo, bucket_hi = _parse_bucket_bounds(bucket)
-    bd_result = check_boundary_proximity(model_prob, model_std, bucket_lo, bucket_hi, config)
+    # [關鍵修復] 使用 post_mean (溫度預測均值) 而非 model_prob (機率值)
+    mean_for_boundary = post_mean if post_mean is not None else model_prob
+    bd_result = check_boundary_proximity(mean_for_boundary, model_std, bucket_lo, bucket_hi, config)
     if not bd_result['passes']:
         return {'passes': False, 'reason': 'BOUNDARY_TOO_CLOSE', 'detail': f'dist_std={bd_result["distance_std"]:.2f}',
                 'boundary_multiplier': bd_result['multiplier'], 'distance_raw': bd_result['distance_raw'],

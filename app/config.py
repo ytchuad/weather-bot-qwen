@@ -39,7 +39,8 @@ TMAX_BUCKETS = [
 ]
 
 TMIN_BUCKETS = [
-    "<22", "22-24", "24-26", "26-28", ">=28",
+    "23 or below", "24C", "25C", "26C", "27C", "28C",
+    "29C", "30C", "31C", "32C", "33 or higher",
 ]
 
 # ---- Model keys ----

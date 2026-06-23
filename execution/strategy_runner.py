@@ -395,6 +395,7 @@ def run_single_strategy_cycle(strategy_key, strategy_config, portfolio_id=None, 
                 drawdown_pct=context.get("drawdown_pct", 0.0),
                 probs_old=context.get("probs_old"),
                 probs_new=context.get("probs_new"),
+                post_mean=context.get("post_mean"),
             )
 
             target_positions = summary.get("target_positions", {})

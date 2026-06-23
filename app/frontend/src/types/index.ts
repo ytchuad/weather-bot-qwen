@@ -8,6 +8,7 @@ export interface ModelPrediction {
   std: number
   source: string
   probs: Record<string, number> | null
+  degraded?: boolean
 }
 
 export interface WeatherNow {

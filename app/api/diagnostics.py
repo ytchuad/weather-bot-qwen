@@ -4,28 +4,19 @@ import logging
 
 import pandas as pd
 
-from app.services.weather_service import (
-    fetch_live_hko_temp_rh,
-    fetch_hko_data,
-    hkt_now,
-    compute_rain_kwargs_live,
-    fetch_rainfall_live,
-)
-
 router = APIRouter(prefix="/api/diagnostics", tags=["Diagnostics"])
 logger = logging.getLogger(__name__)
 
 
 @router.get("/sources")
 def check_data_sources():
-    # Re-import to ensure we get the correct function (avoid cache issues)
     from app.services.weather_service import (
         fetch_live_hko_temp_rh,
         fetch_hko_data,
         compute_rain_kwargs_live,
-        fetch_rainfall_live,
         _fetch_rainfall_live_uncached,
         hkt_now,
+        get_intraday_state,
     )
 
     results = {
@@ -99,5 +90,42 @@ def check_data_sources():
         results["sources"].append({"name": "Polymarket API", "status": status, "message": msg})
     except Exception as e:
         results["sources"].append({"name": "Polymarket API", "status": "error", "message": str(e)})
+
+    # 6. Minute Buffer (df_today) - intraday history data
+    try:
+        state = get_intraday_state(hkt_now().strftime("%Y%m%d"))
+
+        if state and state.get("df_today") is not None:
+            df = state["df_today"]
+            row_count = len(df)
+            latest_time = df["datetime"].max() if not df.empty else None
+            temp_std = float(df["temp"].std()) if not df.empty else 0.0
+
+            # Determine health status
+            if row_count >= 30 and temp_std > 0.1:
+                status = "ok"
+            elif row_count > 0:
+                status = "warning"
+            else:
+                status = "error"
+
+            msg = f"Rows: {row_count}, Latest: {latest_time}, Temp Std: {temp_std:.2f}"
+            results["sources"].append({
+                "name": "Minute Buffer (df_today)",
+                "status": status,
+                "message": msg
+            })
+        else:
+            results["sources"].append({
+                "name": "Minute Buffer (df_today)",
+                "status": "error",
+                "message": "No intraday state available"
+            })
+    except Exception as e:
+        results["sources"].append({
+            "name": "Minute Buffer (df_today)",
+            "status": "error",
+            "message": str(e)
+        })
 
     return results

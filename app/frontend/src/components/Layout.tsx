@@ -23,51 +23,104 @@ export default function Layout({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <div className="flex flex-col h-screen bg-slate-950 text-slate-200">
-      <nav className="h-16 flex items-center justify-between px-8 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md z-10">
-        <div className="flex items-center gap-2">
-          <Cloud className="w-5 h-5 text-cyan-500" />
-          <span className="text-lg font-bold text-slate-100">Weather Quant</span>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="hidden md:flex items-center gap-2 text-xs text-slate-500">
-            <div className="relative">
-              <div className={`w-2 h-2 rounded-full ${isLive ? "bg-emerald-500" : "bg-amber-500"}`}>
-                {isLive && (
-                  <div className="absolute inset-0 rounded-full bg-emerald-500 animate-ping opacity-75" />
-                )}
+    <div className="relative flex flex-col h-screen bg-[#09090b] text-slate-400 overflow-hidden">
+      {/* 全局环境光与材质背景层 */}
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        {/* 微噪点哑光材质 */}
+        <div 
+          className="absolute inset-0 opacity-[0.03]" 
+          style={{ 
+            backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.4'/%3E%3C/svg%3E")` 
+          }}
+        ></div>
+        
+        {/* 环境呼吸光 1 (左上 蓝色) */}
+        <div 
+          className="absolute w-[600px] h-[600px] rounded-full blur-[120px] opacity-[0.2] bg-[#0284c7] top-[-200px] left-[-100px]"
+          style={{ animation: "pulseGlow 8s infinite alternate" }}
+        ></div>
+        
+        {/* 环境呼吸光 2 (右下 青色) */}
+        <div 
+          className="absolute w-[500px] h-[500px] rounded-full blur-[120px] opacity-[0.2] bg-[#155e75] bottom-[-150px] right-[-100px]"
+          style={{ animation: "pulseGlow 10s infinite alternate-reverse" }}
+        ></div>
+      </div>
+
+      <style>{`
+        @keyframes pulseGlow {
+          0% { opacity: 0.1; transform: scale(1); }
+          100% { opacity: 0.25; transform: scale(1.1); }
+        }
+      `}</style>
+
+      {/* 悬浮黑曜石导航栏 */}
+      <nav className="sticky top-4 z-50 px-4 mt-4">
+        <div className="obsidian-nav mx-auto max-w-5xl flex items-center justify-between px-6 py-2.5 rounded-full">
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 border border-white/10 rounded-md flex items-center justify-center bg-[#09090b] shadow-inner">
+                <div className="w-2.5 h-2.5 border border-cyan-400/50 rotate-45 bg-cyan-400/10"></div>
               </div>
+              <span className="text-white font-medium text-sm uppercase tracking-[0.2em]">Weather Quant</span>
             </div>
-            <span>Last sync: {lastUpdate.toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" })}</span>
-            <RefreshCw
-              className="w-3 h-3 hover:text-cyan-400 cursor-pointer transition-colors"
-              onClick={() => { setLastUpdate(new Date()); setIsLive(true) }}
-            />
+            
+            <div className="hidden md:flex items-center gap-2">
+              {navItems.map((item) => {
+                const active = loc.pathname === item.to
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={[
+                      "flex items-center gap-2 px-4 py-1.5 rounded-full text-[11px] font-medium uppercase tracking-[0.15em] transition-all duration-300",
+                      active
+                        ? "bg-cyan-500/10 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.2)]"
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                    ].join(" ")}
+                  >
+                    <Icon className="w-3 h-3" />
+                    <span>{item.label}</span>
+                  </Link>
+                )
+              })}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {navItems.map((item) => {
-              const active = loc.pathname === item.to
-              const Icon = item.icon
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  className={[
-                    "flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all",
-                    active
-                      ? "bg-slate-800 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
-                      : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200",
-                  ].join(" ")}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span className="hidden sm:inline">{item.label}</span>
-                </Link>
-              )
-            })}
+
+          <div className="flex items-center gap-4 text-[11px] font-mono text-slate-400">
+            <div className="hidden md:flex items-center gap-2">
+              <span className={`w-1 h-1 rounded-full ${isLive ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-amber-500"}`}></span>
+              <span>LIVE • {lastUpdate.toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" })}</span>
+            </div>
+            <button 
+              onClick={() => { setLastUpdate(new Date()); setIsLive(true) }}
+              className="p-1.5 hover:bg-white/5 rounded-md transition-colors text-slate-400 hover:text-cyan-400"
+              title="Force refresh"
+            >
+              <RefreshCw className="w-3 h-3" />
+            </button>
           </div>
         </div>
       </nav>
-      <div className="flex-1 overflow-hidden">{children}</div>
+
+      <div className="relative z-10 flex-1 overflow-hidden overflow-y-auto custom-scrollbar mt-6">
+        {children}
+      </div>
+
+      <style>{`
+        .obsidian-nav {
+          background: #0f1013;
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          box-shadow: 
+            0 10px 40px -10px rgba(0, 0, 0, 0.8), 
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 2px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+      `}</style>
     </div>
   )
 }

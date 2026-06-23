@@ -430,14 +430,27 @@ def check_config_entry(
     model_key: str,
     adjusted_bet: dict = None,
     drawdown_pct: float = 0.0,
-    config: dict = None
+    config: dict = None,
+    post_mean: float = None
 ) -> dict:
     """Config-driven entry gate. Returns dict with passes, reason, detail, multipliers."""
     if config is None:
         config = load_config_for_strategy()
+    
+    # [關鍵修正] 根據 action 調整 model_prob 和 market_price
+    # 讓 evaluate_refined_entry 始終看到正向的 Edge
+    action = adjusted_bet.get('action', 'BUY_YES') if adjusted_bet else 'BUY_YES'
+    if action == 'BUY_NO':
+        # 買 NO 時，將機率和價格反轉
+        effective_prob = 1.0 - model_prob
+        effective_price = 1.0 - market_price
+    else:
+        effective_prob = model_prob
+        effective_price = market_price
+
     return evaluate_refined_entry(
-        bucket, model_prob, market_price, model_std,
-        dt_now, rain_regime, model_key, adjusted_bet, drawdown_pct, config
+        bucket, effective_prob, effective_price, model_std,
+        dt_now, rain_regime, model_key, adjusted_bet, drawdown_pct, config, post_mean=post_mean
     )
 
 
@@ -491,7 +504,8 @@ def compute_config_orders(
     nowcast_stale: bool = False,
     data_missing: bool = False,
     probs_old: dict = None,
-    probs_new: dict = None
+    probs_new: dict = None,
+    post_mean: float = None
 ) -> tuple:
     """Config-driven order computation using strategy_gate v2 gates."""
     if config is None:
@@ -522,19 +536,28 @@ def compute_config_orders(
     dd_result = compute_drawdown_multiplier(drawdown_pct, config)
 
     # Model selection
+    if isinstance(rain_regime, str):
+        has_rain = rain_regime != 'no_rain'
+    elif isinstance(rain_regime, dict):
+        has_rain = rain_regime.get('rain_nc_sum_0_120m', 0) > 0
+    else:
+        has_rain = False
+
     model_sel = select_minute_model(
         {'nowcast_stale': nowcast_stale, 'nowcast_missing': data_missing,
-         'rainfall_available': rain_regime and rain_regime.get('rain_nc_sum_0_120m', 0) > 0},
+         'rainfall_available': has_rain},
         config, model_cache_available=set([model_key]) if model_key else set()
     )
+
     active_model = model_sel.get('selected_model', model_key)
+    effective_post_mean = post_mean if post_mean is not None else temp_now
 
     for bucket in sorted(all_buckets):
         model_prob = target_probs.get(bucket, 0.5)
         market_price = prices_dict.get(bucket, 0.5)
         current_pos = market_positions.get(bucket, {})
         bet = adjusted_bets.get(bucket, {})
-        kel_qty = bet.get('adjusted_quantity', 0)
+        kel_qty = bet.get('adjusted_quantity', bet.get('quantity', 0))
 
         if current_pos.get('quantity', 0) > 0:
             # Evaluate exit
@@ -583,7 +606,7 @@ def compute_config_orders(
             if entry_qty < sc.get('min_qty', 5.0):
                 decisions.append({'bucket': bucket, 'action': 'NO_TRADE',
                                   'reason': 'QTY_TOO_SMALL',
-                                  'detail': f'qty {entry_qty:.1f} < min'})
+                                  'detail': f'qty {entry_qty:.2f} < min {sc.get("min_qty", 5.0)} | bet={bet}'})
                 continue
 
             # Drawdown gate for entries
@@ -596,7 +619,7 @@ def compute_config_orders(
             entry_result = check_config_entry(
                 bucket, model_prob, market_price, model_std,
                 dt_now, rain_regime, active_model, bet,
-                drawdown_pct, config
+                drawdown_pct, config, post_mean=effective_post_mean  # <--- 使用 effective_post_mean
             )
             if entry_result.get('passes', False):
                 # Apply sizing multipliers
@@ -651,7 +674,8 @@ def run_config_rebalance_cycle(
     data_missing: bool = False,
     drawdown_pct: float = 0.0,
     probs_old: dict = None,
-    probs_new: dict = None
+    probs_new: dict = None,
+    post_mean: float = None
 ) -> dict:
     """Full config-driven rebalance cycle."""
     if dt_now is None:
@@ -683,7 +707,8 @@ def run_config_rebalance_cycle(
         nowcast_stale=nowcast_stale,
         data_missing=data_missing,
         probs_old=probs_old,
-        probs_new=probs_new
+        probs_new=probs_new,
+        post_mean=post_mean
     )
 
     # Rebalance decision

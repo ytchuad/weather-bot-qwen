@@ -9,8 +9,7 @@ computation for downstream UI.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
-from typing import Any
+from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -19,7 +18,6 @@ from cachetools import TTLCache, cached
 from ..config import (
     DEFAULT_TMAX_FORECAST_DELTA,
     DEFAULT_TMIN_FORECAST_DELTA,
-    MODEL_KEYS,
     CACHE_TTL_MEDIUM,
 )
 
@@ -109,6 +107,16 @@ def predict_intraday_all(
         combine_with_prior,
     )
 
+    # Check if minute-level buffer has sufficient data
+    df_today = state.get("df_today")
+    buffer_sufficient = df_today is not None and len(df_today) >= 30
+    if not buffer_sufficient:
+        logger.warning(
+            f"Insufficient intraday buffer for {target_date_str}: "
+            f"{len(df_today) if df_today is not None else 0} rows. "
+            "Predictions may be degraded."
+        )
+
     rain_kw = rain_kwargs or {}
     hour_now = state["time_now"].hour
     minutes_since_midnight = hour_now * 60 + state["time_now"].minute
@@ -137,11 +145,6 @@ def predict_intraday_all(
         rh_buffer=state.get("df_today", pd.DataFrame()).get("rh", pd.Series()).dropna().tolist() if state.get("df_today") is not None else None,
     )
 
-    # Merge rain kwargs — only pass keys that predict_intraday_tmax/tmin_all
-    # actually accepts via **rain_kwargs.  The function strips non-param
-    # keys internally (rh_current, temp_buffer, etc.), but raw keys like
-    # rain_60m / rain_120m / rain_data_ok are NOT valid params and cause
-    # "unexpected keyword argument" errors.
     _ALLOWED_RAIN_KWARGS = {
         "prev_18_temp", "prev_21_temp", "prev_2359_temp",
         "prev_evening_temp_change", "prev_evening_temp_min",
@@ -151,7 +154,6 @@ def predict_intraday_all(
         "prev_evening_rainfall_18_24", "prev_evening_rain_flag",
         "rainfall_30m_filled", "rainfall_30m_missing_flag",
         "rainfall_data_age_minutes", "rain_data_gap_flag",
-        # buffer variants for Model D/E
         "temp_buffer_long", "rh_buffer_long",
     }
     for k, v in rain_kw.items():
@@ -183,6 +185,10 @@ def predict_intraday_all(
             ps = raw_pred.get("post_std", 1.0)
         if np.isnan(pm) or np.isnan(ps):
             continue
+        # Apply degradation handling for insufficient buffer data
+        if not buffer_sufficient and ps < 0.5:
+            ps = 0.5
+            raw_pred["degraded"] = True
         results[mk] = {
             "post_mean": float(pm),
             "post_std": float(ps),
@@ -308,6 +314,8 @@ def run_all_models(
                     ip["mean"] = ip["post_mean"]
                     ip["std"] = ip["post_std"]
                     ip["source"] = f"🔥 {mk}"
+                    if ip.get("degraded"):
+                        ip["degraded"] = True
                     output[mk] = ip
 
     return output

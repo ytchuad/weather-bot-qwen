@@ -142,35 +142,39 @@ def apply_slippage_to_bets(
 ) -> dict:
     """
     根據訂單簿深度，將 Kelly 輸出的 USDC 預算轉換為真實的合約數量與調整後的 Edge。
-    嚴格區分 YES/NO 的基準價格，並修復 VWAP 計算邏輯。
     """
     adjusted_bets = {}
     
     for label, bet in bets_dict.items():
-        token_ids = token_ids_dict.get(label)
-        if not token_ids:
-            continue
-            
-        yes_id, no_id = token_ids
         is_buy_yes = (bet['action'] == 'BUY_YES')
-        target_token_id = yes_id if is_buy_yes else no_id
         
         # [關鍵修復 1] 嚴格區分 YES/NO 的基準價格
         yes_price = prices_dict.get(label, 0.5) if prices_dict else 0.5
         base_price = yes_price if is_buy_yes else (1.0 - yes_price)
         
+        # [關鍵修復 2] mock_mode 下不需要真實 token_id
+        if mock_mode:
+            target_token_id = "mock_token"
+        else:
+            token_ids = token_ids_dict.get(label) if token_ids_dict else None
+            if not token_ids:
+                logger.warning(f"Slippage Sim: Missing token_ids for {label}, skipping.")
+                continue
+            yes_id, no_id = token_ids
+            target_token_id = yes_id if is_buy_yes else no_id
+        
         ob = get_order_book(target_token_id, mock_mode=mock_mode, mock_base_price=base_price)
         asks = ob.get('asks', [])
         
         if not asks:
+            logger.warning(f"Slippage Sim: No asks in order book for {label}, skipping.")
             continue
             
         best_ask = asks[0]['price']
         remaining_budget = bet['amount']
         acquired_contracts = 0.0
-        total_cost_actual = 0.0 # 用於精確計算 VWAP
+        total_cost_actual = 0.0
         
-        # [關鍵修復 2] 嚴謹的逐層吃單與 VWAP 計算
         for level in asks:
             p = level['price']
             s = level['size']
@@ -181,7 +185,7 @@ def apply_slippage_to_bets(
                 total_cost_actual += max_cost_here
                 remaining_budget -= max_cost_here
             else:
-                qty_here = remaining_budget / p
+                qty_here = remaining_budget / p if p > 0 else 0
                 acquired_contracts += qty_here
                 total_cost_actual += remaining_budget
                 remaining_budget = 0
@@ -191,12 +195,8 @@ def apply_slippage_to_bets(
         filled = (remaining_budget < 0.01) 
         
         if acquired_contracts > 0:
-            # 精確的 VWAP = 總花費 / 總合約數
             avg_fill_price = total_cost_actual / acquired_contracts
-            
-            # 確保價格在合法範圍內
             avg_fill_price = max(0.001, min(0.999, avg_fill_price))
-            
             slippage_pct = ((avg_fill_price - best_ask) / best_ask) * 100 if best_ask > 0 else 0.0
             
             adjusted_bets[label] = {
@@ -208,6 +208,9 @@ def apply_slippage_to_bets(
                 'slippage_pct': round(slippage_pct, 2),
                 'filled': filled
             }
+            logger.info(f"Slippage Sim OK: {label} | Qty: {acquired_contracts:.2f} | Price: {avg_fill_price:.4f}")
+        else:
+            logger.warning(f"Slippage Sim: acquired 0 contracts for {label}. Budget: {bet['amount']}, Best Ask: {best_ask}")
             
     return adjusted_bets
 

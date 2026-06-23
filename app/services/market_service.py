@@ -126,10 +126,16 @@ def _parse_outcome_prices(market: dict) -> tuple[float | None, float | None]:
 def _bucket_bounds(bucket_label: str) -> tuple[float, float]:
     """Map canonical bucket label to (lower, upper) float bounds.
 
-    Tmin: <22 → (-inf, 22), 22-24 → (22, 24), …, >=28 → (28, inf)
+    Tmin: 23 or below → (-inf, 23), 24C → (24, 25), …, 33 or higher → (33, inf)
     Tmax: <23 → (-inf, 23), 23-24 → (23, 24), …, >=34 → (34, inf)
     """
     stripped = bucket_label.strip()
+    if " or below" in stripped.lower():
+        val = float(re.search(r"(\d+)", stripped).group(1))
+        return (-np.inf, val)
+    if " or higher" in stripped.lower():
+        val = float(re.search(r"(\d+)", stripped).group(1))
+        return (val, np.inf)
     if stripped.startswith("<"):
         return (-np.inf, float(stripped[1:]))
     if stripped.startswith(">="):
@@ -137,12 +143,12 @@ def _bucket_bounds(bucket_label: str) -> tuple[float, float]:
     if "-" in stripped:
         parts = stripped.split("-")
         return (float(parts[0]), float(parts[1]))
-    # Fallback: treat as single value (unlikely but safe)
-    try:
-        v = float(stripped)
+    # Single degree buckets like "24C" or "24°C"
+    m = re.search(r"(\d+)", stripped)
+    if m:
+        v = float(m.group(1))
         return (v, v + 1.0)
-    except ValueError:
-        return (-np.inf, np.inf)
+    return (-np.inf, np.inf)
 
 
 def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp: bool) -> str | None:
@@ -153,34 +159,16 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
         return None
 
     temp_val = int(m.group(1))
-    lower = any(kw in source.lower() for kw in ["or below", "less than", "below"])
-    upper = any(kw in source.lower() for kw in ["or higher", "greater than", "higher", "above"])
+    lower = "or below" in source.lower()
+    upper = "or higher" in source.lower()
 
     if is_min_temp:
-        # Polymarket TMIN uses 22-24, 24-26, 26-28, >=28 buckets
+        # Polymarket TMIN uses single-degree buckets: 23 or below, 24C, ..., 33 or higher
         if lower:
-            if temp_val <= 22:
-                return "22-24"  # or could be <22 if bucket exists
-            for lo in range(22, 28, 2):
-                hi = lo + 2
-                if temp_val <= hi:
-                    return f"{lo}-{hi}"
-            return ">=28"
+            return f"{temp_val} or below"
         if upper:
-            if temp_val >= 28:
-                return ">=28"
-            for lo in range(22, 28, 2):
-                hi = lo + 2
-                if temp_val >= lo:
-                    return f"{lo}-{hi}"
-            return "22-24"
-        for lo in range(22, 28, 2):
-            hi = lo + 2
-            if lo <= temp_val < hi:
-                return f"{lo}-{hi}"
-        if temp_val >= 28:
-            return ">=28"
-        return "22-24"
+            return f"{temp_val} or higher"
+        return f"{temp_val}C"
     else:
         if lower:
             if temp_val <= 23:
@@ -308,15 +296,13 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
 def bucket_for_temp(temp: float, is_min_temp: bool) -> str:
     """Return bucket label for a given temperature value."""
     if is_min_temp:
-        if temp < 22:
-            return "<22"
-        if temp < 24:
-            return "22-24"
-        if temp < 26:
-            return "24-26"
-        if temp < 28:
-            return "26-28"
-        return ">=28"
+        # TMIN: single-degree buckets from 24°C to 32°C, with edge buckets
+        if temp < 23:
+            return "23 or below"
+        for t in range(24, 33):
+            if t <= temp < t + 1:
+                return f"{t}C"
+        return "33 or higher"
     if temp < 23:
         return "<23"
     if temp < 24:

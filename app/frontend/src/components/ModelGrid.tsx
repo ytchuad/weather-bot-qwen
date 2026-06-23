@@ -5,41 +5,23 @@ import { CSS } from "@dnd-kit/utilities"
 import { GripVertical, Eye, EyeOff } from "lucide-react"
 
 function SortableCard({
-  id,
-  pred,
-  label,
-  active,
-  isVisible,
-  onClick,
-  onToggleVisible,
+  id, pred, label, active, isVisible, onClick, onToggleVisible,
 }: {
-  id: string
-  pred: ModelPrediction
-  label: string
-  active: boolean
-  isVisible: boolean
-  onClick: () => void
-  onToggleVisible: () => void
+  id: string; pred: ModelPrediction; label: string; active: boolean; isVisible: boolean; onClick: () => void; onToggleVisible: () => void;
 }) {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id })
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
 
-  const probEntries = Object.entries(pred.probs ?? {}) as [string, number][]
-  const topBucket: [string, number] = probEntries.length > 0 
-    ? probEntries.reduce((max, curr) => curr[1] > max[1] ? curr : max) 
-    : ["N/A", 0]
-  const topPct = Math.round(topBucket[1] * 100)
-
-  const style = {
+  const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.4 : (isVisible ? 1 : 0.4),
+    opacity: isDragging ? 0.5 : (isVisible ? 1 : 0.4),
+  }
+
+  // 激活状态强制内联渲染发光阴影
+  if (active && isVisible) {
+    style.boxShadow = "inset 0 0 30px -10px rgba(56, 189, 248, 0.6)";
+    style.borderColor = "#22d3ee";
+    style.backgroundColor = "rgba(56, 189, 248, 0.1)";
   }
 
   return (
@@ -47,57 +29,61 @@ function SortableCard({
       ref={setNodeRef}
       style={style}
       {...attributes}
-      onClick={() => {
-        if (!isVisible) {
-          onToggleVisible();
-        }
-        onClick();
-      }}
+      onClick={() => { if (!isVisible) onToggleVisible(); onClick(); }}
       className={[
-        "model-card group relative bg-slate-900/50 p-3 rounded-lg cursor-pointer border-l-4 transition-all duration-200",
-        active
-          ? "border-cyan-500 bg-slate-800/50 shadow-[0_0_15px_rgba(6,182,212,0.1)]"
-          : "border-transparent hover:bg-slate-800/50 hover:translate-x-1",
+        "relative px-4 py-4 cursor-pointer flex items-center justify-between group transition-all duration-200 border-l-2 border-b border-white/[0.02]",
+        !active || !isVisible 
+          ? isVisible 
+            ? "border-transparent hover:bg-white/[0.02] hover:border-slate-500" 
+            : "border-transparent hover:bg-white/[0.02]"
+          : "" // 激活态样式由内联控制
       ].join(" ")}
     >
-      <div className="flex items-center justify-between mb-1.5">
-        <span className={["text-xs font-semibold", active ? "text-slate-100" : "text-slate-300"].join(" ")}>
-          {label}
-        </span>
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onToggleVisible(); }} 
-            className="text-slate-600 hover:text-cyan-400 transition-colors"
-            title={isVisible ? "Hide from dashboard" : "Show on dashboard"}
-          >
-            {isVisible ? <Eye size={12} /> : <EyeOff size={12} />}
-          </button>
-          <div {...listeners} className="cursor-grab text-slate-600 group-hover:text-slate-400">
-            <GripVertical size={12} />
+      <div className="flex items-center gap-4 flex-1 min-w-0">
+        <button className="text-slate-400 hover:text-slate-200 cursor-grab touch-none" {...listeners}>
+          <GripVertical size={12} />
+        </button>
+        
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+              pred.degraded 
+                ? "bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" 
+                : active 
+                  ? "bg-cyan-400 shadow-[0_0_10px_rgba(56,189,248,0.8)]" 
+                  : "bg-slate-400"
+            }`}></span>
+            <p className={`text-xs font-medium tracking-wide truncate ${active ? "text-white" : "text-slate-200"}`}>
+              {label}
+            </p>
+            {pred.degraded && (
+              <span className="text-[9px] text-amber-400 mono border border-amber-400/30 px-1 rounded-sm flex-shrink-0">
+                DEGRADED
+              </span>
+            )}
+          </div>
+          
+          <div className="flex items-baseline gap-2">
+            <span className={`text-3xl font-light mono ${active ? "text-white" : "text-slate-100"}`}>
+              {pred.mean.toFixed(1)}
+              <span className={`text-lg ${active ? "text-slate-300" : "text-slate-400"}`}>°C</span>
+            </span>
+            <span className="text-[10px] text-slate-400 mono">±{pred.std.toFixed(2)}</span>
           </div>
         </div>
       </div>
-      
-      <div className="flex items-baseline gap-2 mb-2">
-        <span className={["text-2xl font-bold tabular-nums", active ? "text-cyan-400" : "text-slate-300"].join(" ")}>
-          {pred.mean.toFixed(1)}°C
-        </span>
-        <span className="text-[10px] text-slate-500">±{pred.std.toFixed(2)}</span>
-      </div>
-      
-      <div className="flex items-center justify-between gap-2 mb-1">
-        <span className="text-[10px] text-slate-500 uppercase tracking-wider">Most Likely</span>
-        <span className="text-[10px] text-violet-400 font-mono font-semibold">{topBucket[0]} ({topPct}%)</span>
-      </div>
-      
-      <div className="h-1 w-full bg-slate-700/50 rounded-full overflow-hidden">
-        <div className="h-full bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full transition-all duration-500 ease-out" style={{ width: `${topPct}%` }} />
-      </div>
+
+      <button 
+        onClick={(e) => { e.stopPropagation(); onToggleVisible(); }} 
+        className={`transition-colors p-2 rounded-md flex-shrink-0 ${isVisible ? "text-slate-400 hover:text-cyan-400" : "text-slate-600 hover:text-cyan-400"}`}
+        title={isVisible ? "Hide from dashboard" : "Show on dashboard"}
+      >
+        {isVisible ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
     </div>
   )
 }
 
-// 確保這裡有 export
 export const LABEL_MAP: Record<string, string> = {
   "9d": "9-Day XGBoost",
   aws: "AWS High-Freq",
@@ -109,19 +95,9 @@ export const LABEL_MAP: Record<string, string> = {
 }
 
 export default function ModelGrid({
-  models,
-  activeKey,
-  visibleKeys,
-  onSelect,
-  onReorder,
-  onToggleVisible,
+  models, activeKey, visibleKeys, onSelect, onReorder, onToggleVisible,
 }: {
-  models: [string, ModelPrediction][]
-  activeKey: string | null
-  visibleKeys: Set<string> | null
-  onSelect: (key: string) => void
-  onReorder: (keys: string[]) => void
-  onToggleVisible: (key: string) => void
+  models: [string, ModelPrediction][]; activeKey: string | null; visibleKeys: Set<string> | null; onSelect: (key: string) => void; onReorder: (keys: string[]) => void; onToggleVisible: (key: string) => void;
 }) {
   const keys = models.map(([k]) => k)
 
@@ -141,7 +117,7 @@ export default function ModelGrid({
       }}
     >
       <SortableContext items={keys} strategy={rectSortingStrategy}>
-        <div className="space-y-3">
+        <div className="flex flex-col">
           {models.map(([k, pred]) => (
             <SortableCard
               key={k}
