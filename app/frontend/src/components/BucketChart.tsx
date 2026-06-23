@@ -47,8 +47,8 @@ export default function BucketChart({
     const isEdge = viewMode === "edge"
 
     const baseTooltip = {
-      trigger: "axis",
-      axisPointer: { type: "shadow" },
+      trigger: "axis" as const,
+      axisPointer: { type: "shadow" as const },
       backgroundColor: "#0f1013",
       borderColor: "rgba(255,255,255,0.08)",
       borderWidth: 1,
@@ -144,7 +144,6 @@ export default function BucketChart({
         tooltip: {
           ...baseTooltip,
           formatter: (params: any) => {
-            const bucket = params[0].name
             const colors = ["#38bdf8", "#94a3b8"]
             return params.map((p: any, idx: number) => `
               <div style="display:flex; justify-content:space-between; gap:16px;">
