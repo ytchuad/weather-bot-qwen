@@ -143,4 +143,9 @@ export function deleteStrategy(id: string): Promise<{ status: string; id: string
   })
 }
 
+// Run all enabled strategies
+export function runAllStrategies(): Promise<{ results: unknown[]; total: number }> {
+  return post("/strategies/run-all", {})
+}
+
 

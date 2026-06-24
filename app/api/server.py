@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Weather Quant API starting")
+    strategies.start_scheduler()
     yield
     logger.info("Weather Quant API shutting down")
+    strategies.stop_scheduler()
 
 
 app = FastAPI(

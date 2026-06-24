@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { 
   suggestStrategy, 
@@ -7,10 +7,11 @@ import {
   createStrategy, 
   updateStrategy,
   resetStrategy,
-  deleteStrategy
+  deleteStrategy,
+  runAllStrategies
 } from "../api/client"
 import type { Suggestion, StrategyCreate, Strategy, StrategyTrade } from "../types"
-import { TrendingUp, Wallet, Percent, Activity, Plus, Beaker, Settings2 } from "lucide-react"
+import { TrendingUp, Wallet, Percent, Activity, Plus, Beaker, Settings2, Play } from "lucide-react"
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -269,18 +270,50 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
 
 // ── 分頁：Live ──────────────────────────────────────────────────────────────
 function LiveTab() {
+  const queryClient = useQueryClient()
   const { data, isLoading } = useQuery({
     queryKey: ["strategies"],
     queryFn: getStrategies,
     refetchInterval: 60_000,
   })
 
+  // Auto-run strategies every 5 minutes via frontend polling
+  const runAllMutation = useMutation({
+    mutationFn: runAllStrategies,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["strategies"] })
+      // Also invalidate trades to show latest results
+      queryClient.invalidateQueries({ predicate: (q) => q.queryKey[0] === "strategyTrades" })
+    },
+  })
+
+  // Poll every 5 minutes for running strategies
+  useEffect(() => {
+    if (!data?.strategies?.some(s => s.scheduler_on && s.status === "running")) {
+      return
+    }
+    const interval = setInterval(() => {
+      runAllMutation.mutate()
+    }, 300_000)
+    return () => clearInterval(interval)
+  }, [data?.strategies])
+
   return (
     <div>
       <PortfolioOverview />
-      <h2 className="text-[10px] font-medium text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-4">
-        <span className="w-4 h-px bg-slate-500"></span> Active Strategies
-      </h2>
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-[10px] font-medium text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2">
+          <span className="w-4 h-px bg-slate-500"></span> Active Strategies
+        </h2>
+        <button
+          onClick={() => runAllMutation.mutate()}
+          disabled={runAllMutation.isPending}
+          className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-sm bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition-colors disabled:opacity-50"
+        >
+          <Play size={10} />
+          {runAllMutation.isPending ? "Running..." : "Run All"}
+        </button>
+      </div>
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {[1, 2, 3].map(i => <div key={i} className="h-40 rounded-md bg-white/[0.02] animate-pulse" />)}

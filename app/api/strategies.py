@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import date as date_type
+import threading
+import time
+from datetime import date as date_type, datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -285,3 +287,154 @@ def _find_market_price(markets: list[dict], bucket_name: str) -> float | None:
         if m.get("bucket") == bucket_name or m.get("name") == bucket_name:
             return m.get("yes_price")
     return None
+
+
+# ── Run All Strategies Endpoint ──────────────────────────────────────────────
+
+@router.post("/run-all")
+def run_all_strategies():
+    """Run all enabled strategies once. Used by frontend polling and manual triggers."""
+    from execution.strategy_runner import run_enabled_strategies_once
+    results = run_enabled_strategies_once()
+    return {"results": results, "total": len(results)}
+
+
+# ── Background Scheduler ──────────────────────────────────────────────────────
+
+_scheduler_thread: threading.Thread | None = None
+_scheduler_alive = False
+
+def _build_strategy_context(acct: StrategyAccount) -> dict:
+    """Build context for strategy execution from account data."""
+    from execution.market_templates import resolve_slug
+    from app.services.weather_service import compute_rain_kwargs
+    from app.services.market_service import fetch_event_markets
+    
+    target_date = hkt_now().date()
+    target_date_str = target_date.strftime("%Y-%m-%d")
+    _sd = target_date_str.replace("-", "")
+    
+    is_min_temp = acct.market_template == "hk-tmin"
+    today_event = fetch_today_event(target_date_str)
+    slug = today_event.get("slug") if today_event else None
+    markets = fetch_event_markets(slug, is_min_temp=is_min_temp) if slug else []
+    
+    if not markets:
+        logger.warning("No markets found for %s", slug)
+        return {}
+    
+    hko = fetch_hko_data(target_date_str)
+    state = get_intraday_state(_sd)
+    rain_kwargs = compute_rain_kwargs(_sd, hkt_now())
+    forecast_key = "forecast_min" if is_min_temp else "forecast_max"
+    forecast_aws = hko.get(forecast_key) if hko else None
+    params = acct.params or {}
+    
+    results = run_all_models(
+        target_date=target_date,
+        target_date_str=target_date_str,
+        is_min_temp=is_min_temp,
+        bias=params.get("bias", 0.0),
+        std_mult=params.get("std_mult", 1.0),
+        state=state,
+        rain_kwargs=rain_kwargs,
+        markets=markets,
+        forecast_aws_val=forecast_aws,
+        is_today=True,
+    )
+    
+    model = acct.model
+    target_probs = results.get(model, {}).get("probs", {})
+    if not target_probs:
+        logger.error("Model %s produced no probs for strategy %s", model, acct.id)
+        return {}
+    
+    prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
+    token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
+    
+    return dict(
+        capital=acct.capital,
+        model_key=model,
+        mock_slippage=True,
+        bias=params.get("bias", 0.0),
+        std_mult=params.get("std_mult", 1.0),
+        kelly_fraction=params.get("kelly_fraction", 0.25),
+        slug=slug,
+        target_probs=target_probs,
+        prices_dict=prices_dict,
+        token_ids_dict=token_ids_dict,
+        temp_now=state.get("temp_now") if state else None,
+        max_so_far=state.get("max_so_far") if state else None,
+        rain_regime=rain_kwargs.get("rain_regime", "no_rain"),
+        model_std=1.5,
+        recent_price_volatility=0.0,
+        hours_to_settlement=24.0,
+    )
+
+
+def _scheduler_loop():
+    """Background thread that runs enabled strategies on cooldown interval."""
+    global _scheduler_alive
+    logger.info("Strategy scheduler started")
+    
+    while _scheduler_alive:
+        try:
+            from execution.strategy_runner import run_single_strategy_cycle, load_strategy_registry
+            from execution.strategy_account import get_store
+            
+            store = get_store()
+            accounts = store.get_running()
+            
+            if not accounts:
+                time.sleep(30)
+                continue
+            
+            for acct in accounts:
+                if acct.last_run:
+                    try:
+                        last = datetime.fromisoformat(acct.last_run)
+                        elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+                        if elapsed < 300:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                
+                registry = load_strategy_registry()
+                sdef = registry.get("strategies", {}).get(acct.id)
+                if not sdef:
+                    continue
+                
+                context = _build_strategy_context(acct)
+                if context:
+                    result = run_single_strategy_cycle(
+                        strategy_key=acct.id,
+                        strategy_config=sdef,
+                        portfolio_id=acct.id,
+                        event_slug=context.get("slug"),
+                        **context,
+                    )
+                    logger.info("Strategy %s executed: %s", acct.id, result.get("status"))
+                    store.set_last_run(acct.id)
+                
+        except Exception as exc:
+            logger.exception("Scheduler error: %s", exc)
+        
+        time.sleep(30)
+
+
+def start_scheduler():
+    """Start background scheduler thread (call from FastAPI lifespan)."""
+    global _scheduler_thread, _scheduler_alive
+    if _scheduler_thread and _scheduler_thread.is_alive():
+        return
+    
+    _scheduler_alive = True
+    _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="strategy-scheduler")
+    _scheduler_thread.start()
+    logger.info("Background strategy scheduler started")
+
+
+def stop_scheduler():
+    """Stop background scheduler thread."""
+    global _scheduler_alive
+    _scheduler_alive = False
