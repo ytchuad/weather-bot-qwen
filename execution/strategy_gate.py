@@ -505,19 +505,24 @@ def check_boundary_proximity(mean: float, std: float, bucket_lower: float, bucke
     agg_thresh = bp.get('aggressive_reduction_threshold', 0.3)
     agg_mult = bp.get('aggressive_reduction_multiplier', 0.5)
 
+    # [關鍵修復 1] 使用絕對值計算距離，避免外部距離產生負數
     dist_raw = 999.0
     if bucket_lower != -float('inf'):
-        dist_raw = min(dist_raw, mean - bucket_lower)
+        dist_raw = min(dist_raw, abs(mean - bucket_lower))
     if bucket_upper != float('inf'):
-        dist_raw = min(dist_raw, bucket_upper - mean)
+        dist_raw = min(dist_raw, abs(bucket_upper - mean))
 
     dist_std = dist_raw / std if std > 0 else 999.0
 
     if dist_std < agg_thresh:
-        return {'passes': False, 'multiplier': agg_mult, 'distance_raw': dist_raw, 'distance_std': dist_std}
+        # 距離極近，使用激進縮減倍率
+        return {'passes': True, 'multiplier': agg_mult, 'distance_raw': dist_raw, 'distance_std': dist_std}
     if dist_std < min_dist:
+        # 距離稍近，按比例縮減
         ratio = dist_std / min_dist
-        return {'passes': False, 'multiplier': ratio, 'distance_raw': dist_raw, 'distance_std': dist_std}
+        return {'passes': True, 'multiplier': ratio, 'distance_raw': dist_raw, 'distance_std': dist_std}
+    
+    # 距離夠遠，不縮減
     return {'passes': True, 'multiplier': 1.0, 'distance_raw': dist_raw, 'distance_std': dist_std}
 
 
@@ -731,15 +736,14 @@ def evaluate_refined_entry(bucket: str, model_prob: float, market_price: float, 
     if not check_probability_confidence(model_std, config):
         return {'passes': False, 'reason': 'LOW_CONFIDENCE', 'detail': f'std={model_std:.2f}'}
 
-    # 4. Boundary proximity — parse lower/upper from bucket name
+    # 4. Boundary proximity
     bucket_lo, bucket_hi = _parse_bucket_bounds(bucket)
-    # [關鍵修復] 使用 post_mean (溫度預測均值) 而非 model_prob (機率值)
     mean_for_boundary = post_mean if post_mean is not None else model_prob
     bd_result = check_boundary_proximity(mean_for_boundary, model_std, bucket_lo, bucket_hi, config)
-    if not bd_result['passes']:
-        return {'passes': False, 'reason': 'BOUNDARY_TOO_CLOSE', 'detail': f'dist_std={bd_result["distance_std"]:.2f}',
-                'boundary_multiplier': bd_result['multiplier'], 'distance_raw': bd_result['distance_raw'],
-                'distance_std': bd_result['distance_std']}
+    
+    # [關鍵修復 2] 不再硬性阻擋，而是讓其通過並返回縮減倍率
+    # if not bd_result['passes']:
+    #     return {'passes': False, 'reason': 'BOUNDARY_TOO_CLOSE', ...}
 
     # 5. Slippage-adjusted edge positive
     if adjusted_bet:
@@ -757,7 +761,7 @@ def evaluate_refined_entry(bucket: str, model_prob: float, market_price: float, 
     return {
         'passes': True, 'reason': 'PASS', 'detail': 'all entry gates passed',
         'regime': regime, 'exposure_cap': regime_check.get('exposure_cap', 0.50),
-        'boundary_multiplier': bd_result.get('multiplier', 1.0),
+        'boundary_multiplier': bd_result.get('multiplier', 1.0),  # 這個倍率會在後續縮減下注量
         'distance_raw': bd_result.get('distance_raw', 999.0),
         'distance_std': bd_result.get('distance_std', 999.0),
     }
