@@ -406,7 +406,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def select_minute_model(signal_context: dict, config: dict, model_cache_available: set = None) -> dict:
-    """Select the best available minute model: Model C > B > A > baseline fallback.
+    """Select the best available minute model: Model F > Model C > B > A > baseline fallback.
     
     Returns dict with keys: selected_model, multiplier, source_label, reason_code.
     """
@@ -417,6 +417,14 @@ def select_minute_model(signal_context: dict, config: dict, model_cache_availabl
     nowcast_available = not signal_context.get('nowcast_missing', True)
     rainfall_available = signal_context.get('rainfall_available', False)
 
+    # Model F selection (forecast_gap-based)
+    if 'model_f' in model_cache_available:
+        return {
+            'selected_model': 'model_f',
+            'multiplier': ms.get('model_f_multiplier', 1.0),
+            'source_label': 'Model F (forecast_gap)',
+            'reason_code': REASON_PASS_ALL,
+        }
     if nowcast_fresh and nowcast_available and 'model_c' in model_cache_available:
         return {
             'selected_model': 'model_c',
@@ -536,6 +544,7 @@ def get_model_confidence_multiplier(model_key: str, config: dict) -> float:
     """Get the sizing multiplier based on which model is active."""
     ms = config.get('entry', {}).get('model_selection', {})
     multipliers = {
+        'model_f': ms.get('model_f_multiplier', 1.0),
         'model_c': ms.get('model_c_multiplier', 1.0),
         'model_b': ms.get('model_b_fallback_multiplier', 0.7),
         'model_a': ms.get('model_a_fallback_multiplier', 0.5),

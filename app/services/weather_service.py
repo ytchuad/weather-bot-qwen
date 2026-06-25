@@ -314,6 +314,40 @@ def load_rain_15min() -> pd.DataFrame:
     return pd.DataFrame()
 
 
+# ── pressure data (Model F) ─────────────────────────────────────────────
+PRESSURE_CACHE = TTLCache(maxsize=1, ttl=100)
+
+@cached(PRESSURE_CACHE)
+def get_pressure_with_ttl_cache() -> dict:
+    """Fetch pressure and pressure_30m_ago from i-lens.hk with 100s TTL cache."""
+    import re
+    PRESSURE_URL = "https://i-lens.hk/hkweather/instant_chart.php?chart_type=DG_MSLP"
+    try:
+        r = requests.get(PRESSURE_URL, headers=RAIN_HEADERS, timeout=10)
+        r.raise_for_status()
+        html = r.text
+        # Parse JavaScript data array: [[timestamp, pressure], ...]
+        match = re.search(r"data:\s*\[(\[.*?\])\s*\]", html, re.DOTALL)
+        if not match:
+            return {"pressure": None, "pressure_30m_ago": None}
+        data_str = match.group(1)
+        # Extract values
+        values = re.findall(r"\[\s*Date\.UTC\(\d+,\d+,\d+,\d+,\d+\)\s*,\s*([0-9.]+)\s*\]", data_str)
+        if not values:
+            return {"pressure": None, "pressure_30m_ago": None}
+        pressures = [float(v) for v in values]
+        if len(pressures) < 1:
+            return {"pressure": None, "pressure_30m_ago": None}
+        pressure = pressures[-1]  # Latest
+        # Estimate 30-min ago (6 steps if 5-min intervals)
+        idx_30m = max(0, len(pressures) - 7)
+        pressure_30m_ago = pressures[idx_30m]
+        return {"pressure": pressure, "pressure_30m_ago": pressure_30m_ago}
+    except Exception as e:
+        logger.warning("get_pressure_with_ttl_cache failed: %s", e)
+        return {"pressure": None, "pressure_30m_ago": None}
+
+
 def compute_rain_kwargs(
     target_date_str: str,
     now_dt: datetime,

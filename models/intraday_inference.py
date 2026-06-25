@@ -28,6 +28,9 @@ MINUTE_C_TMIN_FL_PATH = MINUTE_MODEL_C_TMIN_DIR / 'feature_list.json'
 MINUTE_D_TMIN_FL_PATH = MINUTE_MODEL_D_TMIN_DIR / 'feature_list.json'
 MINUTE_MODEL_E_MORNING_TMIN_DIR = Path('models/intraday_minute_ml_model_e_morning_tmin')
 MINUTE_E_MORNING_TMIN_FL_PATH = MINUTE_MODEL_E_MORNING_TMIN_DIR / 'feature_list.json'
+# Model F - forecast_gap model
+MINUTE_MODEL_F_DIR = Path('models/intraday_minute_ml_model_f')
+MINUTE_F_FL_PATH = MINUTE_MODEL_F_DIR / 'feature_list.json'
 RAIN_CALIBRATION_PATH = MINUTE_MODEL_D_TMIN_DIR / 'rain_calibration.json'
 MORNING_E_CALIBRATION_PATH = MINUTE_MODEL_E_MORNING_TMIN_DIR / 'morning_calibration.json'
 
@@ -158,6 +161,14 @@ def _get_cached_models():
             logger.warning("Model E Morning Tmin failed to load: %s", e)
     else:
         logger.warning("Model E Morning Tmin not found at %s", MINUTE_MODEL_E_MORNING_TMIN_DIR)
+    # Model F - forecast_gap model
+    if MINUTE_MODEL_F_DIR.exists() and MINUTE_F_FL_PATH.exists():
+        try:
+            result['model_f'] = _load_single_model(MINUTE_MODEL_F_DIR)
+        except Exception as e:
+            logger.warning("Model F failed to load: %s", e)
+    else:
+        logger.warning("Model F not found at %s", MINUTE_MODEL_F_DIR)
     return result
 
 
@@ -214,6 +225,12 @@ def _load_models():
                 _model_cache['model_e_morning_tmin'] = _load_single_model(MINUTE_MODEL_E_MORNING_TMIN_DIR)
             except Exception as e:
                 logger.warning("Model E Morning Tmin lazy-load failed: %s", e)
+    if 'model_f' not in _model_cache:
+        if MINUTE_MODEL_F_DIR.exists() and MINUTE_F_FL_PATH.exists():
+            try:
+                _model_cache['model_f'] = _load_single_model(MINUTE_MODEL_F_DIR)
+            except Exception as e:
+                logger.warning("Model F lazy-load failed: %s", e)
     return _model_cache
 
 
@@ -222,7 +239,7 @@ def set_active_model(model_key):
     global _active_model_key
     valid_keys = ('baseline', 'rain_nowcast', 'model_a', 'model_b', 'model_c',
                   'model_a_tmin', 'model_b_tmin', 'model_c_tmin', 'model_d_tmin',
-                  'model_e_morning_tmin')
+                  'model_e_morning_tmin', 'model_f')
     if model_key not in valid_keys:
         raise ValueError(f"Unknown model_key: {model_key}")
     _active_model_key = model_key
@@ -2206,8 +2223,107 @@ def predict_intraday_tmax_all(current_datetime, max_so_far, temp_60min_ago, temp
         except Exception as e:
             logger.warning("Model C prediction failed: %s", e)
             results['model_c'] = None
+    if 'model_f' in _model_cache:
+        set_active_model('model_f')
+        try:
+            results['model_f'] = predict_intraday_tmax_model_f(
+                current_datetime, max_so_far, temp_now,
+                humidity=rh_current, min_so_far=min_so_far,
+                time_since_max=time_since_max_so_far or 0.0,
+                time_since_min=time_since_min_so_far or 0.0,
+                temp_buffer=temp_buffer, rh_buffer=rh_buffer,
+                hour=hour, minute=current_datetime.minute if current_datetime else None,
+                forecast_tmax=forecast_tmax, pressure=None,
+            )
+        except Exception as e:
+            logger.warning("Model F prediction failed: %s", e)
+            results['model_f'] = None
     set_active_model('baseline')
     return results
+
+
+def predict_intraday_tmax_model_f(current_datetime, max_so_far, temp_now,
+                                  humidity=50.0, min_so_far=None,
+                                  time_since_max=0.0, time_since_min=0.0,
+                                  temp_buffer=None, rh_buffer=None,
+                                  hour=None, minute=None,
+                                  forecast_tmax=None, pressure=None, pressure_30m_ago=None,
+                                  **kwargs):
+    """Predict remaining upside using Model F (forecast_gap-based model)."""
+    from app.services.weather_service import get_pressure_with_ttl_cache
+    
+    if pressure is None:
+        pressure_data = get_pressure_with_ttl_cache()
+        pressure = pressure_data.get("pressure") if pressure_data else None
+        pressure_30m_ago = pressure_data.get("pressure_30m_ago") if pressure_data else None
+    
+    h = hour if hour is not None else (current_datetime.hour if current_datetime else 12)
+    m = minute if minute is not None else (current_datetime.minute if current_datetime else 0)
+    month = current_datetime.month if current_datetime else 6
+    
+    # Build Model F features (12 features)
+    temp_arr = np.array(list(temp_buffer) if temp_buffer else [temp_now])
+    rh_arr = np.array(list(rh_buffer) if rh_buffer else [humidity])
+    idx = len(temp_arr) - 1
+    
+    temp_change_30m = temp_now - (temp_arr[idx-30] if idx >= 30 else temp_arr[0])
+    temp_change_60m = temp_now - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+    
+    start_vol = max(0, idx - 29)
+    temp_volatility_30m = float(np.std(temp_arr[start_vol:idx+1], ddof=1)) if (idx - start_vol) >= 1 else 0.0
+    
+    rh_change_30m = humidity - (rh_arr[idx-30] if idx >= 30 else rh_arr[0])
+    
+    forecast_gap = forecast_tmax - temp_now if forecast_tmax is not None else 0.0
+    pressure_delta = pressure - pressure_30m_ago if pressure and pressure_30m_ago else 0.0
+    
+    features = {
+        "value": temp_now,
+        "humidity": humidity,
+        "pressure": pressure if pressure is not None else 1010.0,
+        "temp_slope_30min": temp_change_30m,
+        "temp_volatility_30min": temp_volatility_30m,
+        "humid_delta_30min": rh_change_30m,
+        "pressure_delta_30min": pressure_delta,
+        "forecast_gap": forecast_gap,
+        "hour": h,
+        "minute": m,
+        "day_of_week": current_datetime.weekday() if current_datetime else 0,
+        "month": month,
+    }
+    
+    active = _get_active()
+    feature_cols = active['feature_cols']
+    model_features = active['upside_q50'].feature_name()
+    cols = [c for c in feature_cols if c in model_features]
+    X = pd.DataFrame([features], columns=cols)[model_features]
+    
+    q10 = active['upside_q10'].predict(X)[0]
+    q25 = active['upside_q25'].predict(X)[0]
+    q50 = active['upside_q50'].predict(X)[0]
+    q75 = active['upside_q75'].predict(X)[0]
+    q90 = active['upside_q90'].predict(X)[0]
+    
+    quantiles = sorted([q10, q25, q50, q75, q90])
+    remaining_upside_p10, remaining_upside_p25, remaining_upside_p50, remaining_upside_p75, remaining_upside_p90 = quantiles
+    
+    # upside_zero fallback (not required)
+    prob_max_reached = 0.0
+    if current_datetime and current_datetime.hour >= 18 and (max_so_far - temp_now) > 1.0:
+        prob_max_reached = 0.95
+    
+    pred_tmax_p50 = max(max_so_far, max_so_far + remaining_upside_p50)
+    
+    return {
+        'remaining_upside_p10': remaining_upside_p10,
+        'remaining_upside_p25': remaining_upside_p25,
+        'remaining_upside_p50': remaining_upside_p50,
+        'remaining_upside_p75': remaining_upside_p75,
+        'remaining_upside_p90': remaining_upside_p90,
+        'prob_max_reached': prob_max_reached,
+        'pred_tmax_p50': pred_tmax_p50,
+        'sample_count': None,
+    }
 
 
 def predict_intraday_tmin_all(current_datetime, min_so_far, temp_60min_ago, temp_now,
