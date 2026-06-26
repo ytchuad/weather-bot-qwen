@@ -75,7 +75,8 @@ def strategy_card(
             "baseline": "Baseline", "rain_nowcast": "Rain Nowcast",
             "rain_observed": "Rain Observed", "model_a": "Model A",
             "model_b": "Model B", "model_c": "Model C", "model_d": "Model D",
-            "model_e": "Model E", "9d": "9-Day", "aws": "AWS HF",
+            "model_e": "Model E", "model_f": "Model F (Gap)", "model_g": "Model G (Gap+Max)",
+            "9d": "9-Day", "aws": "AWS HF",
         }.get(acct.model, acct.model)
 
         st.markdown(

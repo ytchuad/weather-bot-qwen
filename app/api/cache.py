@@ -9,7 +9,7 @@ from cachetools import TTLCache
 logger = logging.getLogger(__name__)
 
 _weather_cache = TTLCache(maxsize=32, ttl=60)
-_prediction_cache = TTLCache(maxsize=32, ttl=300)
+_prediction_cache = TTLCache(maxsize=32, ttl=60)
 _market_cache = TTLCache(maxsize=32, ttl=120)
 
 

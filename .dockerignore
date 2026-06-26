@@ -18,6 +18,7 @@ data/paper_trader/
 data/paper_trader_test/
 data/pa_test_v2/
 data/paper_adapter_test/
+data/hk_weather_raw/
 
 models/intraday_ml_rain_nowcast_candidate/
 models/intraday_ml_rain_candidate/

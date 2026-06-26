@@ -1,0 +1,14 @@
+[
+  "value",
+  "humidity",
+  "pressure",
+  "temp_slope_30min",
+  "temp_volatility_30min",
+  "humid_delta_30min",
+  "pressure_delta_30min",
+  "forecast_gap",
+  "hour",
+  "minute",
+  "day_of_week",
+  "month"
+]

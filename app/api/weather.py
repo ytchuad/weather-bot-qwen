@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import logging
+import time as _time
 from datetime import datetime, timezone
 
+import pandas as pd
 from fastapi import APIRouter
 
 from app.api.cache import weather_cache
 from app.api.schemas import WeatherNow
 from app.services.weather_service import (
     fetch_hko_data,
-    fetch_live_hko_temp_rh,
+    fetch_hko_intraday_csv,
     hkt_now,
     compute_rain_kwargs_live,
     get_accumulated_rain_today,
@@ -26,33 +28,44 @@ router = APIRouter(prefix="/api/weather", tags=["Weather"])
 def weather_now(date: str | None = None):
     hkt = hkt_now()
     target_date = date or hkt.date()
-    temp_rh = fetch_live_hko_temp_rh()
-    hko = fetch_hko_data(str(target_date).replace("-", ""))
-    
+    target_str = str(target_date).replace("-", "")
+
+    # Fetch CSV (same source as model input) for temp, RH, max, min
+    df = fetch_hko_intraday_csv(_cache_buster=int(_time.time() // 60))
+    temp = rh = max_today = min_today = None
+    if df is not None and not df.empty:
+        target_dt = pd.Timestamp(target_date)
+        today = df[df["datetime"].dt.date == target_dt.date()]
+        if not today.empty:
+            temp = float(today["temp"].iloc[-1])
+            max_today = float(today["temp"].max())
+            min_today = float(today["temp"].min())
+            rh_vals = today["rh"].dropna()
+            rh = float(rh_vals.iloc[-1]) if not rh_vals.empty else None
+
+    # Fetch forecast data from HKO XML (max/min prediction)
+    hko = fetch_hko_data(target_str)
+
     # Fetch rainfall data
     rain_kwargs = compute_rain_kwargs_live()
     rain_60m = rain_kwargs.get("rain_60m", 0.0)
     rain_120m = rain_kwargs.get("rain_120m", 0.0)
-    
+
     # Get accumulated rainfall today from i-lens
     rain_accumulated = get_accumulated_rain_today()
-    
+
     # Get nowcast rainfall
     rain_nowcast_val = get_nowcast_rainfall()
-
-    temp = rh = None
-    if temp_rh:
-        _, temp, rh = temp_rh
 
     return WeatherNow(
         date=str(target_date),
         temp=temp,
         humidity=rh,
-        max_today=hko.get("max_since_midnight"),
-        min_today=hko.get("min_since_midnight"),
+        max_today=max_today,
+        min_today=min_today,
         forecast=hko.get("forecast_max"),
         aws_temp=hko.get("aws_temp"),
-        source="HKO API",
+        source="HKO AWS CSV",
         fetched_at=datetime.now(timezone.utc).isoformat(),
         rain_60m=rain_60m if rain_kwargs.get("rain_data_ok") else None,
         rain_120m=rain_120m if rain_kwargs.get("rain_data_ok") else None,
