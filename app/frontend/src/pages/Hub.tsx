@@ -17,13 +17,13 @@ export default function Hub() {
   const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(null)
   const [order, setOrder] = useState<string[]>([])
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["predictions", date, isMinTemp],
     queryFn: () => fetchPredictions(date, isMinTemp),
     refetchInterval: 120_000,
+    retry: 1, // 减少重试次数，快速暴露错误
   })
 
-  // 获取 Polymarket 事件数据
   const { data: todayEventData } = useQuery({
     queryKey: ["today-event", date, isMinTemp],
     queryFn: () => fetchTodayEvent(date, isMinTemp),
@@ -39,7 +39,6 @@ export default function Hub() {
     refetchInterval: 120_000,
   })
 
-  // 解码并提取市场概率
   const marketPrices = useMemo(() => {
     const p = eventData?.prices ?? {}
     const decoded: Record<string, number> = {}
@@ -54,24 +53,17 @@ export default function Hub() {
     if (data?.models) {
       const keys = Object.keys(data.models)
       if (keys.length > 0) {
-        // 1. 动态更新排序：保留原有顺序，将新出现的模型追加到末尾，并过滤掉已不存在的模型
         setOrder(prev => {
           const existingOrder = prev.filter(k => keys.includes(k))
           const newKeys = keys.filter(k => !prev.includes(k))
           return [...existingOrder, ...newKeys]
         })
-
-        // 2. 动态更新激活模型：如果当前激活的模型不在新数据里，则自动切换到第一个
         setActiveKey(prev => (prev && keys.includes(prev)) ? prev : keys[0])
-
-        // 3. 动态更新可见模型：如果之前没设置过，设为全部可见；如果设置过，保留原有状态并将新模型设为可见
         setVisibleKeys(prev => {
           if (!prev) return new Set(keys)
           const current = new Set(prev)
           keys.forEach(k => {
-            if (!prev.has(k)) {
-              current.add(k) // 新出现的模型默认设为可见
-            }
+            if (!prev.has(k)) current.add(k)
           })
           return current
         })
@@ -129,7 +121,6 @@ export default function Hub() {
 
   return (
     <div className="flex flex-col h-full w-full max-w-[1600px] mx-auto overflow-y-auto custom-scrollbar">
-      {/* 顶部标题与切换 */}
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 p-4 md:p-8 pb-0">
         <div>
           <p className="text-[10px] text-cyan-400/80 mono tracking-[0.2em] uppercase mb-2">Institutional Terminal</p>
@@ -169,7 +160,6 @@ export default function Hub() {
         <WeatherCards date={date} />
       </div>
 
-      {/* 模型共识轨 (横跨全宽) */}
       <div className="px-4 md:px-8">
         <ConsensusTrack 
           models={displayModels} 
@@ -178,15 +168,12 @@ export default function Hub() {
         />
       </div>
 
-      {/* 下部双栏：左模型矩阵，右市场分析 */}
       <div className="flex flex-col lg:flex-row gap-6 px-4 md:px-8 pb-8">
-        {/* 左侧：模型矩阵 */}
         <aside className="w-full lg:w-1/3 lg:min-w-[300px] lg:max-w-[400px] flex flex-col border border-white/[0.06] bg-[#09090b] rounded-md max-h-[600px] overflow-hidden">
           <div className="p-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
             <h2 className="text-[10px] font-medium text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2">
               <span className="w-4 h-px bg-slate-500"></span> Model Matrix
             </h2>
-            {/* 恢复原有的 Compare 模式按钮 */}
             <button
               onClick={() => setCompareMode(!compareMode)}
               className={["flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest px-3 py-1.5 rounded-md transition-colors",
@@ -201,6 +188,11 @@ export default function Hub() {
           <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
             {isLoading ? (
               <div className="text-center text-slate-400 text-xs py-4">Loading models...</div>
+            ) : isError ? (
+              <div className="text-center text-rose-400 text-xs py-4 px-2">
+                Failed to load models.<br/>
+                <span className="text-slate-500 text-[10px] mt-1 block">{(error as Error)?.message || "API Error"}</span>
+              </div>
             ) : displayModels.length > 0 ? (
               <ModelGrid
                 models={displayModels}
@@ -211,12 +203,11 @@ export default function Hub() {
                 onToggleVisible={handleToggleVisible}
               />
             ) : (
-              <div className="text-center text-slate-400 text-xs py-4">No models available</div>
+              <div className="text-center text-slate-400 text-xs py-4">No models available for this date.</div>
             )}
           </div>
         </aside>
 
-        {/* 右侧：市场分析图表 */}
         <section className="flex-1 w-full bg-[#0f1013] border border-white/[0.06] rounded-md p-6 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)]">
           <div className="flex justify-between items-center mb-6">
             <div>
@@ -227,8 +218,13 @@ export default function Hub() {
             </div>
           </div>
           <div className="h-[400px] w-full">
-            {isLoading || !data ? (
+            {isLoading ? (
               <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Loading chart data...</div>
+            ) : isError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-rose-400 text-sm text-center px-4">
+                Failed to load chart data.
+                <span className="text-slate-500 text-xs mt-2">{(error as Error)?.message || "API Error"}</span>
+              </div>
             ) : compareMode ? (
               <ComparisonChart
                 models={displayModels}

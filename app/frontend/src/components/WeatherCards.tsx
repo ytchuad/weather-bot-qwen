@@ -17,11 +17,17 @@ export default function WeatherCards({ date }: { date: string }) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   
   const [visibleKeys, setVisibleKeys] = useState<Set<CardKey>>(() => {
+    const defaultKeys = new Set(["temp", "humidity", "max_so_far", "min_so_far", "rain_60m"])
     try {
       const saved = localStorage.getItem("weatherCardVisibility")
-      return saved ? new Set(JSON.parse(saved)) : new Set(["temp", "humidity", "max_so_far", "min_so_far", "rain_60m"])
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        // 如果保存的数据是空数组，则返回默认值，防止什么都不显示
+        return parsed.length > 0 ? new Set(parsed) : defaultKeys
+      }
+      return defaultKeys
     } catch {
-      return new Set(["temp", "humidity", "max_so_far", "min_so_far", "rain_60m"])
+      return defaultKeys
     }
   })
 
