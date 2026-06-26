@@ -99,46 +99,60 @@ print(f"   濕度範圍: {df_obs['humidity'].min():.1f} ~ {df_obs['humidity'].ma
 print(f"   氣壓範圍: {df_obs['pressure'].min():.1f} ~ {df_obs['pressure'].max():.1f} hPa")
 
 # ======================================================================
-# 步驟 2：計算 Model C 的三個錨定特徵 (在原始分鐘數據上)
+# 步驟 2：修正版錨定特徵 (參考 AI 代理建議)
 # ======================================================================
-print("\n📊 步驟 2：計算錨定特徵 (max_so_far, drop_from_max, time_since_max)...")
+print("\n📊 步驟 2：計算修正版錨定特徵...")
 
-# 2.1 計算每日累積最高溫 (cumulative max)
+# 2.1 確保數據按日期與時間嚴格排序
+df_obs = df_obs.sort_values(['date', 'timestamp']).copy()
+
+# 2.2 計算累積最高溫 (max_so_far)
 df_obs['max_so_far'] = df_obs.groupby('date')['value'].cummax()
-print(f"   ✅ max_so_far 計算完成")
 
-# 2.2 計算每日最高溫第一次發生的時間
-# 找出每個日期中，value == max_so_far 且為該日期第一次出現的記錄
-df_obs['is_daily_max'] = df_obs['value'] == df_obs['max_so_far']
-daily_max_time = df_obs[df_obs['is_daily_max']].groupby('date')['timestamp'].min().reset_index()
-daily_max_time.columns = ['date', 'max_time']
-print(f"   ✅ 每日最高溫時間標記完成")
+# 2.3 計算「首次達到最高溫的時間」(is_new_high 邏輯)
+# 只有當目前數值突破或達到之前的累積最高值時，才標記為「新高時點」
+# 這避免了「數值持平」時被誤標記為新高的問題
+df_obs['prev_max'] = df_obs.groupby('date')['max_so_far'].shift(1).fillna(-999)
+df_obs['is_new_high'] = (df_obs['value'] >= df_obs['prev_max'])
 
-# 將 max_time 合併回 df_obs (以便後續計算 time_since_max)
-df_obs = df_obs.merge(daily_max_time, on='date', how='left')
+# 記錄達到該最高溫的時間 (僅在 is_new_high 為 True 時記錄)
+df_obs['max_so_far_time'] = np.where(
+    (df_obs['value'] == df_obs['max_so_far']) & (df_obs['is_new_high']),
+    df_obs['timestamp'],
+    pd.NaT
+)
 
-# 2.3 計算 time_since_max (距最高溫發生過了幾分鐘)
-df_obs['time_since_max'] = (df_obs['timestamp'] - pd.to_datetime(df_obs['max_time'])).dt.total_seconds() / 60
-# 若尚未到達最高溫 (負數)，設為 0 (代表還在上升階段)
-df_obs['time_since_max'] = df_obs['time_since_max'].clip(lower=0)
+# 將最高溫時間向前填充（fill forward）至同一天的所有後續分鐘
+df_obs['max_so_far_time'] = df_obs.groupby('date')['max_so_far_time'].ffill()
 
-# 2.4 計算 drop_from_max (離最高點掉了幾度)
+# 2.4 計算 time_since_max (分鐘)
+df_obs['time_since_max'] = (
+    (df_obs['timestamp'] - pd.to_datetime(df_obs['max_so_far_time'])).dt.total_seconds() / 60
+).fillna(0).clip(lower=0)
+
+# 2.5 計算 drop_from_max
 df_obs['drop_from_max'] = df_obs['max_so_far'] - df_obs['value']
 
-print(f"   ✅ 錨定特徵計算完成")
+print(f"   ✅ 修正版錨定特徵計算完成")
 print(f"      max_so_far 範圍: {df_obs['max_so_far'].min():.1f} ~ {df_obs['max_so_far'].max():.1f}°C")
-print(f"      drop_from_max 平均: {df_obs['drop_from_max'].mean():.2f}°C")
 print(f"      time_since_max 中位數: {df_obs['time_since_max'].median():.1f} 分鐘")
 
 # ======================================================================
-# 步驟 3：計算每日最終最高溫 (Label 用)
+# 步驟 3：計算每日最終最高溫 & 修正版 Label
 # ======================================================================
-print("\n📊 步驟 3：計算每日最高溫 (Label)...")
+print("\n📊 步驟 3：計算修正版 Label...")
+
 daily_max = df_obs.groupby('date')['value'].max().reset_index()
 daily_max.columns = ['date', 'daily_max_temp']
 df_obs = df_obs.merge(daily_max, on='date', how='left')
-df_obs['remaining_upside'] = df_obs['daily_max_temp'] - df_obs['value']
-print(f"   ✅ Label 計算完成")
+
+# 🔥 關鍵修正點：
+# Label = 每日最終最高溫 - 目前為止累積最高溫（而非當前溫度）
+# 如此一來，下雨導致當前溫度暴跌時，Label 不會變大，反而維持低點。
+df_obs['remaining_upside'] = df_obs['daily_max_temp'] - df_obs['max_so_far']
+df_obs['remaining_upside'] = df_obs['remaining_upside'].clip(lower=0)  # 物理上不小於0
+
+print(f"   ✅ Label 計算完成 (使用 max_so_far 錨定)")
 
 # ======================================================================
 # 步驟 4：讀取每日預測資料 (for forecast_gap)
@@ -240,7 +254,7 @@ print(f"   ✅ 滑動窗口特徵計算完成")
 # ======================================================================
 # 步驟 8：對齊每日官方預測 (forecast_gap)
 # ======================================================================
-print("\n📊 步驟 8：對齊每日官方預測...")
+print("\n📊 步驟 8：對齊每日官方預測 (修正 gap 計算)...")
 
 def get_latest_forecast(row):
     target_d = row['decision_date']
@@ -255,9 +269,18 @@ def get_latest_forecast(row):
 
 tqdm.pandas(desc="匹配預測")
 merged['forecast_max_temp_aligned'] = merged.progress_apply(get_latest_forecast, axis=1)
-merged['forecast_gap'] = merged['forecast_max_temp_aligned'] - merged['value']
 
-print(f"   ✅ 預測對齊完成")
+# 🔥 關鍵修正點：
+# 舊版: forecast_gap = forecast_max - value (被雨天膨脹)
+# 新版: forecast_gap_from_max = forecast_max - max_so_far (雨天不受影響)
+merged['forecast_gap_from_max'] = merged['forecast_max_temp_aligned'] - merged['max_so_far']
+# 若無預測資料，設為 0
+merged['forecast_gap_from_max'] = merged['forecast_gap_from_max'].fillna(0)
+
+# 為了保險，保留舊的 forecast_gap 但改名為備用（可選）
+# merged['forecast_gap'] = merged['forecast_max_temp_aligned'] - merged['value']
+
+print(f"   ✅ 預測對齊完成，forecast_gap_from_max 計算完成")
 
 # ======================================================================
 # 步驟 9：加入時間特徵
