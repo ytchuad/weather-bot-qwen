@@ -109,9 +109,9 @@ df_obs = df_obs.sort_values(['date', 'timestamp']).copy()
 # 2.2 計算累積最高溫 (max_so_far)
 df_obs['max_so_far'] = df_obs.groupby('date')['value'].cummax()
 
-# 2.3 計算「首次達到最高溫的時間」(is_new_high 邏輯)
-# 只有當目前數值突破或達到之前的累積最高值時，才標記為「新高時點」
-# 這避免了「數值持平」時被誤標記為新高的問題
+# 2.3 計算「達到最高溫的時間」(max_so_far time)
+# 使用 >= 表示平等高點/平台點也當作 max 刷新點
+# 這樣平台期 time_since_max = 0 是合理的行為
 df_obs['prev_max'] = df_obs.groupby('date')['max_so_far'].shift(1).fillna(-999)
 df_obs['is_new_high'] = (df_obs['value'] >= df_obs['prev_max'])
 
@@ -150,7 +150,9 @@ df_obs = df_obs.merge(daily_max, on='date', how='left')
 # Label = 每日最終最高溫 - 目前為止累積最高溫（而非當前溫度）
 # 如此一來，下雨導致當前溫度暴跌時，Label 不會變大，反而維持低點。
 df_obs['remaining_upside'] = df_obs['daily_max_temp'] - df_obs['max_so_far']
-df_obs['remaining_upside'] = df_obs['remaining_upside'].clip(lower=0)  # 物理上不小於0
+df_obs['remaining_upside'] = df_obs['remaining_upside'].clip(lower=0)
+
+df_obs['is_upside_zero'] = (df_obs['remaining_upside'] <= 0.05).astype(int)
 
 print(f"   ✅ Label 計算完成 (使用 max_so_far 錨定)")
 
@@ -203,7 +205,7 @@ merged = pd.merge_asof(
     df_decisions_sorted,
     df_obs_sorted[['timestamp', 'value', 'humidity', 'pressure', 
                    'max_so_far', 'drop_from_max', 'time_since_max', 
-                   'daily_max_temp', 'remaining_upside']],
+                   'daily_max_temp', 'remaining_upside', 'is_upside_zero']],
     left_on='lookback_time',
     right_on='timestamp',
     direction='backward'  # 向後找 (即找 <= lookback_time 的最新一筆)
@@ -222,28 +224,28 @@ print("\n📊 步驟 7：計算滑動窗口特徵...")
 # 按日期分組進行滾動計算
 def calc_rolling_features(group):
     group = group.sort_values('timestamp').reset_index(drop=True)
-    group['temp_slope_30min'] = np.nan
-    group['temp_volatility_30min'] = np.nan
-    group['humid_delta_30min'] = np.nan
-    group['pressure_delta_30min'] = np.nan
-    
-    for i in range(3, len(group)):  # 至少需要 3 個點 (30 分鐘)
-        window = group.iloc[i-3:i]
-        if len(window) >= 2:
-            # 升溫斜率 (線性迴歸)
-            x = np.arange(len(window))
-            y = window['value'].values
-            if len(y) == len(x) and len(y) > 1:
-                slope, _ = np.polyfit(x, y, 1)
-                group.loc[i, 'temp_slope_30min'] = slope
-            # 溫度波動 (標準差)
-            group.loc[i, 'temp_volatility_30min'] = window['value'].std()
-            # 濕度變化
-            if not window['humidity'].isna().all():
-                group.loc[i, 'humid_delta_30min'] = window['humidity'].iloc[-1] - window['humidity'].iloc[0]
-            # 氣壓變化
-            if not window['pressure'].isna().all():
-                group.loc[i, 'pressure_delta_30min'] = window['pressure'].iloc[-1] - window['pressure'].iloc[0]
+
+    # 決策間隔 10 分鐘，30 分鐘 = 3 行
+    group["value_lag_30min"] = group["value"].shift(3)
+    group["humidity_lag_30min"] = group["humidity"].shift(3)
+    group["pressure_lag_30min"] = group["pressure"].shift(3)
+
+    group["temp_slope_30min"] = (
+        group["value"] - group["value_lag_30min"]
+    ) / 30.0
+
+    group["temp_volatility_30min"] = (
+        group["value"].rolling(window=3, min_periods=2).std()
+    )
+
+    group["humid_delta_30min"] = (
+        group["humidity"] - group["humidity_lag_30min"]
+    )
+
+    group["pressure_delta_30min"] = (
+        group["pressure"] - group["pressure_lag_30min"]
+    )
+
     return group
 
 merged = merged.sort_values(['decision_date', 'timestamp'])
@@ -270,17 +272,13 @@ def get_latest_forecast(row):
 tqdm.pandas(desc="匹配預測")
 merged['forecast_max_temp_aligned'] = merged.progress_apply(get_latest_forecast, axis=1)
 
-# 🔥 關鍵修正點：
-# 舊版: forecast_gap = forecast_max - value (被雨天膨脹)
-# 新版: forecast_gap_from_max = forecast_max - max_so_far (雨天不受影響)
-merged['forecast_gap_from_max'] = merged['forecast_max_temp_aligned'] - merged['max_so_far']
-# 若無預測資料，設為 0
-merged['forecast_gap_from_max'] = merged['forecast_gap_from_max'].fillna(0)
+# 錨定版 forecast_gap: 官方預測最高溫 - 已觀測到的最高溫 (max_so_far)
+# 雨天當前溫度暴跌時 gap 不會被膨脹
+# 可為負值 (官方預測低於已觀測到的最高溫)，不 clip
+merged['forecast_gap'] = merged['forecast_max_temp_aligned'] - merged['max_so_far']
+merged['forecast_gap'] = merged['forecast_gap'].fillna(0)
 
-# 為了保險，保留舊的 forecast_gap 但改名為備用（可選）
-# merged['forecast_gap'] = merged['forecast_max_temp_aligned'] - merged['value']
-
-print(f"   ✅ 預測對齊完成，forecast_gap_from_max 計算完成")
+print(f"   ✅ 預測對齊完成，forecast_gap (錨定版) 計算完成")
 
 # ======================================================================
 # 步驟 9：加入時間特徵
@@ -319,16 +317,18 @@ print(f"   ✅ 最終樣本數: {len(merged):,}")
 # ======================================================================
 print("\n💾 步驟 11：儲存 Feature Store...")
 
-# 選擇最終輸出欄位 (共 15 個特徵 + 輔助欄位)
+# 選擇最終輸出欄位 (共 16 個特徵 + 2 個 label + 輔助欄位)
 final_cols = [
-    'decision_time', 'timestamp',  # 輔助 (timestamp 是 lookback_time)
+    'decision_time', 'timestamp',
     'value', 'humidity', 'pressure',
     'temp_slope_30min', 'temp_volatility_30min',
     'humid_delta_30min', 'pressure_delta_30min',
     'forecast_gap',
-    'max_so_far', 'drop_from_max', 'time_since_max',  # ✅ Model C 錨定特徵
+    'max_so_far', 'drop_from_max', 'time_since_max',
     'hour', 'minute', 'day_of_week', 'month',
-    'remaining_upside'  # Label
+    'remaining_upside',
+    'is_upside_zero',
+    'daily_max_temp',
 ]
 
 df_final = merged[final_cols].copy()
@@ -343,6 +343,37 @@ print(f"📊 最終維度: {df_final.shape}")
 print(f"📋 特徵清單: {list(df_final.columns)}")
 print("\n✅ 特徵統計摘要:")
 print(df_final.describe())
+
+# ==================== 完整性檢查 ====================
+print("\n🔍 完整性檢查:")
+assert "forecast_gap" in df_final.columns, "❌ forecast_gap 缺失"
+assert "remaining_upside" in df_final.columns, "❌ remaining_upside 缺失"
+assert "is_upside_zero" in df_final.columns, "❌ is_upside_zero 缺失"
+assert df_final["remaining_upside"].min() >= 0, "❌ remaining_upside 出現負值"
+slope_coverage = df_final["temp_slope_30min"].notna().mean()
+assert slope_coverage > 0.95, f"❌ temp_slope_30min 覆蓋率僅 {slope_coverage:.1%}"
+print(f"   ✅ forecast_gap 存在")
+print(f"   ✅ remaining_upside 存在，最小值 {df_final['remaining_upside'].min():.2f}")
+print(f"   ✅ is_upside_zero 存在")
+print(f"   ✅ temp_slope_30min 覆蓋率 {slope_coverage:.1%}")
+
+# 大雨後降溫診斷
+print("\n🌧️ 大雨降溫診斷 (drop_from_max >= 5):")
+rain_drop = df_final[df_final["drop_from_max"] >= 5]
+if len(rain_drop) > 0:
+    print(f"   樣本數: {len(rain_drop):,}")
+    print(f"   remaining_upside 中位數: {rain_drop['remaining_upside'].median():.2f}")
+    print(f"   is_upside_zero 比例: {rain_drop['is_upside_zero'].mean():.1%}")
+    print(f"   max_so_far 中位數: {rain_drop['max_so_far'].median():.1f}°C")
+    print(f"   value 中位數: {rain_drop['value'].median():.1f}°C")
+    near_max = rain_drop[rain_drop['daily_max_temp'] == rain_drop['max_so_far']]
+    if len(near_max) > 0:
+        zero_pct = near_max['is_upside_zero'].mean()
+        print(f"   已達 daily_max_temp 樣本: {len(near_max):,}，is_upside_zero={zero_pct:.1%}")
+        if zero_pct < 0.7:
+            print("   ⚠️ 預警: 大雨後已達最高溫但 remaining_upside 未趨近於 0")
+        else:
+            print("   ✅ 行為正確: 大雨後 remaining_upside 趨近於 0")
 
 print("\n" + "=" * 60)
 print("✅ 所有步驟完成！現在請執行 train_model_g.py 開始訓練。")

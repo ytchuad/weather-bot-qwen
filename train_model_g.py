@@ -50,7 +50,7 @@ LGB_PARAMS = dict(
     verbose=-1,
 )
 
-# ========== 定義 Model G 特徵清單 (15 個) ==========
+# ========== 定義 Model G 特徵清單 ==========
 # 來自 Model F 的 12 個特徵
 MODEL_F_FEATURES = [
     "value",                # 當前溫度 (T-8)
@@ -60,7 +60,7 @@ MODEL_F_FEATURES = [
     "temp_volatility_30min",# 過去 30 分鐘溫度波動
     "humid_delta_30min",    # 過去 30 分鐘濕度變化
     "pressure_delta_30min", # 過去 30 分鐘氣壓變化
-    "forecast_gap",         # 官方預測最高溫 - 當前溫度
+    "forecast_gap",         # 官方預測最高溫 - max_so_far
     "hour",                 # 當前小時
     "minute",               # 當前分鐘
     "day_of_week",          # 星期幾
@@ -74,7 +74,7 @@ MODEL_C_ANCHORS = [
     "time_since_max",       # 距離達到今日最高溫過了幾分鐘
 ]
 
-# Model G 最終特徵清單 (15 個)
+# Model G 最終特徵清單 (15 個: 12 Model F + 3 錨定)
 FEATURE_COLS = MODEL_F_FEATURES + MODEL_C_ANCHORS
 
 # ========== 輔助函數 ==========
@@ -252,11 +252,17 @@ def main():
     # 4. 準備訓練資料
     X_train = train[FEATURE_COLS]
     y_train = train["remaining_upside"]
-    y_train_zero = (train["remaining_upside"] <= 0.2).astype(int)
+    if "is_upside_zero" in train.columns:
+        y_train_zero = train["is_upside_zero"]
+    else:
+        y_train_zero = (train["remaining_upside"] <= 0.05).astype(int)
 
     X_valid = valid[FEATURE_COLS]
     y_valid = valid["remaining_upside"]
-    y_valid_zero = (valid["remaining_upside"] <= 0.2).astype(int)
+    if "is_upside_zero" in valid.columns:
+        y_valid_zero = valid["is_upside_zero"]
+    else:
+        y_valid_zero = (valid["remaining_upside"] <= 0.05).astype(int)
 
     # 5. 訓練分位數模型 (5 個)
     logger.info("=" * 50)

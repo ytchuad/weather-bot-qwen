@@ -2389,7 +2389,7 @@ def predict_intraday_tmax_model_g(current_datetime, max_so_far, temp_now,
 
     rh_change_30m = humidity - (rh_arr[idx-30] if idx >= 30 else rh_arr[0])
 
-    forecast_gap = forecast_tmax - temp_now if forecast_tmax is not None else 0.0
+    forecast_gap = forecast_tmax - max_so_far if forecast_tmax is not None else 0.0
     pressure_delta = pressure - pressure_30m_ago if pressure and pressure_30m_ago else 0.0
     drop_from_max = max_so_far - temp_now if max_so_far is not None else 0.0
 
@@ -2442,7 +2442,11 @@ def predict_intraday_tmax_model_g(current_datetime, max_so_far, temp_now,
                 prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
                 prob_max_reached = 1.0 if prob_max_reached > th else 0.0
 
-    pred_tmax_p50 = max(max_so_far, max_so_far + remaining_upside_p50)
+    pred_tmax_p10 = max_so_far + remaining_upside_p10
+    pred_tmax_p25 = max_so_far + remaining_upside_p25
+    pred_tmax_p50 = max_so_far + remaining_upside_p50
+    pred_tmax_p75 = max_so_far + remaining_upside_p75
+    pred_tmax_p90 = max_so_far + remaining_upside_p90
 
     return {
         'remaining_upside_p10': remaining_upside_p10,
@@ -2451,7 +2455,11 @@ def predict_intraday_tmax_model_g(current_datetime, max_so_far, temp_now,
         'remaining_upside_p75': remaining_upside_p75,
         'remaining_upside_p90': remaining_upside_p90,
         'prob_max_reached': prob_max_reached,
+        'pred_tmax_p10': pred_tmax_p10,
+        'pred_tmax_p25': pred_tmax_p25,
         'pred_tmax_p50': pred_tmax_p50,
+        'pred_tmax_p75': pred_tmax_p75,
+        'pred_tmax_p90': pred_tmax_p90,
         'sample_count': None,
     }
 
