@@ -17,13 +17,21 @@ export default function WeatherCards({ date }: { date: string }) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   
   const [visibleKeys, setVisibleKeys] = useState<Set<CardKey>>(() => {
-    const defaultKeys = new Set(["temp", "humidity", "max_so_far", "min_so_far", "rain_60m"])
+    // ✅ 修正 1：顯式指定 Set 的泛型型別為 <CardKey>
+    const defaultKeys = new Set<CardKey>(["temp", "humidity", "max_so_far", "min_so_far", "rain_60m"])
+    
     try {
       const saved = localStorage.getItem("weatherCardVisibility")
       if (saved) {
-        const parsed = JSON.parse(saved)
-        // 如果保存的数据是空数组，则返回默认值，防止什么都不显示
-        return parsed.length > 0 ? new Set(parsed) : defaultKeys
+        const parsed: string[] = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // ✅ 修正 2：將 parsed 斷言為 CardKey[]，並過濾掉無效的 key
+          const validKeys = parsed.filter((key): key is CardKey => 
+            defaultKeys.has(key as CardKey)
+          )
+          return validKeys.length > 0 ? new Set(validKeys) : defaultKeys
+        }
+        return defaultKeys
       }
       return defaultKeys
     } catch {
