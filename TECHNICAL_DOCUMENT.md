@@ -851,6 +851,87 @@ P(final_tmin_bucket = b) = P(morning_min_bucket = b) × P(survives)
 
 ---
 
+### 4.6 Model 2A：核心 + 風力特徵 (`models/train_model_2a.py`)
+
+Model 2A 整合分鐘級觀測、官方預報與 5 組測風站資料（參考站、離岸、高山、維多利亞港、京士柏），是功能最完整的日內最高溫預測模型。
+
+#### 4.6.1 特徵儲存庫 (`data/build_model_2a_feature_store.py`)
+
+特徵儲存庫由三種資料來源合併至 10 分鐘決策網格（06:00–23:50）產生：
+
+| 資料源 | 內容 | 檔案 |
+|--------|------|------|
+| 分鐘氣象 | 溫度、濕度、氣壓、露點（原始 1 分鐘） | `hk_weather_raw/*_{temperature,humidity,pressure,dew}.parquet` |
+| 風力 | 5 組測風站群組的平均/最大/散佈/站數 | `wind_data/*_wind_all.parquet` |
+| 預報 | HKO 每日預報（最高/最低溫、發布時間） | `hk_daily_forecast/daily_forecast_clean.parquet` |
+
+**資料修正項目**（相較初始版本）：
+1. `actual_high_today` 與 `max_so_far`/`min_so_far` 在原始 1 分鐘數據上計算，再合併至 10 分鐘決策時間，避免因時間聚合而低估每日最高溫。
+2. 以 `pd.merge_asof` 配對 `decision_time` 與 `forecast_issue_datetime`，確保僅使用決策時間前已發布的預報（無前瞻偏差）。
+3. 風力滾動最大值（`wind_{prefix}_max_60m`）使用群組 `max` 欄位，而非群組 `mean` 欄位。
+4. 資料新鮮度（`obs_data_age_minutes`、`wind_data_age_minutes`）以實際來源時間戳計算。
+5. 維多利亞港測站明確指定（`京士柏`、`啟德`、`九龍天星碼頭`），而非依賴 `未知` 類別映射。
+
+#### 4.6.2 模型架構
+
+- **45 個特徵**（定義於 `MODEL_2A_MIN_FEATURES`）：
+  - 5 當前狀態：`temp_current`、`rh_current`、`pressure_current`、`dew_point_current`、`dew_point_spread`
+  - 5 錨點：`max_so_far`、`min_so_far`、`range_so_far`、`drop_from_max`、`time_since_max`
+  - 6 溫度趨勢：`temp_change_30m`、`temp_change_60m`、`temp_slope_30m`、`temp_slope_60m`、`temp_acceleration_60m`、`temp_volatility_60m`
+  - 5 濕度/氣壓：`rh_change_60m`、`dew_point_change_60m`、`dew_point_spread_change_60m`、`pressure_change_60m`、`pressure_change_180m`
+  - 6 預報：`forecast_min_temp`、`forecast_max_temp`、`forecast_range`、`forecast_gap_from_max_so_far`、`forecast_age_minutes`、`forecast_lead_days`
+  - 8 風力：`wind_ref_mean`、`wind_ref_max`、`wind_victoria_harbour_mean`、`wind_victoria_harbour_max`、`wind_highland_mean`、`wind_highland_max`、`wind_all_change_60m`、`wind_kings_park_current`
+  - 7 時間特徵 + 2 新鮮度特徵
+- **分位數模型**：5 個 LightGBM 分位數回歸（q10/q25/q50/q75/q90），`max_depth=6`、`learning_rate=0.03`、`n_estimators=1500`
+- **分類器**：1 個 LightGBM 二元分類器預測 `is_upside_zero`（remaining_upside ≤ 0.05）
+- **時間分割**：2024-06-11 前訓練、2024-06-11 至 2025-06-11 驗證、2025-06-11 後 OOT
+
+#### 4.6.3 OOT 表現（54,289 筆，2025-06-11 至 2026-06-23）
+
+**整體**
+| 指標 | 數值 |
+|------|------|
+| MAE（剩餘上漲空間） | 0.426°C |
+| cov80 | 86.3% |
+| PIW | 1.413°C |
+| 偏差（q50） | +0.016°C |
+| q90 突破率 | 5.96% |
+| q10 突破率 | 7.75% |
+| 分類器 PR-AUC | 0.981 |
+| 分類器 F1（閾值 0.446） | 0.923 |
+
+**按小時區間**
+| 時段 | n | MAE_up | cov80 | PIW | 偏差 |
+|------|---|--------|-------|-----|------|
+| 00-06 | 13,573 | 0.803 | 78.8% | 2.584 | +0.036 |
+| 06-09 | 6,786 | 0.785 | 79.0% | 2.613 | +0.035 |
+| 09-12 | 6,786 | 0.654 | 80.5% | 2.270 | +0.107 |
+| 12-15 | 6,786 | 0.315 | 81.2% | 1.027 | -0.049 |
+| 15-18 | 6,786 | 0.036 | 94.9% | 0.143 | -0.027 |
+| 18-24 | 13,572 | 0.006 | 98.6% | 0.041 | -0.005 |
+
+**關鍵觀察**
+- 下午時段（12-18）表現優異：MAE < 0.32°C、cov80 > 81%。
+- 清晨/上午時段（00-09）不確定性較高（PIW ~2.6°C），因一日之初剩餘上漲空間較大。
+- 分類器 PR-AUC 高達 0.981，能可靠偵測當日最高溫是否已達到。
+
+#### 4.6.4 特徵重要性（q50 模型，按分裂增益）
+
+1. `drop_from_max` — 最重要的單一特徵
+2. `max_so_far`
+3. `temp_current`
+4. `forecast_gap_from_max_so_far`
+5. `time_since_max`
+6. `temp_change_60m`
+7. `wind_all_change_60m` — 首項風力特徵
+8. `wind_ref_mean`
+9. `temp_slope_60m`
+10. `pressure_current`
+
+風力特徵在核心溫度與預報特徵之後提供有意义的貢獻，尤其 60 分鐘風力變化與參考站平均風速。
+
+---
+
 ## 5. 推論與預測邏輯 (`models/intraday_inference.py`)
 
 ### 5.1 特徵組裝

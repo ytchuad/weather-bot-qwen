@@ -854,6 +854,106 @@ Summary statistics:
 
 ---
 
+### 4.6 Model G: Forecast-Gap + Max-So-Far (`models/train_model_g.py`)
+
+Model G predicts remaining upside using 17 features focused on forecast gap and max-so-far, without rainfall or nowcast data. It is a successor to the removed Model F.
+
+#### 4.6.1 Features (17)
+| Group | Features |
+|-------|----------|
+| Current state | `temp_current`, `humidity`, `pressure`, `temp_slope_30min`, `temp_volatility_30min`, `humid_delta_30min`, `pressure_delta_30min` |
+| Forecast | `forecast_gap` (forecast_max - max_so_far) |
+| Time | `hour`, `minute`, `day_of_week`, `month` |
+| Max-so-far | `drop_from_max` |
+
+#### 4.6.2 OOT Results
+| Metric | Value |
+|--------|-------|
+| cov80 | 84.3% |
+| PIW | ~1.5°C |
+| MAE | ~0.45°C |
+
+### 4.7 Model 2A: Core + Wind (`models/train_model_2a.py`)
+
+Model 2A combines the core minute-observation baseline with forecast features and wind station data from 5 station groups (Ref, Offshore, Highland, Victoria Harbour, King's Park). This is the most feature-rich intraday tmax model.
+
+#### 4.7.1 Feature Store (`data/build_model_2a_feature_store.py`)
+
+The feature store is built from three data sources merged onto a 10-minute decision grid (06:00–23:50):
+
+| Source | Data | Files |
+|--------|------|-------|
+| Minute weather | temp, RH, pressure, dew point (1-min raw) | `hk_weather_raw/*_{temperature,humidity,pressure,dew}.parquet` |
+| Wind | 5-group station wind speed (mean, max, spread, count) | `wind_data/*_wind_all.parquet` |
+| Forecast | HKO daily forecast (max/min, issue time) | `hk_daily_forecast/daily_forecast_clean.parquet` |
+
+**Data corrections applied** (vs initial build):
+1. `actual_high_today` and `max_so_far` / `min_so_far` computed on raw 1-minute data before rounding to the 10-minute grid, preventing the 10-min grid from artificially lowering daily max.
+2. Forecast merged via `pd.merge_asof` with `decision_time` / `forecast_issue_datetime` per target date, ensuring only forecasts issued before the decision time are used (no look-ahead).
+3. Wind rolling max (`wind_{prefix}_max_60m`) uses the group `max` column, not the group `mean` column.
+4. Data freshness (`obs_data_age_minutes`, `wind_data_age_minutes`) calculated from real source timestamps.
+5. Victoria Harbour stations explicitly mapped (`京士柏`, `啟德`, `九龍天星碼頭`) instead of relying on `"未知"` station_type mapping.
+
+#### 4.7.2 Architecture
+
+- **45 features** defined in `MODEL_2A_MIN_FEATURES`:
+  - 5 current state: `temp_current`, `rh_current`, `pressure_current`, `dew_point_current`, `dew_point_spread`
+  - 5 anchor: `max_so_far`, `min_so_far`, `range_so_far`, `drop_from_max`, `time_since_max`
+  - 6 temperature trend: `temp_change_30m`, `temp_change_60m`, `temp_slope_30m`, `temp_slope_60m`, `temp_acceleration_60m`, `temp_volatility_60m`
+  - 5 moisture/pressure: `rh_change_60m`, `dew_point_change_60m`, `dew_point_spread_change_60m`, `pressure_change_60m`, `pressure_change_180m`
+  - 6 forecast: `forecast_min_temp`, `forecast_max_temp`, `forecast_range`, `forecast_gap_from_max_so_far`, `forecast_age_minutes`, `forecast_lead_days`
+  - 8 wind: `wind_ref_mean`, `wind_ref_max`, `wind_victoria_harbour_mean`, `wind_victoria_harbour_max`, `wind_highland_mean`, `wind_highland_max`, `wind_all_change_60m`, `wind_kings_park_current`
+  - 7 time features + 2 freshness features
+- **Quantile models**: 5 LightGBM quantile regressors (q10/q25/q50/q75/q90) for remaining upside, trained with `max_depth=6, learning_rate=0.03, n_estimators=1500`
+- **Classifier**: 1 LightGBM binary classifier for `is_upside_zero` (remaining_upside ≤ 0.05)
+- **Training split**: Pre-2024-06-11 train, 2024-06-11 to 2025-06-11 valid, post-2025-06-11 OOT
+
+#### 4.7.3 OOT Performance (54,289 rows, 2025-06-11 to 2026-06-23)
+
+**Overall**
+| Metric | Value |
+|--------|-------|
+| MAE (remaining upside) | 0.426°C |
+| cov80 | 86.3% |
+| PIW | 1.413°C |
+| Bias (q50) | +0.016°C |
+| q90 breach rate | 5.96% |
+| q10 breach rate | 7.75% |
+| Classifier PR-AUC | 0.981 |
+| Classifier F1 (thr=0.446) | 0.923 |
+
+**By Hour Bucket**
+| Bucket | n | MAE_up | cov80 | PIW | Bias |
+|--------|---|--------|-------|-----|------|
+| 00-06 | 13,573 | 0.803 | 78.8% | 2.584 | +0.036 |
+| 06-09 | 6,786 | 0.785 | 79.0% | 2.613 | +0.035 |
+| 09-12 | 6,786 | 0.654 | 80.5% | 2.270 | +0.107 |
+| 12-15 | 6,786 | 0.315 | 81.2% | 1.027 | -0.049 |
+| 15-18 | 6,786 | 0.036 | 94.9% | 0.143 | -0.027 |
+| 18-24 | 13,572 | 0.006 | 98.6% | 0.041 | -0.005 |
+
+**Key observations:**
+- Afternoon buckets (12-18) show strong performance with MAE < 0.32°C and cov80 > 81%.
+- Morning/early buckets (00-09) have higher uncertainty (PIW ~2.6°C) due to larger remaining upside at the start of the day.
+- The classifier achieves high PR-AUC (0.981), making it reliable for detecting when max temperature has been reached.
+
+#### 4.7.4 Feature Importance
+Key features from the q50 model (by split gain):
+1. `drop_from_max` — most important single feature
+2. `max_so_far`
+3. `temp_current`
+4. `forecast_gap_from_max_so_far`
+5. `time_since_max`
+6. `temp_change_60m`
+7. `wind_all_change_60m` — first wind feature
+8. `wind_ref_mean`
+9. `temp_slope_60m`
+10. `pressure_current`
+
+Wind features contribute meaningfully after the core temperature and forecast features, particularly wind change over 60 minutes and reference station mean speed.
+
+---
+
 ## 5. Inference & Prediction Logic (`models/intraday_inference.py`)
 
 ### 5.1 Feature Assembly
