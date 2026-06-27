@@ -425,14 +425,6 @@ def select_minute_model(signal_context: dict, config: dict, model_cache_availabl
             'source_label': 'Model G (forecast_gap+max)',
             'reason_code': REASON_PASS_ALL,
         }
-    # Model F selection (forecast_gap-based)
-    if 'model_f' in model_cache_available:
-        return {
-            'selected_model': 'model_f',
-            'multiplier': ms.get('model_f_multiplier', 1.0),
-            'source_label': 'Model F (forecast_gap)',
-            'reason_code': REASON_PASS_ALL,
-        }
     if nowcast_fresh and nowcast_available and 'model_c' in model_cache_available:
         return {
             'selected_model': 'model_c',
@@ -553,7 +545,6 @@ def get_model_confidence_multiplier(model_key: str, config: dict) -> float:
     ms = config.get('entry', {}).get('model_selection', {})
     multipliers = {
         'model_g': ms.get('model_g_multiplier', 1.0),
-        'model_f': ms.get('model_f_multiplier', 1.0),
         'model_c': ms.get('model_c_multiplier', 1.0),
         'model_b': ms.get('model_b_fallback_multiplier', 0.7),
         'model_a': ms.get('model_a_fallback_multiplier', 0.5),

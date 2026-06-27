@@ -44,7 +44,7 @@ TMIN_BUCKETS = [
 ]
 
 # ---- Model keys ----
-MODEL_KEYS = ["9d", "aws", "baseline", "rain_nowcast", "rain_observed", "model_a", "model_b", "model_c", "model_d", "model_e", "model_f", "model_g", "model_2a"]
+MODEL_KEYS = ["9d", "aws", "baseline", "rain_nowcast", "rain_observed", "model_a", "model_b", "model_c", "model_d", "model_e", "model_g", "model_2a"]
 MODEL_LABELS = {
     "9d": "9-Day XGBoost",
     "aws": "AWS High-Freq",
@@ -56,7 +56,6 @@ MODEL_LABELS = {
     "model_c": "Model C (Nowcast)",
     "model_d": "Model D",
     "model_e": "Model E",
-    "model_f": "Model F (Gap)",
     "model_g": "Model G (Gap+Max)",
     "model_2a": "Model 2A (Core+Wind)",
 }
@@ -70,6 +69,7 @@ STRATEGY_MODEL_ALIASES = {
     "model_a_paper": "model_a",
     "model_b_paper": "model_b",
     "model_c_paper": "model_c",
+    "model_2a_paper": "model_2a",
 }
 
 # ---- HKO API endpoints ----
@@ -94,7 +94,6 @@ COLORS = {
     "model_c": "#FFA15A",
     "model_d": "#19D3F3",
     "model_e": "#FF6692",
-    "model_f": "#00E5FF",
     "model_g": "#FFB86C",
     "model_2a": "#FF2C97",
     "9d": "#1f77b4",

@@ -30,7 +30,10 @@ The system is structured into three distinct layers:
 *   **Intraday Model (LightGBM)**: Quantile regression models (q10-q90), for predicting "remaining upside/downside".
 *   **Model A (Minute-Level LightGBM, temp+RH only)**: Higher-resolution (5-min) quantile models using temperature + relative humidity only, no rainfall features.
 *   **Model B (Minute-Level LightGBM, temp+RH+rainfall, trained)**: Augments Model A with rainfall accumulation and cooling features at minute granularity from HKO 15-min rain gauge data.
-*   **Model C (Planned — Minute + Rainfall + Nowcast)**: Augments Model B with 37 spatial rainfall nowcast features from HKO gridded nowcast data.
+*   **Model C (Minute + Rainfall + Nowcast)**: Augments Model B with 37 spatial rainfall nowcast features from HKO gridded nowcast data.
+*   **Model D / E (Tmin)**: Cross-midnight, evening cooling, and morning minimum prediction models for Tmin.
+*   **Model G (Gap+Max)**: Forecast-gap + max_so_far based intraday tmax model (17 features).
+*   **Model 2A (Core+Wind)**: Combines minute observations, forecast gap, wind station data, pressure, and dew point for intraday tmax (45 features, OOT MAE=0.222°C, PR-AUC=0.992).
 *   **Rainfall-aware Model**: Specialized features to capture rain-cooling effects.
 *   **Fusion Engine**: Bayesian fusion combining prior (XGBoost) and posterior (LightGBM) distributions.
 
@@ -1310,6 +1313,8 @@ The **Strategies** page (`app/pages/page_strategies.py`) replaces the old Portfo
 *   **Model A (Minute-Level, temp+RH)**: 5-min resolution predictions using temperature + RH only.
 *   **Model B (Minute-Level, temp+RH+rainfall)**: Model A + rainfall history features at minute resolution (trained, integrated).
 *   **Model C (Planned)**: Model B + 37 spatial rainfall nowcast features.
+*   **Model G (Gap+Max)**: Forecast-gap + max_so_far based intraday tmax.
+*   **Model 2A (Core+Wind)**: Baseline + forecast + wind station data + pressure + dew point.
 
 ### 7.4 Performance Tracking
 *   **Forward Test Log**: Evaluates model predictions against actual outcomes.
@@ -1422,6 +1427,7 @@ Weather_Bot_Qwen/
 │   ├── train_minute_model_a_restricted.py  # A_restricted: ≥2023-06-01 control
 │   ├── train_minute_model_b_restricted.py  # B_restricted: ≥2023-06-01 control
 │   ├── train_minute_model_c.py             # Model C training (+nowcast)
+│   ├── train_model_2a.py                   # Model 2A training (+wind + forecast)
 │   ├── intraday_minute_ml/                 # Model A artifacts (38 features)
 │   ├── intraday_minute_ml_model_b/         # Model B artifacts (46 features)
 │   ├── intraday_minute_ml_model_c/         # Model C artifacts (83 features)
@@ -1431,7 +1437,9 @@ Weather_Bot_Qwen/
 │   ├── intraday_minute_ml_model_b_tmin/    # Model B Tmin artifacts
 │   ├── intraday_minute_ml_model_c_tmin/    # Model C Tmin artifacts
 │   ├── intraday_minute_ml_model_d/         # Model D artifacts (cross-midnight)
-│   └── intraday_minute_ml_model_e/         # Model E artifacts (morning min)
+│   ├── intraday_minute_ml_model_e/         # Model E artifacts (morning min)
+│   ├── intraday_minute_ml_model_g/         # Model G artifacts (forecast-gap + max)
+│   └── intraday_minute_ml_model_2a/        # Model 2A artifacts (wind + forecast)
 ├── experiments/            # Experimental analysis scripts
 │   └── calibration_model_b.py              # Residual-based interval calibration
 ├── scripts/                # Utility scripts
@@ -1473,8 +1481,10 @@ Weather_Bot_Qwen/
 3. **Restricted Experiment (A vs B)**: ✅ Done. Within the rainfall-available period (≥2023-06-01, 109K train rows), rainfall features reduce rain bias (−0.128) and rain MAE (−0.067). But data volume (pre-2023 history) dominates overall performance.
 4. **Interval Calibration**: ✅ Done. Residual-based calibration for rain rows (p10=-1.97, p90=+0.55) achieves 80% rain-regime coverage. See §4.4.10.
 5. **Dashboard Integration**: ✅ Model B added to summary row, comparison tabs, model selector.
-5. **Backtesting**: Run Minute Model B/C through the paper-trader backtest pipeline to measure PnL impact.
-6. **Scheduled Retraining**: Automate weekly retraining of all minute models as new HKO minute data accumulates.
+6. **Model G (Gap+Max)**: ✅ Trained and integrated. Forecast-gap + max_so_far features; OOT cov80=84.3%.
+7. **Model 2A (Core+Wind)**: ✅ Trained and integrated. 45 features including wind station data, pressure, dew point; OOT MAE=0.222°C, cov80=93.2%, PR-AUC=0.992.
+8. **Backtesting**: Run Minute Model B/C through the paper-trader backtest pipeline to measure PnL impact.
+9. **Scheduled Retraining**: Automate weekly retraining of all minute models as new HKO minute data accumulates.
 
 ### Medium-Term: Infrastructure & Quality
 *   **Model Quality**: Automated data-quality reports, by-hour validation, scheduled retraining.

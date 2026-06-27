@@ -57,8 +57,11 @@ The **trading‑related modules** are separated as an optional **research, paper
 - **Intraday LightGBM quantile model** → remaining upside / downside quantiles
 - **Rainfall‑aware intraday model** → same‑day nowcast aware of rain intensity and regime
 - **Model A (minute‑level, temp+RH)** → 5‑min resolution quantile model (38 features, temp + RH only)
-- **Model B (planned)** → Model A + rainfall history features at minute granularity
-- **Model C (planned)** → Model B + 37 spatial rainfall nowcast features
+- **Model B (Rain)** → Model A + rainfall history features at minute granularity
+- **Model C (Nowcast)** → Model B + 37 spatial rainfall nowcast features
+- **Model D / E** → Enhanced minute-level variants
+- **Model G (Gap+Max)** → forecast-gap + max_so_far based intraday model
+- **Model 2A (Core+Wind)** → Baseline + forecast + wind station data + pressure + dew point (45 features, OOT MAE=0.222°C, PR-AUC=0.992)
 - **Empirical baseline fallback** (lookup tables) for quick reference
 - Calibration & probability mapping → bucket probabilities
 - **Bayesian fusion** between prior (long‑horizon) and posterior (intraday)

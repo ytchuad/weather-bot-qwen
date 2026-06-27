@@ -47,7 +47,7 @@ def _check_model_files() -> list[dict]:
             for var in ["tmax", "tmin"]:
                 p = MODELS_DIR / f"aws_hf_{var}"
                 results.append(_check_file(p, f"aws_{var}"))
-        elif mk in ("baseline", "model_a", "model_b", "model_c", "model_d", "model_e"):
+        elif mk in ("baseline", "model_a", "model_b", "model_c", "model_d", "model_e", "model_g", "model_2a"):
             p = MODELS_DIR / f"intraday_model_{mk}.txt"
             results.append(_check_file(p, f"intraday_{mk}"))
         elif mk == "rain_nowcast":

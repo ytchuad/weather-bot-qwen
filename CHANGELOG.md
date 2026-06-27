@@ -13,6 +13,7 @@
 ### Changed
 - **Model G target definition fixed**: `remaining_upside` now uses `daily_max_temp - max_so_far` (not `temp_current`); `forecast_gap` uses `forecast_max_temp - max_so_far`; rolling features replaced with shift-based; added `is_upside_zero` classifier target with ≤0.05 threshold
 - **.gitignore**: Added `data/wind_data/`, `data/weather_minute_wide.parquet`, `data/wind_features_10min.parquet`, `data/forecast_features.parquet`, `data/model_2a_feature_store.parquet`
+- **Model F removed**: Removed `model_f` from `app/config.py`, `intraday_inference.py`, `strategy_builder.py`, `strategy_card.py`, `page_health.py`
 
 ## [2026-06-19]
 
