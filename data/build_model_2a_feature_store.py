@@ -111,12 +111,19 @@ def build_wind_features():
     print(f"  Files: {len(all_files)}")
 
     chunks = []
+    _diag_printed = False
     for f in tqdm(all_files, desc="Wind"):
         day = pd.read_parquet(f)
         day['group'] = day['station_type'].map(STATION_GROUP_MAP)
 
         # Fix 5: Override Victoria Harbour stations explicitly + diagnostics
-        print(day.groupby("station_type")["station"].unique())
+        if not _diag_printed:
+            _grp = day.groupby("station_type")["station"].unique()
+            with open("wind_station_diag.txt", "w", encoding="utf-8") as _d:
+                for _k, _v in _grp.items():
+                    _d.write(f"{_k}: {list(_v)}\n")
+            print("  Station diagnostics written to wind_station_diag.txt")
+            _diag_printed = True
         day.loc[
             day["station"].isin(VICTORIA_HARBOUR_STATIONS),
             "group"
@@ -353,12 +360,18 @@ def match_forecast(df, df_fc):
             fc_g,
             left_on="decision_time",
             right_on="forecast_issue_datetime",
-            direction="backward"
+            direction="backward",
+            suffixes=("", "_fc")
         )
 
         out.append(m)
 
     merged = pd.concat(out, ignore_index=True)
+
+    # Drop duplicate target_date_fc column from forecast
+    for _col in ["target_date_fc"]:
+        if _col in merged.columns:
+            merged = merged.drop(columns=[_col])
 
     merged["forecast_age_minutes"] = (
         merged["decision_time"] - merged["forecast_issue_datetime"]
@@ -446,7 +459,7 @@ def sanity_checks(df):
             if zp < 0.7:
                 print("  Warning: remaining_upside should be near 0 after rain drop")
             else:
-                print("  Correct: rain drop + max reached ≈ zero upside")
+                print("  Correct: rain drop + max reached ~ zero upside")
 
 
 def validate_actual_high(df_weather, df_final):
@@ -457,6 +470,9 @@ def validate_actual_high(df_weather, df_final):
         .max()
         .rename("raw_actual_high")
     )
+    if "target_date" not in df_final.columns:
+        print("  Skipping validation: target_date column not in df_final")
+        return
     fs_daily = (
         df_final.groupby(pd.to_datetime(df_final["target_date"]).dt.date)["actual_high_today"]
         .max()
