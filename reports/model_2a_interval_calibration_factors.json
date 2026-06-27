@@ -1,0 +1,10 @@
+{
+  "15-18": {
+    "scale_lower": 0.9999999999999998,
+    "scale_upper": 0.3
+  },
+  "18-24": {
+    "scale_lower": 0.3,
+    "scale_upper": 0.3
+  }
+}
