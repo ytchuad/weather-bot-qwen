@@ -1,6 +1,20 @@
 # Changelog
 
-## [Unreleased] - 2026-06-19
+## [Unreleased] - 2026-06-27
+
+### Added
+- **Model 2A (Core+Wind)**: New intraday tmax model combining minute observations, forecast gap, wind station data (Ref, Victoria Harbour, Highland, King's Park), pressure, dew point, and temporal features
+  - Feature store builder: `data/build_model_2a_feature_store.py`
+  - Training script: `models/train_model_2a.py`
+  - Inference: `predict_intraday_tmax_model_2a()` added to `models/intraday_inference.py`
+  - OOT: MAE=0.222°C, cov80=93.2%, PIW=0.340°C, PR-AUC=0.992
+- **UI integration**: Model 2A registered in `app/config.py` (key, label, colour) and `app/frontend/src/components/ModelGrid.tsx` (label)
+
+### Changed
+- **Model G target definition fixed**: `remaining_upside` now uses `daily_max_temp - max_so_far` (not `temp_current`); `forecast_gap` uses `forecast_max_temp - max_so_far`; rolling features replaced with shift-based; added `is_upside_zero` classifier target with ≤0.05 threshold
+- **.gitignore**: Added `data/wind_data/`, `data/weather_minute_wide.parquet`, `data/wind_features_10min.parquet`, `data/forecast_features.parquet`, `data/model_2a_feature_store.parquet`
+
+## [2026-06-19]
 
 ### Fixed
 - **HKO Daily Data source corrected**: Changed `fetch_hko_data()` to use `HKO_AWS_CSV_URL` (`https://www.hko.gov.hk/wxinfo/awsgis/hko.csv`) for calculating `max_since_midnight` and `min_since_midnight` instead of the defunct `HKO_MAXMIN_URL`

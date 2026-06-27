@@ -92,6 +92,7 @@ export const LABEL_MAP: Record<string, string> = {
   model_a: "Model A",
   model_b: "Model B",
   model_c: "Model C",
+  model_2a: "Model 2A",
 }
 
 export default function ModelGrid({
