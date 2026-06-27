@@ -215,9 +215,8 @@ def build_decision_calendar():
     while cur <= END_DATE:
         times.append(cur)
         cur += timedelta(minutes=DECISION_INTERVAL)
-        if cur.hour >= ACTIVE_END_HOUR + 1:
+        if cur.hour < ACTIVE_START_HOUR:
             cur = cur.replace(hour=ACTIVE_START_HOUR, minute=0, second=0, microsecond=0)
-            cur += timedelta(days=1)
 
     df = pd.DataFrame({'decision_time': times})
     df['target_date'] = df['decision_time'].dt.date
@@ -250,9 +249,10 @@ def merge_asof_features(decisions, source, suffix):
 
 def compute_anchors(df):
     print("\n=== Step 6: Anchor Features ===")
-    # Fix 1: Use raw-minute cummax/cummin that were carried over from weather table
-    df['max_so_far'] = df['max_so_far_raw']
-    df['min_so_far'] = df['min_so_far_raw']
+    # Recompute per target_date to avoid stale cross-date data from merge_asof
+    df = df.sort_values(['target_date', 'decision_time'])
+    df['max_so_far'] = df.groupby('target_date')['temp_current'].cummax()
+    df['min_so_far'] = df.groupby('target_date')['temp_current'].cummin()
     df['range_so_far'] = df['max_so_far'] - df['min_so_far']
     df['drop_from_max'] = df['max_so_far'] - df['temp_current']
     df['rise_from_min'] = df['temp_current'] - df['min_so_far']
@@ -396,7 +396,11 @@ def match_forecast(df, df_fc):
 
 def compute_targets(df):
     print("\n=== Step 8: Targets ===")
-    # Fix 1: actual_high_today already comes from raw minute data, no need to recompute
+    # Recompute per target_date to avoid stale cross-date data from weather date grouping
+    daily_max = df.groupby('target_date')['temp_current'].max().reset_index()
+    daily_max.columns = ['target_date', 'actual_high_today']
+    df = df.drop(columns=['actual_high_today'], errors='ignore')
+    df = df.merge(daily_max, on='target_date', how='left')
     df['remaining_upside'] = (df['actual_high_today'] - df['max_so_far']).clip(lower=0)
     df['is_upside_zero'] = (df['remaining_upside'] <= 0.05).astype(int)
     return df
@@ -505,6 +509,10 @@ def main():
     merged = merge_asof_features(decisions, df_weather, suffix=False)
     wc = merged['temp_current'].notna().mean()
     print(f"  Coverage: {wc:.1%}")
+    # Drop stale columns from weather table (date grouping is per weather date, not target_date)
+    for _col in ['date', 'max_so_far_raw', 'min_so_far_raw']:
+        if _col in merged.columns:
+            merged = merged.drop(columns=[_col])
 
     print("\n=== Step 5b: Merge Wind ===")
     wind_cols = [c for c in df_wind.columns if c.startswith('wind_') or c in ('available_time', 'wind_timestamp')]

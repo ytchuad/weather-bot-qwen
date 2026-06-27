@@ -33,7 +33,7 @@ The system is structured into three distinct layers:
 *   **Model C (Minute + Rainfall + Nowcast)**: Augments Model B with 37 spatial rainfall nowcast features from HKO gridded nowcast data.
 *   **Model D / E (Tmin)**: Cross-midnight, evening cooling, and morning minimum prediction models for Tmin.
 *   **Model G (Gap+Max)**: Forecast-gap + max_so_far based intraday tmax model (17 features).
-*   **Model 2A (Core+Wind)**: Combines minute observations, forecast gap, wind station data, pressure, and dew point for intraday tmax (45 features, OOT MAE=0.222°C, PR-AUC=0.992).
+*   **Model 2A (Core+Wind)**: Combines minute observations, forecast gap, wind station data, pressure, and dew point for intraday tmax (45 features, OOT MAE=0.306°C, PR-AUC=0.987).
 *   **Rainfall-aware Model**: Specialized features to capture rain-cooling effects.
 *   **Fusion Engine**: Bayesian fusion combining prior (XGBoost) and posterior (LightGBM) distributions.
 
@@ -875,7 +875,7 @@ Model G predicts remaining upside using 17 features focused on forecast gap and 
 
 ### 4.7 Model 2A: Core + Wind (`models/train_model_2a.py`)
 
-Model 2A combines the core minute-observation baseline with forecast features and wind station data from 5 station groups (Ref, Offshore, Highland, Victoria Harbour, King's Park). This is the most feature-rich intraday tmax model.
+Model 2A combines the core minute-observation baseline with forecast features and wind station data from 4 station groups (Ref, Offshore, Highland, Victoria Harbour) plus selected raw station features (King's Park, Kai Tak). This is the most feature-rich intraday tmax model.
 
 #### 4.7.1 Feature Store (`data/build_model_2a_feature_store.py`)
 
@@ -888,11 +888,13 @@ The feature store is built from three data sources merged onto a 10-minute decis
 | Forecast | HKO daily forecast (max/min, issue time) | `hk_daily_forecast/daily_forecast_clean.parquet` |
 
 **Data corrections applied** (vs initial build):
-1. `actual_high_today` and `max_so_far` / `min_so_far` computed on raw 1-minute data before rounding to the 10-minute grid, preventing the 10-min grid from artificially lowering daily max.
-2. Forecast merged via `pd.merge_asof` with `decision_time` / `forecast_issue_datetime` per target date, ensuring only forecasts issued before the decision time are used (no look-ahead).
-3. Wind rolling max (`wind_{prefix}_max_60m`) uses the group `max` column, not the group `mean` column.
-4. Data freshness (`obs_data_age_minutes`, `wind_data_age_minutes`) calculated from real source timestamps.
-5. Victoria Harbour stations explicitly mapped (`京士柏`, `啟德`, `九龍天星碼頭`) instead of relying on `"未知"` station_type mapping.
+1. Decision calendar generates only 06:00–23:50 rows (excludes 00:00–05:50 from midnight carry-over).
+2. `max_so_far` / `min_so_far` recomputed per `target_date` after the merge (not carried from weather table's per-calendar-date cummax), preventing stale data from the previous day's observations.
+3. `actual_high_today` recomputed per `target_date` after merge (max of 10-min `temp_current`), ensuring the target matches the correct date.
+4. Forecast merged via `pd.merge_asof` with `decision_time` / `forecast_issue_datetime` per target date, ensuring only forecasts issued before the decision time are used (no look-ahead).
+5. Wind rolling max (`wind_{prefix}_max_60m`) uses the group `max` column, not the group `mean` column.
+6. Data freshness (`obs_data_age_minutes`, `wind_data_age_minutes`) calculated from real source timestamps.
+7. Victoria Harbour stations explicitly mapped (`京士柏`, `啟德`, `九龍天星碼頭`) instead of relying on `"未知"` station_type mapping.
 
 #### 4.7.2 Architecture
 
@@ -908,34 +910,34 @@ The feature store is built from three data sources merged onto a 10-minute decis
 - **Classifier**: 1 LightGBM binary classifier for `is_upside_zero` (remaining_upside ≤ 0.05)
 - **Training split**: Pre-2024-06-11 train, 2024-06-11 to 2025-06-11 valid, post-2025-06-11 OOT
 
-#### 4.7.3 OOT Performance (54,289 rows, 2025-06-11 to 2026-06-23)
+#### 4.7.3 OOT Performance (40,716 rows, 2025-06-11 to 2026-06-22)
 
 **Overall**
 | Metric | Value |
 |--------|-------|
-| MAE (remaining upside) | 0.426°C |
-| cov80 | 86.3% |
-| PIW | 1.413°C |
-| Bias (q50) | +0.016°C |
-| q90 breach rate | 5.96% |
-| q10 breach rate | 7.75% |
-| Classifier PR-AUC | 0.981 |
-| Classifier F1 (thr=0.446) | 0.923 |
+| MAE (remaining upside) | 0.306°C |
+| cov80 | 88.7% |
+| PIW | 0.993°C |
+| Bias (q50) | +0.006°C |
+| q90 breach rate | 5.48% |
+| q10 breach rate | 5.81% |
+| Classifier PR-AUC | 0.987 |
+| Classifier F1 (thr=0.462) | 0.934 |
 
 **By Hour Bucket**
 | Bucket | n | MAE_up | cov80 | PIW | Bias |
 |--------|---|--------|-------|-----|------|
-| 00-06 | 13,573 | 0.803 | 78.8% | 2.584 | +0.036 |
-| 06-09 | 6,786 | 0.785 | 79.0% | 2.613 | +0.035 |
-| 09-12 | 6,786 | 0.654 | 80.5% | 2.270 | +0.107 |
-| 12-15 | 6,786 | 0.315 | 81.2% | 1.027 | -0.049 |
-| 15-18 | 6,786 | 0.036 | 94.9% | 0.143 | -0.027 |
-| 18-24 | 13,572 | 0.006 | 98.6% | 0.041 | -0.005 |
+| 06-09 | 6,786 | 0.812 | 80.3% | 2.611 | +0.088 |
+| 09-12 | 6,786 | 0.643 | 80.3% | 2.161 | +0.079 |
+| 12-15 | 6,786 | 0.315 | 80.7% | 1.012 | -0.074 |
+| 15-18 | 6,786 | 0.045 | 94.2% | 0.127 | -0.037 |
+| 18-24 | 13,572 | 0.010 | 98.3% | 0.022 | -0.009 |
 
 **Key observations:**
-- Afternoon buckets (12-18) show strong performance with MAE < 0.32°C and cov80 > 81%.
-- Morning/early buckets (00-09) have higher uncertainty (PIW ~2.6°C) due to larger remaining upside at the start of the day.
-- The classifier achieves high PR-AUC (0.981), making it reliable for detecting when max temperature has been reached.
+- Afternoon buckets (12-18) show strong performance with MAE < 0.32°C and cov80 > 80%.
+- Morning buckets (06-12) have higher uncertainty (PIW ~2.4°C) due to larger remaining upside at the start of the day.
+- The classifier achieves high PR-AUC (0.987), making it reliable for detecting when max temperature has been reached.
+- With the corrected feature store (per-target-date `actual_high_today` and no midnight carry-over), OOT MAE fell from 0.426°C to 0.306°C and PIW narrowed from 1.413°C to 0.993°C.
 
 #### 4.7.4 Feature Importance
 Key features from the q50 model (by split gain):
@@ -1582,7 +1584,7 @@ Weather_Bot_Qwen/
 4. **Interval Calibration**: ✅ Done. Residual-based calibration for rain rows (p10=-1.97, p90=+0.55) achieves 80% rain-regime coverage. See §4.4.10.
 5. **Dashboard Integration**: ✅ Model B added to summary row, comparison tabs, model selector.
 6. **Model G (Gap+Max)**: ✅ Trained and integrated. Forecast-gap + max_so_far features; OOT cov80=84.3%.
-7. **Model 2A (Core+Wind)**: ✅ Trained and integrated. 45 features including wind station data, pressure, dew point; OOT MAE=0.222°C, cov80=93.2%, PR-AUC=0.992.
+7. **Model 2A (Core+Wind)**: ✅ Trained and integrated. 45 features including wind station data, pressure, dew point; OOT MAE=0.306°C, cov80=88.7%, PR-AUC=0.987.
 8. **Backtesting**: Run Minute Model B/C through the paper-trader backtest pipeline to measure PnL impact.
 9. **Scheduled Retraining**: Automate weekly retraining of all minute models as new HKO minute data accumulates.
 
