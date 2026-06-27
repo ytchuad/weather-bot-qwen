@@ -47,6 +47,9 @@ STATION_GROUP_MAP = {
     "未知": "victoria_harbour",
 }
 
+# Fix 5: Explicit Victoria Harbour stations
+VICTORIA_HARBOUR_STATIONS = ["京士柏", "啟德", "九龍天星碼頭"]
+
 SPECIAL_STATIONS = {
     "wind_kings_park_current": "京士柏",
     "wind_kai_tak_current": "啟德",
@@ -83,10 +86,20 @@ def build_weather_minute_wide():
 
     df = df.sort_values('timestamp').reset_index(drop=True)
     df['dew_point_spread'] = df['temp_current'] - df['dew_point_current']
+
+    # Fix 1: Calculate raw-minute cumulative and daily high BEFORE rounding to 10-min grid
+    df['date'] = df['timestamp'].dt.date
+    df = df.sort_values(['date', 'timestamp'])
+    df['max_so_far_raw'] = df.groupby('date')['temp_current'].cummax()
+    df['min_so_far_raw'] = df.groupby('date')['temp_current'].cummin()
+    df['actual_high_today'] = df.groupby('date')['temp_current'].transform('max')
+
+    # Preserve weather_timestamp for freshness calculation (Fix 4)
+    df['weather_timestamp'] = df['timestamp']
+
     df['available_time'] = df['timestamp'].apply(
         lambda ts: ceil_dt_10min(ts) + timedelta(minutes=DATA_LAG)
     )
-    df['date'] = df['timestamp'].dt.date
     print(f"  Shape: {df.shape}, range: {df['timestamp'].min()} ~ {df['timestamp'].max()}")
     df.to_parquet(OUTPUT_WEATHER, index=False)
     return df
@@ -101,6 +114,13 @@ def build_wind_features():
     for f in tqdm(all_files, desc="Wind"):
         day = pd.read_parquet(f)
         day['group'] = day['station_type'].map(STATION_GROUP_MAP)
+
+        # Fix 5: Override Victoria Harbour stations explicitly + diagnostics
+        print(day.groupby("station_type")["station"].unique())
+        day.loc[
+            day["station"].isin(VICTORIA_HARBOUR_STATIONS),
+            "group"
+        ] = "victoria_harbour"
 
         raw_cols = {}
         for col_name, station_name in SPECIAL_STATIONS.items():
@@ -139,6 +159,9 @@ def build_wind_features():
                 pivot = pivot.merge(sr, on='timestamp', how='left')
             else:
                 pivot[k] = np.nan
+
+        # Fix 4: Preserve wind_timestamp for freshness calculation
+        pivot['wind_timestamp'] = pivot['timestamp']
 
         pivot['available_time'] = pivot['timestamp'].apply(
             lambda ts: ceil_dt_10min(ts) + timedelta(minutes=DATA_LAG)
@@ -220,9 +243,9 @@ def merge_asof_features(decisions, source, suffix):
 
 def compute_anchors(df):
     print("\n=== Step 6: Anchor Features ===")
-    df = df.sort_values(['target_date', 'decision_time']).reset_index(drop=True)
-    df['max_so_far'] = df.groupby('target_date')['temp_current'].cummax()
-    df['min_so_far'] = df.groupby('target_date')['temp_current'].cummin()
+    # Fix 1: Use raw-minute cummax/cummin that were carried over from weather table
+    df['max_so_far'] = df['max_so_far_raw']
+    df['min_so_far'] = df['min_so_far_raw']
     df['range_so_far'] = df['max_so_far'] - df['min_so_far']
     df['drop_from_max'] = df['max_so_far'] - df['temp_current']
     df['rise_from_min'] = df['temp_current'] - df['min_so_far']
@@ -290,12 +313,14 @@ def compute_wind_trends(df):
 
     def _w(g):
         g = g.copy()
+        # Fix 3: wind_{prefix}_change_60m uses mean column, wind_{prefix}_max_60m uses max column
         for prefix in ['ref', 'offshore', 'highland', 'victoria_harbour', 'all']:
-            mc = f'wind_{prefix}_mean'
-            if mc not in g.columns:
-                continue
-            g[f'wind_{prefix}_change_60m'] = g[mc] - g[mc].shift(6)
-            g[f'wind_{prefix}_max_60m'] = g[mc].rolling(6, min_periods=1).max()
+            mean_col = f'wind_{prefix}_mean'
+            max_col = f'wind_{prefix}_max'
+            if mean_col in g.columns:
+                g[f'wind_{prefix}_change_60m'] = g[mean_col] - g[mean_col].shift(6)
+            if max_col in g.columns:
+                g[f'wind_{prefix}_max_60m'] = g[max_col].rolling(6, min_periods=1).max()
         return g
 
     df = df.groupby('target_date', group_keys=False).apply(_w)
@@ -303,59 +328,85 @@ def compute_wind_trends(df):
 
 
 def match_forecast(df, df_fc):
+    # Fix 2: Use merge_asof with decision_time / forecast_issue_datetime
     print("\n=== Step 5c: Match Forecast ===")
-    df_fc['target_date'] = pd.to_datetime(df_fc['target_date'])
-    df_fc = df_fc.dropna(subset=['forecast_issue_datetime'])
-    df['target_date'] = pd.to_datetime(df['target_date'])
-    # Build integer keys: use target_date as int and time-of-day offset
-    DAY_SEC = 86400
-    df_fc['td_int'] = df_fc['target_date'].astype('int64') // 10**9 // DAY_SEC
-    df_fc['tod'] = (df_fc['forecast_issue_datetime'].astype('int64') // 10**9) % DAY_SEC
-    df_fc['fc_key'] = df_fc['td_int'] * DAY_SEC + df_fc['tod']
-    df_fc = df_fc.sort_values('fc_key').reset_index(drop=True)
-    df['td_int'] = df['target_date'].astype('int64') // 10**9 // DAY_SEC
-    df['tod'] = (df['decision_time'].astype('int64') // 10**9) % DAY_SEC
-    df['dec_key'] = df['td_int'] * DAY_SEC + df['tod']
-    df = df.sort_values('dec_key').reset_index(drop=True)
-    merged = pd.merge_asof(
-        df, df_fc,
-        left_on='dec_key', right_on='fc_key',
-        direction='backward',
-        tolerance=DAY_SEC,  # prevent merging across days
+
+    df = df.copy()
+    df_fc = df_fc.copy()
+
+    df["target_date"] = pd.to_datetime(df["target_date"]).dt.date
+    df_fc["target_date"] = pd.to_datetime(df_fc["target_date"]).dt.date
+    df_fc = df_fc.dropna(subset=["forecast_issue_datetime"])
+
+    out = []
+
+    for d, dec_g in df.groupby("target_date"):
+        dec_g = dec_g.sort_values("decision_time").copy()
+        fc_g = df_fc[df_fc["target_date"] == d].sort_values("forecast_issue_datetime").copy()
+
+        if fc_g.empty:
+            out.append(dec_g)
+            continue
+
+        m = pd.merge_asof(
+            dec_g,
+            fc_g,
+            left_on="decision_time",
+            right_on="forecast_issue_datetime",
+            direction="backward"
+        )
+
+        out.append(m)
+
+    merged = pd.concat(out, ignore_index=True)
+
+    merged["forecast_age_minutes"] = (
+        merged["decision_time"] - merged["forecast_issue_datetime"]
+    ).dt.total_seconds() / 60
+
+    merged["forecast_gap_from_max_so_far"] = (
+        merged["forecast_max_temp"] - merged["max_so_far"]
     )
-    # Drop helper columns and any cross-day mismatches
-    merged = merged[merged['td_int_x'] == merged['td_int_y']]
-    merged['forecast_age_minutes'] = (
-        merged['decision_time'] - merged['forecast_issue_datetime']
-    ).dt.total_seconds() / 60
-    merged = merged.drop(columns=['dec_key', 'fc_key', 'td_int_x', 'td_int_y', 'tod_x', 'tod_y',
-                                   'target_date_y'], errors='ignore')
-    if 'target_date_x' in merged.columns:
-        merged = merged.rename(columns={'target_date_x': 'target_date'})
-    merged['forecast_age_minutes'] = (
-        merged['decision_time'] - merged['forecast_issue_datetime']
-    ).dt.total_seconds() / 60
-    merged = merged.drop(columns=['forecast_issue_datetime'])
-    merged['forecast_gap_from_max_so_far'] = merged['forecast_max_temp'] - merged['max_so_far']
-    merged['forecast_gap_from_current'] = merged['forecast_max_temp'] - merged['temp_current']
+
+    merged["forecast_gap_from_current"] = (
+        merged["forecast_max_temp"] - merged["temp_current"]
+    )
+
+    merged["forecast_missing_flag"] = merged["forecast_max_temp"].isna().astype(int)
+
     print(f"  Coverage: {merged['forecast_max_temp'].notna().mean():.1%}")
+
+    merged = merged.drop(columns=["forecast_issue_datetime"], errors="ignore")
+
     return merged
 
 
 def compute_targets(df):
     print("\n=== Step 8: Targets ===")
-    daily_max = df.groupby('target_date')['temp_current'].max().reset_index()
-    daily_max.columns = ['target_date', 'actual_high_today']
-    df = df.merge(daily_max, on='target_date', how='left')
+    # Fix 1: actual_high_today already comes from raw minute data, no need to recompute
     df['remaining_upside'] = (df['actual_high_today'] - df['max_so_far']).clip(lower=0)
     df['is_upside_zero'] = (df['remaining_upside'] <= 0.05).astype(int)
     return df
 
 
 def compute_freshness(df):
+    # Fix 4: Use real source timestamps when available
     print("  Computing freshness...")
-    df['obs_data_age_minutes'] = DATA_LAG + (df['minutes_since_midnight'] % 10)
-    df['wind_data_age_minutes'] = df['obs_data_age_minutes'].copy()
+    if 'weather_timestamp' in df.columns and 'decision_time' in df.columns:
+        df['obs_data_age_minutes'] = (
+            df['decision_time'] - df['weather_timestamp']
+        ).dt.total_seconds() / 60
+    else:
+        # TODO: fallback — remove once weather_timestamp is reliably preserved
+        df['obs_data_age_minutes'] = DATA_LAG + (df['minutes_since_midnight'] % 10)
+
+    if 'wind_timestamp' in df.columns and 'decision_time' in df.columns:
+        df['wind_data_age_minutes'] = (
+            df['decision_time'] - df['wind_timestamp']
+        ).dt.total_seconds() / 60
+    else:
+        # TODO: fallback — remove once wind_timestamp is reliably preserved
+        df['wind_data_age_minutes'] = df['obs_data_age_minutes'].copy()
     return df
 
 
@@ -363,33 +414,65 @@ def sanity_checks(df):
     print("\n=== Sanity Checks ===")
     try:
         assert df['remaining_upside'].min() >= -0.01
-        print("  ✅ remaining_upside.min() >= 0")
+        print("  remaining_upside.min() >= 0")
     except AssertionError:
-        print(f"  ⚠️  remaining_upside.min() = {df['remaining_upside'].min():.3f}")
+        print(f"  remaining_upside.min() = {df['remaining_upside'].min():.3f}")
+
+    try:
+        assert df['temp_current'].between(0, 40).mean() > 0.99
+        print("  temp_current in [0,40]: >99%")
+    except AssertionError:
+        print(f"  temp_current in [0,40]: {df['temp_current'].between(0, 40).mean():.1%}")
+
+    try:
+        assert df['rh_current'].between(0, 100).mean() > 0.99
+        print("  rh_current in [0,100]: >99%")
+    except AssertionError:
+        print(f"  rh_current in [0,100]: {df['rh_current'].between(0, 100).mean():.1%}")
 
     gap_cov = df['forecast_gap_from_max_so_far'].notna().mean()
-    print(f"  ✅ forecast_gap coverage: {gap_cov:.1%}")
+    print(f"  forecast_gap coverage: {gap_cov:.1%}")
 
-    tc = df['temp_current'].between(0, 40).mean()
-    print(f"  ✅ temp_current in [0,40]: {tc:.1%}")
-    rc = df['rh_current'].between(0, 100).mean()
-    print(f"  ✅ rh_current in [0,100]: {rc:.1%}")
-
-    if 'wind_all_mean' in df.columns:
-        wc = df['wind_all_mean'].ge(0).mean()
-        print(f"  ✅ wind_all_mean >= 0: {wc:.1%}")
+    w_cov = df['wind_all_mean'].notna().mean() if 'wind_all_mean' in df.columns else 0
+    print(f"  wind_all_mean coverage: {w_cov:.1%}")
 
     rd = df[df['drop_from_max'] >= 5]
     if len(rd) > 0:
         nm = rd[rd['actual_high_today'] == rd['max_so_far']]
         if len(nm) > 0:
             zp = nm['is_upside_zero'].mean()
-            print(f"  🌧️  Rain drop diagnostic (drop>=5, max reached): "
+            print(f"  Rain drop diagnostic (drop>=5, max reached): "
                   f"{len(nm):,} rows, is_upside_zero={zp:.1%}")
             if zp < 0.7:
-                print("  ⚠️  Warning: remaining_upside should be near 0 after rain drop")
+                print("  Warning: remaining_upside should be near 0 after rain drop")
             else:
-                print("  ✅  Correct: rain drop + max reached ≈ zero upside")
+                print("  Correct: rain drop + max reached ≈ zero upside")
+
+
+def validate_actual_high(df_weather, df_final):
+    """Fix 7: Validate actual_high_today against raw minute daily high."""
+    print("\n=== Validation: actual_high_today ===")
+    raw_daily = (
+        df_weather.groupby("date")["temp_current"]
+        .max()
+        .rename("raw_actual_high")
+    )
+    fs_daily = (
+        df_final.groupby(pd.to_datetime(df_final["target_date"]).dt.date)["actual_high_today"]
+        .max()
+        .rename("fs_actual_high")
+    )
+    cmp = pd.concat([raw_daily, fs_daily], axis=1).dropna()
+    cmp["diff"] = cmp["fs_actual_high"] - cmp["raw_actual_high"]
+
+    print(cmp["diff"].describe())
+
+    large_diff = cmp[cmp["diff"].abs() > 0.05]
+    if len(large_diff) > 0:
+        print(" actual_high_today differs from raw minute daily high")
+        print(large_diff.head(20))
+    else:
+        print(" actual_high_today matches raw minute daily high")
 
 
 def main():
@@ -408,7 +491,7 @@ def main():
     print(f"  Coverage: {wc:.1%}")
 
     print("\n=== Step 5b: Merge Wind ===")
-    wind_cols = [c for c in df_wind.columns if c.startswith('wind_') or c == 'available_time']
+    wind_cols = [c for c in df_wind.columns if c.startswith('wind_') or c in ('available_time', 'wind_timestamp')]
     merged = merge_asof_features(merged, df_wind[wind_cols], suffix=False)
     wic = merged['wind_ref_mean'].notna().mean() if 'wind_ref_mean' in merged.columns else 0
     print(f"  Wind coverage: {wic:.1%}")
@@ -420,6 +503,14 @@ def main():
     merged = compute_freshness(merged)
     merged = compute_targets(merged)
 
+    # Fix 6: Add missing flags
+    merged["forecast_missing_flag"] = merged["forecast_max_temp"].isna().astype(int)
+    if "wind_all_mean" in merged.columns:
+        merged["wind_missing_flag"] = merged["wind_all_mean"].isna().astype(int)
+    else:
+        merged["wind_missing_flag"] = 1
+    merged["weather_missing_flag"] = merged["temp_current"].isna().astype(int)
+
     # Fill NaN for features only
     fill_cols = [c for c in merged.columns if c not in
                  ['decision_time', 'target_date', 'actual_high_today',
@@ -427,7 +518,10 @@ def main():
                   'forecast_max_temp', 'forecast_min_temp',
                   'forecast_range', 'forecast_lead_days',
                   'forecast_age_minutes', 'forecast_gap_from_max_so_far',
-                  'forecast_gap_from_current']]
+                  'forecast_gap_from_current',
+                  'weather_timestamp', 'wind_timestamp',
+                  'max_so_far_raw', 'min_so_far_raw',
+                  'forecast_missing_flag', 'wind_missing_flag', 'weather_missing_flag']]
     for c in fill_cols:
         if c in merged.columns and merged[c].dtype in ('float64', 'float32', 'int64'):
             merged[c] = merged[c].fillna(0)
@@ -448,6 +542,7 @@ def main():
         'forecast_min_temp', 'forecast_max_temp', 'forecast_range',
         'forecast_gap_from_max_so_far', 'forecast_gap_from_current',
         'forecast_age_minutes', 'forecast_lead_days',
+        'forecast_missing_flag',
         'wind_ref_mean', 'wind_ref_max', 'wind_ref_spread', 'wind_ref_station_count',
         'wind_ref_change_60m', 'wind_ref_max_60m',
         'wind_victoria_harbour_mean', 'wind_victoria_harbour_max',
@@ -460,6 +555,7 @@ def main():
         'wind_all_mean', 'wind_all_max', 'wind_all_spread', 'wind_all_station_count',
         'wind_all_change_60m', 'wind_all_max_60m',
         'wind_kings_park_current', 'wind_kai_tak_current',
+        'wind_missing_flag', 'weather_missing_flag',
         'hour', 'minute', 'minutes_since_midnight', 'month', 'day_of_year',
         'month_sin', 'month_cos', 'day_sin', 'day_cos',
         'is_morning', 'is_afternoon', 'is_evening',
@@ -473,13 +569,16 @@ def main():
     df_final = df_final.dropna(subset=['temp_current'])
     print(f"\n  Dropped {before - len(df_final):,} rows without weather data")
 
+    # Fix 7: Run validation
+    validate_actual_high(df_weather, df_final)
+
     df_final.to_parquet(OUTPUT_FINAL, index=False)
 
     print(f"\n=== Model 2A Feature Store saved! ===")
-    print(f"📊 Shape: {df_final.shape}")
-    print(f"📋 Columns: {len(df_final.columns)}")
-    print(f"📅 Date range: {df_final['target_date'].min()} ~ {df_final['target_date'].max()}")
-    print(f"📈 Upside mean: {df_final['remaining_upside'].mean():.2f}, zero%: {df_final['is_upside_zero'].mean():.1%}")
+    print(f"  Shape: {df_final.shape}")
+    print(f"  Columns: {len(df_final.columns)}")
+    print(f"  Date range: {df_final['target_date'].min()} ~ {df_final['target_date'].max()}")
+    print(f"  Upside mean: {df_final['remaining_upside'].mean():.2f}, zero%: {df_final['is_upside_zero'].mean():.1%}")
 
     sanity_checks(df_final)
 
