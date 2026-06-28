@@ -250,18 +250,6 @@ def get_intraday_state(target_date_str: str) -> dict | None:
     df_120m = df_combined[df_combined["datetime"] <= time_threshold_120]
     temp_120m_ago = float(df_120m["temp"].iloc[-1]) if not df_120m.empty else temp_now
 
-    # Override temp_now and rh_now with fresher rhrread API data when available
-    try:
-        _rhr = fetch_live_hko_temp_rh()
-        if _rhr and _rhr[1] is not None:
-            _rhr_dt, _rhr_temp, _rhr_rh = _rhr
-            temp_now = float(_rhr_temp)
-            time_now = pd.Timestamp(_rhr_dt) if _rhr_dt else time_now
-            if _rhr_rh is not None:
-                rh_now = float(_rhr_rh)
-    except Exception:
-        pass
-
     return {
         "temp_now": temp_now,
         "temp_60m_ago": temp_60m_ago,

@@ -44,7 +44,41 @@ def check_data_sources():
         "features_flat": [],
     }
 
-    # ── 1. HKO Live Temp/RH (Observatory, from RHRREAD API) ───────────
+    # ── 1. HKO AWS CSV (hko.csv) — primary model input ────────────────
+    try:
+        from app.services.weather_service import fetch_hko_intraday_csv
+        df_csv = fetch_hko_intraday_csv(_cache_buster=int(_time.time() // 60))
+        features = []
+        if not df_csv.empty:
+            last_row = df_csv.iloc[-1]
+            csv_temp = float(last_row["temp"])
+            csv_dt = last_row["datetime"]
+            csv_rh = float(last_row["rh"]) if "rh" in last_row else None
+            features.append({"name": "temp_current", "value": f"{csv_temp:.1f} °C", "status": "ok"})
+            features.append({"name": "record_time", "value": csv_dt.strftime("%H:%M:%S") if hasattr(csv_dt, "strftime") else str(csv_dt), "status": "ok"})
+            if csv_rh:
+                features.append({"name": "rh_current", "value": f"{csv_rh:.0f} %", "status": "ok"})
+            status = "ok"
+            msg = f"Temp: {csv_temp:.1f}°C at {csv_dt}"
+        else:
+            status = "error"
+            msg = "Empty DataFrame"
+        results["sources"].append({
+            "name": "HKO AWS CSV (hko.csv)",
+            "url": HKO_AWS_CSV_URL,
+            "status": status, "message": msg,
+            "last_update": _now_str(),
+            "features": features,
+        })
+    except Exception as e:
+        results["sources"].append({
+            "name": "HKO AWS CSV (hko.csv)",
+            "url": HKO_AWS_CSV_URL,
+            "status": "error", "message": str(e),
+            "last_update": _now_str(), "features": [],
+        })
+
+    # ── 2. HKO Live Temp/RH (Observatory, RHRREAD API, for reference) ──
     try:
         dt, temp, rh = fetch_live_hko_temp_rh()
         features = []
@@ -64,7 +98,7 @@ def check_data_sources():
             features.append({"name": "rh_current", "value": "None", "status": "error"})
         status = "ok" if temp is not None else "error"
         results["sources"].append({
-            "name": "HKO Live Temp/RH",
+            "name": "HKO Observatory (RHRREAD)",
             "url": HKO_RHRREAD_URL,
             "status": status,
             "message": f"Observatory: {temp}°C (recorded {record_time})" if temp else "No data",
@@ -73,13 +107,13 @@ def check_data_sources():
         })
     except Exception as e:
         results["sources"].append({
-            "name": "HKO Live Temp/RH",
+            "name": "HKO Observatory (RHRREAD)",
             "url": HKO_RHRREAD_URL,
             "status": "error", "message": str(e),
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 2. HKO Daily Data (AWS CSV) ───────────────────────────────────
+    # ── 3. HKO Daily Data (AWS CSV) ───────────────────────────────────
     try:
         hko = fetch_hko_data(hkt_now().strftime("%Y%m%d"))
         features = []
@@ -109,7 +143,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 3. i-Lens Rainfall API ────────────────────────────────────────
+    # ── 4. i-Lens Rainfall API ────────────────────────────────────────
     try:
         rain_df = _fetch_rainfall_live_uncached()
         features = []
@@ -138,7 +172,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 4. Rainfall Features (derived) ────────────────────────────────
+    # ── 5. Rainfall Features (derived) ────────────────────────────────
     try:
         rk = compute_rain_kwargs_live()
         features = []
@@ -165,7 +199,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 5. Gridded Nowcast ────────────────────────────────────────────
+    # ──     6. Gridded Nowcast ────────────────────────────────────────────
     try:
         nc = get_nowcast_rainfall()
         features = []
@@ -188,7 +222,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 6. Pressure (HKO CSV) ────────────────────────────────────────
+    # ── 7. Pressure (HKO CSV) ────────────────────────────────────────
     try:
         df_p = fetch_pressure_live()
         features = []
@@ -217,7 +251,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 7. Wind (i-Lens DG_WIND) ──────────────────────────────────────
+    # ── 8. Wind (i-Lens DG_WIND) ──────────────────────────────────────
     try:
         df_w = fetch_wind_live()
         features = []
@@ -247,7 +281,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 8. Forecast Freshness (HKO XML) ───────────────────────────────
+    # ── 9. Forecast Freshness (HKO XML) ───────────────────────────────
     try:
         url = HKO_FORECAST_URL_TEMPLATE.format(ts=int(_time.time() * 1000))
         r = _req.get(url, timeout=10)
@@ -284,7 +318,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 9. Polymarket API ─────────────────────────────────────────────
+    # ── 10. Polymarket API ─────────────────────────────────────────────
     try:
         from app.services.market_service import fetch_today_event
         event = fetch_today_event(hkt_now().strftime("%Y-%m-%d"))
@@ -308,7 +342,7 @@ def check_data_sources():
             "last_update": _now_str(), "features": [],
         })
 
-    # ── 10. Minute Buffer (df_today) ──────────────────────────────────
+    # ── 11. Minute Buffer (df_today) ──────────────────────────────────
     try:
         state = get_intraday_state(hkt_now().strftime("%Y%m%d"))
         features = []
@@ -317,10 +351,8 @@ def check_data_sources():
             row_count = len(df)
             latest_time = df["datetime"].max() if not df.empty else None
             temp_std = float(df["temp"].std()) if not df.empty else 0.0
-            last_temp = float(df["temp"].iloc[-1]) if not df.empty else None
-            model_temp = state.get("temp_now")
-            features.append({"name": "raw_buffer_temp", "value": f"{last_temp:.1f} °C" if last_temp else "None", "status": "ok" if last_temp else "error"})
-            features.append({"name": "temp_model_input", "value": f"{model_temp:.1f} °C" if model_temp else "None", "status": "ok" if model_temp else "error"})
+            temp_val = float(state.get("temp_now", df["temp"].iloc[-1] if not df.empty else 0))
+            features.append({"name": "temp_current", "value": f"{temp_val:.1f} °C", "status": "ok"})
             features.append({"name": "rows", "value": str(row_count), "status": "ok" if row_count >= 30 else "warning"})
             features.append({"name": "latest_timestamp", "value": str(latest_time), "status": "ok"})
             features.append({"name": "temp_std", "value": f"{temp_std:.2f}", "status": "ok" if temp_std > 0.1 else "warning"})
