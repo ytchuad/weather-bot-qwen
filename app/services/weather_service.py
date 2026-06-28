@@ -537,6 +537,188 @@ def get_accumulated_rain_today() -> float | None:
         return None
 
 
+# ── pressure live (HKO CSV) ────────────────────────────────────────────
+
+HKO_PRESSURE_CSV_URL = "https://www.hko.gov.hk/wxinfo/awsgis/hko_pre.csv"
+
+_pressure_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_SHORT)
+
+
+@cached(_pressure_cache)
+def fetch_pressure_live() -> pd.DataFrame:
+    """Fetch 1-min pressure CSV from HKO, return DataFrame with datetime, pressure."""
+    try:
+        r = requests.get(HKO_PRESSURE_CSV_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        df = pd.read_csv(io.StringIO(r.text))
+        df["datetime"] = pd.to_datetime(df["Date"], format="%Y/%m/%d %H:%M")
+        df = df.drop(columns=["Date"]).dropna()
+        return df
+    except Exception as e:
+        logger.warning("fetch_pressure_live failed: %s", e)
+        return pd.DataFrame()
+
+
+def compute_pressure_kwargs() -> dict:
+    """Compute pressure_current, pressure_change_60m, pressure_change_180m from live CSV."""
+    df = fetch_pressure_live()
+    if df.empty:
+        return {"pressure_current": None, "pressure_change_60m": 0.0, "pressure_change_180m": 0.0}
+    now = hkt_now()
+    latest = float(df["pressure"].iloc[-1])
+    t_60 = now - timedelta(minutes=60)
+    idx_60 = (df["datetime"] - t_60).abs().idxmin()
+    p_60 = float(df.loc[idx_60, "pressure"])
+    t_180 = now - timedelta(minutes=180)
+    idx_180 = (df["datetime"] - t_180).abs().idxmin()
+    p_180 = float(df.loc[idx_180, "pressure"])
+    return {
+        "pressure_current": latest,
+        "pressure_change_60m": latest - p_60,
+        "pressure_change_180m": latest - p_180,
+    }
+
+
+# ── wind live (i-Lens DG_WIND) ─────────────────────────────────────────
+
+WIND_INSTANT_URL = "https://i-lens.hk/hkweather/instant_chart.php?chart_type=DG_WIND"
+_WIND_STATION_GROUP_MAP = {"參考": "ref", "離岸": "offshore", "高山": "highland"}
+_WIND_VICTORIA_HARBOUR_STATIONS = {"京士柏", "啟德", "九龍天星碼頭"}
+_WIND_GROUP_GROUPS = ["ref", "offshore", "highland", "victoria_harbour"]
+
+
+def _parse_wind_from_html(html: str) -> pd.DataFrame:
+    """Parse i-Lens wind HTML into DataFrame with timestamp, station_type, station, wind_speed."""
+    import re
+    from bs4 import BeautifulSoup
+    records = []
+    soup = BeautifulSoup(html, "html.parser")
+    for script in soup.find_all("script"):
+        if not script.string:
+            continue
+        text = script.string
+        for m in re.finditer(r"Highcharts\.chart\([^)]+?,\s*\{", text):
+            start = m.end() - 1
+            brace_count = 0
+            i = start
+            while i < len(text):
+                ch = text[i]
+                if ch == '{':
+                    brace_count += 1
+                elif ch == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end = text.find(');', i) + 1
+                        break
+                i += 1
+            else:
+                continue
+            config_str = text[start:end + 1]
+            title_m = re.search(r"text\s*:\s*'([^']+)'", config_str)
+            if not title_m:
+                continue
+            title = title_m.group(1)
+            station_type = "未知"
+            for k in _WIND_STATION_GROUP_MAP:
+                if k in title:
+                    station_type = k
+                    break
+            series_match = re.search(r"series\s*:\s*\[", config_str)
+            if not series_match:
+                continue
+            arr_start = series_match.end() - 1
+            bracket_count = 0
+            i = arr_start
+            while i < len(config_str):
+                if config_str[i] == '[':
+                    bracket_count += 1
+                elif config_str[i] == ']':
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        arr_end = i
+                        break
+                i += 1
+            else:
+                continue
+            series_content = config_str[arr_start + 1:arr_end]
+            for s in re.finditer(
+                r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\]\s*(?:\}\s*[,|\]])",
+                series_content, re.DOTALL
+            ):
+                station = s.group(1)
+                data_part = s.group(2)
+                pts = re.findall(
+                    r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)\s*,\s*(\d+)",
+                    data_part
+                )
+                for y_str, mon_str, d_str, h_str, min_str, val_str in pts:
+                    try:
+                        ts = datetime(int(y_str), int(mon_str) + 1, int(d_str), int(h_str), int(min_str))
+                    except ValueError:
+                        continue
+                    records.append({
+                        "timestamp": ts,
+                        "station_type": station_type,
+                        "station": station,
+                        "wind_speed": float(int(val_str)),
+                    })
+    return pd.DataFrame(records)
+
+
+_wind_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_SHORT)
+
+
+@cached(_wind_cache)
+def fetch_wind_live() -> pd.DataFrame:
+    """Fetch live wind data from i-Lens DG_WIND, return DataFrame with all stations."""
+    try:
+        r = requests.get(WIND_INSTANT_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+        r.raise_for_status()
+        df = _parse_wind_from_html(r.text)
+        if df.empty:
+            return df
+        df["group"] = df["station_type"].map(_WIND_STATION_GROUP_MAP).fillna("victoria_harbour")
+        df.loc[df["station"].isin(_WIND_VICTORIA_HARBOUR_STATIONS), "group"] = "victoria_harbour"
+        return df
+    except Exception as e:
+        logger.warning("fetch_wind_live failed: %s", e)
+        return pd.DataFrame()
+
+
+def compute_wind_kwargs() -> dict:
+    """Compute wind features from live i-Lens data."""
+    df = fetch_wind_live()
+    if df.empty:
+        return {
+            "wind_ref_mean": 0.0, "wind_ref_max": 0.0,
+            "wind_victoria_harbour_mean": 0.0, "wind_victoria_harbour_max": 0.0,
+            "wind_highland_mean": 0.0, "wind_highland_max": 0.0,
+            "wind_all_change_60m": 0.0, "wind_kings_park_current": 0.0,
+        }
+    result = {}
+    for grp in _WIND_GROUP_GROUPS:
+        sub = df[df["group"] == grp]
+        if not sub.empty:
+            result[f"wind_{grp}_mean"] = float(sub.groupby("timestamp")["wind_speed"].mean().mean())
+            result[f"wind_{grp}_max"] = float(sub.groupby("timestamp")["wind_speed"].max().max())
+        else:
+            result[f"wind_{grp}_mean"] = 0.0
+            result[f"wind_{grp}_max"] = 0.0
+    # Kings Park
+    kp = df[df["station"] == "京士柏"]
+    result["wind_kings_park_current"] = float(kp["wind_speed"].iloc[-1]) if not kp.empty else 0.0
+    # All stations — compute 60m change
+    all_ts = df.groupby("timestamp")["wind_speed"].mean().reset_index()
+    all_ts = all_ts.sort_values("timestamp")
+    now = hkt_now()
+    t_60 = now - timedelta(minutes=60)
+    now_mean = all_ts["wind_speed"].iloc[-1] if not all_ts.empty else 0.0
+    past = all_ts[all_ts["timestamp"] <= t_60]
+    past_mean = past["wind_speed"].iloc[-1] if not past.empty else now_mean
+    result["wind_all_change_60m"] = float(now_mean - past_mean)
+    return result
+
+
 def get_nowcast_rainfall() -> float | None:
     """Get rainfall nowcast from HKO Gridded_rainfall_nowcast.csv."""
     NOWCAST_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/F3/Gridded_rainfall_nowcast.csv"

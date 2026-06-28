@@ -19,6 +19,7 @@ from ..config import (
     DEFAULT_TMAX_FORECAST_DELTA,
     DEFAULT_TMIN_FORECAST_DELTA,
     CACHE_TTL_MEDIUM,
+    HKT_OFFSET,
 )
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,46 @@ def predict_intraday_all(
     hour_now = state["time_now"].hour
     minutes_since_midnight = hour_now * 60 + state["time_now"].minute
 
+    # Collect live pressure + wind data for Model 2A
+    from ..services.weather_service import (
+        compute_pressure_kwargs,
+        compute_wind_kwargs,
+        hkt_now,
+    )
+    pressure_kw = compute_pressure_kwargs()
+    wind_kw = compute_wind_kwargs()
+
+    # Compute forecast freshness from HKO XML ModelTime
+    forecast_age_minutes = None
+    forecast_lead_days = None
+    try:
+        from ..services.weather_service import HKO_FORECAST_URL_TEMPLATE
+        import time as _time_mod
+        import requests as _req
+        _url = HKO_FORECAST_URL_TEMPLATE.format(ts=int(_time_mod.time() * 1000))
+        _r = _req.get(_url, timeout=10)
+        _r.raise_for_status()
+        _data = _r.json()
+        _model_time_str = _data.get("ModelTime", "")
+        if _model_time_str:
+            _model_dt = pd.to_datetime(str(_model_time_str), format="%Y%m%d%H")
+            _model_dt_hkt = _model_dt + HKT_OFFSET
+            _now = hkt_now()
+            forecast_age_minutes = (_now - _model_dt_hkt).total_seconds() / 60
+            _target_dt = pd.to_datetime(target_date_str, format="%Y%m%d")
+            forecast_lead_days = (_target_dt.date() - _model_dt_hkt.date()).days
+    except Exception as _e:
+        logger.debug("Could not compute forecast freshness: %s", _e)
+        forecast_age_minutes = None
+        forecast_lead_days = None
+
+    # Compute obs_data_age_minutes from state observation timestamp
+    obs_data_age_minutes = None
+    if state.get("time_now") and state.get("df_today") is not None and not state["df_today"].empty:
+        _last_obs = state["df_today"]["datetime"].iloc[-1]
+        _now = hkt_now()
+        obs_data_age_minutes = (_now - _last_obs).total_seconds() / 60
+
     common = dict(
         current_datetime=state["time_now"],
         temp_60min_ago=state.get("temp_60m_ago", state["temp_now"]),
@@ -143,6 +184,22 @@ def predict_intraday_all(
         rh_current=state.get("rh_now", 50.0),
         temp_buffer=state.get("df_today", pd.DataFrame()).get("temp", pd.Series()).dropna().tolist() if state.get("df_today") is not None else None,
         rh_buffer=state.get("df_today", pd.DataFrame()).get("rh", pd.Series()).dropna().tolist() if state.get("df_today") is not None else None,
+        # Model 2A data
+        pressure_current=pressure_kw.get("pressure_current"),
+        pressure_change_60m=pressure_kw.get("pressure_change_60m", 0.0),
+        pressure_change_180m=pressure_kw.get("pressure_change_180m", 0.0),
+        wind_ref_mean=wind_kw.get("wind_ref_mean", 0.0),
+        wind_ref_max=wind_kw.get("wind_ref_max", 0.0),
+        wind_victoria_harbour_mean=wind_kw.get("wind_victoria_harbour_mean", 0.0),
+        wind_victoria_harbour_max=wind_kw.get("wind_victoria_harbour_max", 0.0),
+        wind_highland_mean=wind_kw.get("wind_highland_mean", 0.0),
+        wind_highland_max=wind_kw.get("wind_highland_max", 0.0),
+        wind_all_change_60m=wind_kw.get("wind_all_change_60m", 0.0),
+        wind_kings_park_current=wind_kw.get("wind_kings_park_current", 0.0),
+        forecast_age_minutes=forecast_age_minutes,
+        forecast_lead_days=forecast_lead_days,
+        obs_data_age_minutes=obs_data_age_minutes,
+        wind_data_age_minutes=None,
     )
 
     _ALLOWED_RAIN_KWARGS = {

@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ..components.top_nav import mark_refreshed
-from ..config import MODEL_LABELS, TMAX_BUCKETS, TMIN_BUCKETS
+from ..config import MODEL_KEYS, MODEL_LABELS, TMAX_BUCKETS, TMIN_BUCKETS
 from ..services.market_service import fetch_event_markets
 from ..services.model_service import run_all_models
 from ..services.weather_service import (
@@ -22,13 +22,13 @@ from ..state import AppState
 
 _MODELS_KEY = "hub_selected_models"
 _SELECTED_KEY = "hub_selected_model"
-_DEFAULT_MODELS = ["baseline", "rain_nowcast", "model_a"]
+_DEFAULT_MODELS = ["baseline", "rain_nowcast", "model_a", "model_2a"]
 
 
 def _init_models(all_results: dict):
     if _MODELS_KEY not in st.session_state:
         avail = [k for k in all_results if k not in ("9d", "aws", "_intraday_error")]
-        st.session_state[_MODELS_KEY] = [m for m in _DEFAULT_MODELS if m in avail][:3]
+        st.session_state[_MODELS_KEY] = [m for m in _DEFAULT_MODELS if m in avail][:4]
     if _SELECTED_KEY not in st.session_state:
         sm = st.session_state.get(_MODELS_KEY, [])
         st.session_state[_SELECTED_KEY] = sm[0] if sm else None
@@ -646,6 +646,15 @@ def run() -> None:
         state.pred_9d = ar.get("9d")
         state.pred_aws = ar.get("aws")
         state.pred_intra = {k: v for k, v in ar.items() if k not in ("9d", "aws", "_intraday_error")}
+
+    # ── Warn about registered models that failed silently ──
+    _INTRA_MODEL_KEYS = {k for k in MODEL_KEYS if k not in ("9d", "aws", "_intraday_error")}
+    _missing = sorted(_INTRA_MODEL_KEYS - set(ar.keys()))
+    if _missing:
+        st.warning(
+            f"The following models failed to load or predict: **{', '.join(_missing)}**. "
+            "Check the Health page for details."
+        )
 
     _init_models(ar)
 

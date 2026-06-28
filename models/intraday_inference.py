@@ -2142,18 +2142,26 @@ def predict_intraday_tmin(current_datetime, min_so_far, temp_60min_ago, temp_now
     }
 
 
-def predict_intraday_tmax_all(current_datetime, max_so_far, temp_60min_ago, temp_now,
-                               forecast_tmax=None, forecast_tmin=None, temp_120m_ago=None, min_so_far=None,
-                               rainfall_60m_filled=0.0, rainfall_120m_filled=0.0,
-                               rainfall_60m_missing_flag=1, rainfall_120m_missing_flag=1,
-                               rainfall_30m_filled=0.0, rainfall_30m_missing_flag=1,
-                               rainfall_data_age_minutes=0.0, rain_data_gap_flag=0,
-                               temp_change_30min=None, temp_change_60min=None,
-                               time_since_max_so_far=None, hour=None, minutes_since_midnight=None,
-                               # Model A params (optional, default = zero RH / no buffers)
-                               rh_current=50.0, temp_buffer=None, rh_buffer=None,
-                               time_since_min_so_far=None,
-                               **rain_kwargs):
+def predict_intraday_tmax_all(
+    current_datetime, max_so_far, temp_60min_ago, temp_now,
+    forecast_tmax=None, forecast_tmin=None, temp_120m_ago=None, min_so_far=None,
+    rainfall_60m_filled=0.0, rainfall_120m_filled=0.0,
+    rainfall_60m_missing_flag=1, rainfall_120m_missing_flag=1,
+    rainfall_30m_filled=0.0, rainfall_30m_missing_flag=1,
+    rainfall_data_age_minutes=0.0, rain_data_gap_flag=0,
+    temp_change_30min=None, temp_change_60min=None,
+    time_since_max_so_far=None, hour=None, minutes_since_midnight=None,
+    rh_current=50.0, temp_buffer=None, rh_buffer=None,
+    time_since_min_so_far=None,
+    # Model 2A data
+    pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
+    wind_ref_mean=0.0, wind_ref_max=0.0,
+    wind_victoria_harbour_mean=0.0, wind_victoria_harbour_max=0.0,
+    wind_highland_mean=0.0, wind_highland_max=0.0,
+    wind_all_change_60m=0.0, wind_kings_park_current=0.0,
+    forecast_age_minutes=None, forecast_lead_days=None,
+    obs_data_age_minutes=None, wind_data_age_minutes=None,
+    **rain_kwargs):
     _load_models()
     # Strip any Model A/D/E params that may have leaked into rain_kwargs (defensive)
     for _key in ('rh_current', 'temp_buffer', 'rh_buffer', 'time_since_min_so_far',
@@ -2265,7 +2273,22 @@ def predict_intraday_tmax_all(current_datetime, max_so_far, temp_60min_ago, temp
                 temp_buffer=temp_buffer, rh_buffer=rh_buffer,
                 hour=hour, minute=current_datetime.minute if current_datetime else None,
                 forecast_tmax=forecast_tmax, forecast_tmin=forecast_tmin,
-                forecast_age_minutes=None, forecast_lead_days=None,
+                pressure_current=pressure_current,
+                pressure_change_60m=pressure_change_60m,
+                pressure_change_180m=pressure_change_180m,
+                dew_point_current=None,
+                forecast_age_minutes=forecast_age_minutes,
+                forecast_lead_days=forecast_lead_days,
+                wind_ref_mean=wind_ref_mean,
+                wind_ref_max=wind_ref_max,
+                wind_victoria_harbour_mean=wind_victoria_harbour_mean,
+                wind_victoria_harbour_max=wind_victoria_harbour_max,
+                wind_highland_mean=wind_highland_mean,
+                wind_highland_max=wind_highland_max,
+                wind_all_change_60m=wind_all_change_60m,
+                wind_kings_park_current=wind_kings_park_current,
+                obs_data_age_minutes=obs_data_age_minutes,
+                wind_data_age_minutes=wind_data_age_minutes,
             )
         except Exception as e:
             logger.warning("Model 2A prediction failed: %s", e)
@@ -2382,7 +2405,8 @@ def predict_intraday_tmax_model_g(current_datetime, max_so_far, temp_now,
 
 def predict_intraday_tmax_model_2a(
     current_datetime, max_so_far, temp_now,
-    humidity=50.0, pressure_current=None, dew_point_current=None,
+    humidity=50.0, pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
+    dew_point_current=None,
     min_so_far=None, time_since_max=0.0,
     temp_buffer=None, rh_buffer=None,
     forecast_tmax=None, forecast_tmin=None,
@@ -2416,12 +2440,22 @@ def predict_intraday_tmax_model_2a(
     rh_idx = len(rh_arr) - 1
     rh_change_60m = humidity - (rh_arr[rh_idx-6] if rh_idx >= 6 else rh_arr[0])
 
-    dew_point_spread = (temp_now - dew_point_current) if dew_point_current is not None else 0.0
-    dew_point_change_60m = dew_point_current - (dew_point_current if dew_point_current is not None else 0.0)
-    dew_point_spread_change_60m = dew_point_spread - dew_point_spread
+    # Compute dew_point_current via Magnus formula if not provided
+    if dew_point_current is None and humidity is not None and temp_now is not None:
+        try:
+            import math as _math
+            _a = 17.625
+            _b = 243.04
+            _gamma = _math.log(humidity / 100.0) + (_a * temp_now) / (_b + temp_now)
+            dew_point_current = (_b * _gamma) / (_a - _gamma)
+        except Exception:
+            dew_point_current = temp_now - 5
+    elif dew_point_current is None:
+        dew_point_current = temp_now - 5
 
-    pressure_change_60m = 0.0
-    pressure_change_180m = 0.0
+    dew_point_spread = temp_now - dew_point_current
+    dew_point_change_60m = 0.0
+    dew_point_spread_change_60m = 0.0
 
     forecast_gap = forecast_tmax - max_so_far if forecast_tmax is not None else 0.0
     forecast_range = forecast_tmax - forecast_tmin if forecast_tmax is not None and forecast_tmin is not None else 0.0

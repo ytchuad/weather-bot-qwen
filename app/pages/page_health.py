@@ -37,6 +37,19 @@ def _check_file(path: Path, label: str = "") -> dict:
 
 def _check_model_files() -> list[dict]:
     """Check that expected model files exist."""
+    # Map model key → (directory relative to MODELS_DIR, indicator file)
+    MODEL_DIR_MAP = {
+        "baseline":      ("intraday_ml",                         "feature_list.json"),
+        "rain_nowcast":  ("intraday_ml_rain_nowcast",             "feature_list.json"),
+        "rain_observed": ("intraday_ml_rain_observed",            "feature_list.json"),
+        "model_a":       ("intraday_minute_ml",                   "feature_list.json"),
+        "model_b":       ("intraday_minute_ml_model_b",           "feature_list.json"),
+        "model_c":       ("intraday_minute_ml_model_c",           "feature_list.json"),
+        "model_d":       ("intraday_minute_ml_model_d_tmin",      "feature_list.json"),
+        "model_e":       ("intraday_minute_ml_model_e_morning_tmin", "feature_list.json"),
+        "model_g":       ("intraday_minute_ml_model_g",           "feature_list.json"),
+        "model_2a":      ("intraday_minute_ml_model_2a",          "feature_list.json"),
+    }
     results = []
     for mk in MODEL_KEYS:
         if mk == "9d":
@@ -47,15 +60,10 @@ def _check_model_files() -> list[dict]:
             for var in ["tmax", "tmin"]:
                 p = MODELS_DIR / f"aws_hf_{var}"
                 results.append(_check_file(p, f"aws_{var}"))
-        elif mk in ("baseline", "model_a", "model_b", "model_c", "model_d", "model_e", "model_g", "model_2a"):
-            p = MODELS_DIR / f"intraday_model_{mk}.txt"
+        elif mk in MODEL_DIR_MAP:
+            subdir, indicator = MODEL_DIR_MAP[mk]
+            p = MODELS_DIR / subdir / indicator
             results.append(_check_file(p, f"intraday_{mk}"))
-        elif mk == "rain_nowcast":
-            p = MODELS_DIR / "intraday_model_rain_nowcast.txt"
-            results.append(_check_file(p, "rain_nowcast"))
-        elif mk == "rain_observed":
-            p = MODELS_DIR / "intraday_model_rain_observed.txt"
-            results.append(_check_file(p, "rain_observed"))
     return results
 
 
