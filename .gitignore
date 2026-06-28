@@ -78,3 +78,15 @@ tmp_eval_*.py
 pit_histogram_*.html
 reliability_diagram.png
 *.egg-info/
+
+# Inference logs
+logs/
+# Generated reports
+reports/*_parity_*.csv
+reports/*_parity_*.txt
+reports/*_shadow_*.csv
+reports/*_dq_*.csv
+
+# Generated diagnostics
+wind_station_diag.txt
+data/model_2a_row_universe_check.txt

@@ -1437,10 +1437,28 @@ Weather_Bot_Qwen/
 │       ├── sidebar.py           # 全域側邊欄（日期選擇器、同步）
 │       ├── strategy_card.py     # 每策略卡片（含開關與損益）
 │       └── strategy_builder.py  # 策略建立表單與閘門調整
+├── config/                 # 配置檔案
+│   ├── generic_realtime_parity_framework.yaml  # 通用即時推論同軌框架
+│   ├── model_2a_feature_spec.yaml              # Model 2A 特徵規格
+│   └── paper_strategies.json                   # 8 個紙上策略
 ├── features/               # 特徵建構器與資料集建構器
+│   ├── source_adapters_base.py         # 通用標準化源資料轉接器
+│   ├── shared_feature_builder_base.py  # 共享特徵建構器合約
+│   ├── model_2a_source_adapters.py     # Model 2A 標準化轉接器
+│   ├── model_2a_feature_builder.py     # Model 2A 特徵建構器
 │   ├── build_intraday_ml_dataset.py
 │   ├── build_intraday_lookup.py
 │   └── build_intraday_minute_features.py   # 模型 A 特徵
+├── inference/              # 即時推論框架
+│   ├── realtime_inference_base.py      # 通用 11 步驟推論流程
+│   └── model_2a_realtime_inference.py  # Model 2A 端到端推論
+├── monitoring/             # 生產級 ML 監控
+│   ├── inference_parity_check_base.py  # 通用重播同軌檢查
+│   ├── daily_shadow_eval_base.py       # 通用影子評估
+│   ├── data_quality_checks_base.py     # 通用資料品質檢查
+│   ├── model_2a_inference_parity_check.py  # Model 2A 同軌檢查
+│   ├── model_2a_daily_shadow_eval.py       # Model 2A 影子評估
+│   └── model_2a_data_quality_checks.py     # Model 2A 資料品質
 ├── models/                 # 訓練、推論、保存的模型
 │   ├── train_intraday_ml.py
 │   ├── intraday_inference.py
@@ -1450,6 +1468,8 @@ Weather_Bot_Qwen/
 │   ├── train_minute_model_a_restricted.py  # A_restricted：≥2023-06-01 控制
 │   ├── train_minute_model_b_restricted.py  # B_restricted：≥2023-06-01 控制
 │   ├── train_minute_model_c.py             # 模型 C 訓練（+即時預報）
+│   ├── train_model_2a.py                   # Model 2A 訓練（+風力+預報）
+│   ├── validate_model_2a.py                # Model 2A 驗證
 │   ├── intraday_minute_ml/                 # 模型 A 產出物（38 特徵）
 │   ├── intraday_minute_ml_model_b/         # 模型 B 產出物（46 特徵）
 │   ├── intraday_minute_ml_model_c/         # 模型 C 產出物（83 特徵）
@@ -1459,7 +1479,9 @@ Weather_Bot_Qwen/
 │   ├── intraday_minute_ml_model_b_tmin/    # 模型 B Tmin 產出物
 │   ├── intraday_minute_ml_model_c_tmin/    # 模型 C Tmin 產出物
 │   ├── intraday_minute_ml_model_d/         # 模型 D 產出物（跨午夜）
-│   └── intraday_minute_ml_model_e/         # 模型 E 產出物（早晨最低）
+│   ├── intraday_minute_ml_model_e/         # 模型 E 產出物（早晨最低）
+│   ├── intraday_minute_ml_model_g/         # 模型 G 產出物（Gap+Max）
+│   └── intraday_minute_ml_model_2a/        # Model 2A 產出物（風力+預報）
 ├── experiments/            # 實驗分析腳本
 │   └── calibration_model_b.py              # 殘差區間校正
 ├── scripts/                # 工具腳本
@@ -1490,17 +1512,143 @@ Weather_Bot_Qwen/
 └── README.md
 ```
 
+## 10.1 即時推論同軌框架（Real-Time Inference Parity Framework）
+
+通用生產級 ML 同軌框架，確保歷史訓練特徵與即時推論特徵即使來自不同資料源也能一致建構。
+
+### 10.1.1 核心原則
+
+所有生產模型必須遵循以下管線：
+
+```
+原始歷史資料源 / 即時資料源
+      │
+      ▼
+源資料轉接器 (standardize_source)
+      │
+      ▼
+標準化原始結構 (canonical raw schema)
+      │
+      ▼
+共享特徵建構器 (build_features)
+      │
+      ▼
+固定特徵向量 (feature_list.json 來自訓練)
+      │
+      ▼
+模型推論
+      │
+      ▼
+推論日誌 + 重播同軌檢查 + 監控
+```
+
+不允許模型直接使用特定資料源的原始即時數據。
+
+### 10.1.2 架構模組
+
+| 模組 | 檔案 | 用途 |
+|------|------|------|
+| 框架配置 | `config/generic_realtime_parity_framework.yaml` | 管線步驟、規範結構、停止條件 |
+| 源資料轉接器基礎 | `features/source_adapters_base.py` | `standardize_source()` 將任何原始資料轉為標準結構 |
+| 特徵建構器基礎 | `features/shared_feature_builder_base.py` | 合約：可用性規則、特徵向量驗證 |
+| 推論基礎 | `inference/realtime_inference_base.py` | 11 步驟通用推論流程、spec 載入、守門機制 |
+| 同軌檢查基礎 | `monitoring/inference_parity_check_base.py` | 重播同軌檢查、容忍度比較 |
+| 影子評估基礎 | `monitoring/daily_shadow_eval_base.py` | 實際結果後的評估 |
+| 資料品質基礎 | `monitoring/data_quality_checks_base.py` | 8 大類品質檢查 |
+| Model 2A spec | `config/model_2a_feature_spec.yaml` | 模型專屬：活躍時段、特徵、守門機制 |
+| Model 2A 轉接器 | `features/model_2a_source_adapters.py` | 天氣/風力/預報標準化轉接器 |
+| Model 2A 建構器 | `features/model_2a_feature_builder.py` | 46+ 個特徵計算 |
+| Model 2A 推論 | `inference/model_2a_realtime_inference.py` | 端到端推論含守門機制 |
+
+### 10.1.3 標準化結構合約
+
+每個源資料轉接器將原始數據轉換為標準化結構，包含必要欄位：
+
+```
+source_system: str          # 例如 "hko_obs", "wind_obs", "hko_forecast"
+source_mode: str            # "historical" | "live" | "replay"
+available_time: datetime    # 數據可用時間（必須明確）
+timestamp: datetime         # 測量記錄時間
+station_id: str             # 站點標識符
+value: float                # 通用測量值
+data_quality_flags: int     # 品質標誌
+```
+
+歷史與即時資料源必須產生相同的標準化結構。若即時資料源未提供 `available_time`，必須根據模型 spec 推導。
+
+### 10.1.4 共享特徵建構器合約
+
+每個模型都使用單一共享特徵建構器函數：
+
+```python
+def build_features(decision_time, canonical_sources, spec, mode):
+    """用於歷史、即時、重播三種模式的特徵計算。"""
+```
+
+此函數：
+1. 按 `available_time <= decision_time` 過濾所有資料源（不使用 `timestamp <= decision_time`）
+2. 在三種模式中一致地計算特徵
+3. 回傳以 `decision_time` 為索引的 DataFrame
+
+### 10.1.5 固定特徵向量
+
+每個模型使用訓練時儲存的特徵清單：
+
+```python
+with open(feature_list_path) as f:
+    FEATURE_COLS = json.load(f)
+missing = [c for c in FEATURE_COLS if c not in feature_df.columns]
+if missing:
+    raise ValueError(f"缺少必要特徵: {missing}")
+X = feature_df[FEATURE_COLS]
+```
+
+規則：不動態推導特徵順序；不新增僅即時可用的特徵；缺少訓練特徵時快速失敗。
+
+### 10.1.6 Model 2A 特徵規格
+
+Model 2A spec (`config/model_2a_feature_spec.yaml`) 定義：
+
+| 參數 | 值 |
+|------|-----|
+| 活躍時段 | 06:00 – 23:50 |
+| 決策網格 | 10 分鐘 |
+| 目標定義 | `remaining_upside = max(actual_high_today - max_so_far, 0)` |
+| 預測公式 | `pred_tmax_qXX = max_so_far + upside_qXX`（非 `temp_current + upside_qXX`）|
+| 溫度清洗 | 有效範圍 [0, 40]；異常旗標在錨點前處理 |
+| Spike 偵測 | `temp_change_1m_abs >= 5` |
+| 特徵容忍度 | 每個特徵的 pass/fail 閾值 |
+| 晚間守門機制 | 若 hour >= 18 且 pred_tmax_q50 > max_so_far + 0.5，標記為不合理 |
+| 分類器窗口 | `classifier_reliable_window = hour >= 15` |
+| 停止條件 | 8 項：同軌率 < 95%、溫度缺失、資料過時等 |
+
+### 10.1.7 未來模型擴展模式
+
+未來模型（Model B - 降雨、Model C - 即時預報、UV、警告）可以重用通用框架，只需新增：
+
+1. 新的標準化結構（如 `rainfall_canonical`、`nowcast_canonical`）
+2. 將原始資料轉為新標準結構的轉接器
+3. 擴展 `build_features()` 的特徵建構器
+4. 含雨量專屬品質規則的模型 spec YAML
+5. 通用 `run_realtime_inference()` 和同軌檢查保持不變
+
+---
+
 ## 11. 未來路線圖
 
 ### 近期：分鐘級模型演化
 
 1. **模型 B (降雨歷史)**：✅ 已訓練並整合 — 小幅改善 (+0.5pp cov80, -0.032 降雨 MAE)。降雨/無雨差距仍存在。
-2. **模型 C (即時預報)**：在模型 B 基礎上增加 37 個空間即時預報特徵。腳本：`models/train_minute_model_c.py`。
-3. **受限實驗 (A vs B)**：✅ 已完成。在降雨數據存在的時段內 (≥2023-06-01，109K 訓練行)，降雨特徵降低有雨偏差 (−0.128) 和有雨 MAE (−0.067)。但資料量 (2023 年前歷史) 主導整體表現。
+2. **模型 C (即時預報)**：✅ 已訓練並整合。37 個空間即時預報特徵。OOT MAE=0.602°C, cov80=85.0%。
+3. **受限實驗 (A vs B)**：✅ 已完成。在降雨數據存在的時段內 (≥2023-06-01，109K 訓練行)，降雨特徵降低有雨偏差 (−0.128) 和有雨 MAE (−0.067)。
 4. **區間校正**：✅ 已完成。殘差校正（有雨行 p10=-1.97, p90=+0.55）達到 80% 有雨覆蓋率。詳見 §4.4.10。
-5. **儀表板整合**：✅ 模型 B 已加入摘要行、比較分頁、模型選擇器。
-5. **回測**：將分鐘模型 B/C 通過模擬交易回溯測試管道，衡量損益影響。
-6. **排程再訓練**：隨著新 HKO 分鐘數據累積，自動化每週再訓練所有分鐘模型。
+5. **儀表板整合**：✅ 模型 B/C 已加入摘要行、比較分頁、模型選擇器。
+6. **模型 G (Gap+Max)**：✅ 已訓練並整合。預測差距+當日最高特徵；OOT cov80=84.3%。
+7. **Model 2A (Core+Wind)**：✅ 已訓練並整合。45 個特徵含風力站、氣壓、露點；OOT MAE=0.306°C，PR-AUC=0.987。
+8. **即時推論同軌框架**：✅ 已實作。通用框架 + Model 2A spec；可重用於 B/C/D/E/G 及未來降雨/即時預報/UV/警告模型。
+9. **回測**：將分鐘模型 B/C 通過模擬交易回溯測試管道，衡量損益影響。
+10. **排程再訓練**：隨著新 HKO 分鐘數據累積，自動化每週再訓練所有分鐘模型。
+11. **框架推廣**：將即時推論同軌框架應用至模型 B/C/D/E/G。
 
 ### 中期：基礎設施與品質
 *   **模型品質**：自動化數據品質報告、按小時驗證、排程再訓練。

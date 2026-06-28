@@ -1,0 +1,181 @@
+# config/generic_realtime_parity_framework.yaml
+# Generic Real-Time Inference Parity Framework
+# All production models must follow this pipeline:
+#
+# raw historical source / live source
+#       |
+#       v
+# source adapter
+#       |
+#       v
+# canonical raw schema
+#       |
+#       v
+# shared feature builder
+#       |
+#       v
+# fixed feature vector (frozen at training time)
+#       |
+#       v
+# model inference
+#       |
+#       v
+# inference log + replay parity check + monitoring
+
+framework:
+  name: generic_realtime_parity_framework
+  version: v1
+  description: >
+    Reusable framework ensuring historical training features and live inference
+    features are built consistently, even when data comes from different sources.
+
+pipeline:
+  steps:
+    - raw_source_ingestion
+    - source_adapter
+    - canonical_schema
+    - shared_feature_builder
+    - fixed_feature_vector
+    - model_inference
+    - inference_logging
+    - parity_check
+    - shadow_evaluation
+    - data_quality_monitoring
+
+canonical_schema:
+  required_fields:
+    - source_system
+    - source_mode
+    - available_time
+    - timestamp
+    - station_id
+    - value
+    - data_quality_flags
+
+  field_definitions:
+    source_system:
+      type: string
+      description: "Name of the originating data system (e.g. hko_obs, hko_forecast, wind_obs)"
+    source_mode:
+      type: string
+      enum: ["historical", "live", "replay"]
+      description: "Whether this data is from historical store, live API, or replay"
+    available_time:
+      type: datetime
+      description: "Time when the observation/forecast was made available for consumption"
+    timestamp:
+      type: datetime
+      description: "Time when the raw measurement was recorded"
+    station_id:
+      type: string
+      description: "Station identifier (may be null for non-station data)"
+    value:
+      type: float
+      description: "Generic measurement value"
+    data_quality_flags:
+      type: object
+      description: "Quality flags attached to the raw observation"
+
+feature_builder:
+  availability_rule: "available_time <= decision_time"
+  timestamp_fallback_rule: >
+    Only use timestamp <= decision_time when available_time is unavailable
+    and explicitly derived from model spec.
+  feature_selection:
+    method: "Use feature_list.json saved during training"
+    rules:
+      - "Do not infer feature order dynamically"
+      - "Do not add live-only features not used in training"
+      - "Do not silently drop missing trained features"
+      - "Fail fast if trained features are missing"
+
+inference:
+  steps:
+    - load_model_spec
+    - validate_active_hours_and_grid
+    - standardize_all_raw_sources
+    - build_features_using_shared_builder
+    - load_model_and_feature_list
+    - score_model
+    - apply_prediction_formula
+    - apply_calibration
+    - apply_guardrails
+    - write_inference_log
+    - return_prediction_payload
+
+  log_fields:
+    - model_name
+    - model_version
+    - decision_time
+    - run_timestamp
+    - source_mode
+    - source_systems
+    - source_timestamps
+    - source_available_times
+    - feature_values
+    - prediction_payload
+    - guardrail_flags
+    - data_quality_flags
+    - stop_condition_status
+    - inference_parity_status
+
+parity_check:
+  output:
+    report: "reports/{model_name}_feature_parity_report.csv"
+    summary: "reports/{model_name}_feature_parity_summary.txt"
+
+  report_columns:
+    - decision_time
+    - feature_name
+    - live_value
+    - replay_value
+    - abs_diff
+    - rel_diff
+    - pass_flag
+
+  summary_metrics:
+    - n_inference_rows
+    - n_feature_comparisons
+    - overall_pass_rate
+    - pass_rate_by_feature
+    - max_absolute_diff
+    - missing_feature_rate
+    - spike_detection_rate
+    - guardrail_violation_count
+
+shadow_evaluation:
+  output: "reports/{model_name}_live_shadow_metrics.csv"
+  generic_metrics:
+    - n_predictions
+    - bias
+    - mae
+    - rmse
+    - brier_score
+    - breach_rate
+    - false_alarm_rate
+    - feature_parity_pass_rate
+    - guardrail_violation_count
+
+data_quality:
+  checks:
+    - schema_checks
+    - range_checks
+    - freshness_checks
+    - missingness_checks
+    - timestep_checks
+    - source_availability_checks
+    - distribution_drift_checks
+    - baseline_divergence_checks
+  output: "reports/{model_name}_data_quality_report.csv"
+
+stop_conditions:
+  description: "Prediction is returned with warning flags or blocked if any condition is triggered"
+  conditions:
+    - feature_parity_pass_rate_below_threshold
+    - temp_current_missing_or_anomalous
+    - wind_all_change_30m_ago_missing
+    - source_data_stale
+    - feature_outside_allowed_range
+    - prediction_formula_check_fails
+    - guardrail_violation
+    - raw_data_spike

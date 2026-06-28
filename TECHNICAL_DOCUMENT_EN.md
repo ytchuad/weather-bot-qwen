@@ -956,6 +956,141 @@ Wind features contribute meaningfully after the core temperature and forecast fe
 
 ---
 
+## 4.8 Real-Time Inference Parity Framework
+
+A generic production ML parity framework ensuring historical training features and live inference features are built consistently, even when data comes from different sources.
+
+### 4.8.1 Core Principle
+
+All production models follow this pipeline:
+
+```
+raw historical source / live source
+      |
+      v
+source adapter (standardize_source)
+      |
+      v
+canonical raw schema
+      |
+      v
+shared feature builder (build_features)
+      |
+      v
+fixed feature vector (feature_list.json from training)
+      |
+      v
+model inference
+      |
+      v
+inference log + replay parity check + monitoring
+```
+
+Do not allow a model to directly consume source-specific live raw data.
+
+### 4.8.2 Framework Module Layout
+
+| Module | File | Purpose |
+|--------|------|---------|
+| Framework config | `config/generic_realtime_parity_framework.yaml` | Pipeline steps, canonical schema, stop conditions |
+| Source adapter base | `features/source_adapters_base.py` | `standardize_source()` converts any raw data to canonical schema |
+| Feature builder base | `features/shared_feature_builder_base.py` | Contract: availability rule, feature vector validation |
+| Inference base | `inference/realtime_inference_base.py` | 11-step generic inference flow, spec loading, guardrails |
+| Parity check base | `monitoring/inference_parity_check_base.py` | Replay parity check, tolerance comparison |
+| Shadow eval base | `monitoring/daily_shadow_eval_base.py` | Post-outcome evaluation |
+| Data quality base | `monitoring/data_quality_checks_base.py` | 8-category quality checks |
+| Model 2A spec | `config/model_2a_feature_spec.yaml` | Model-specific: active hours, features, guardrails |
+| Model 2A adapters | `features/model_2a_source_adapters.py` | Weather/wind/forecast canonical adapters |
+| Model 2A builder | `features/model_2a_feature_builder.py` | 46+ feature calculations |
+| Model 2A inference | `inference/model_2a_realtime_inference.py` | End-to-end inference with guardrails |
+
+### 4.8.3 Canonical Schema Contract
+
+Every source adapter converts raw data into a canonical schema with these required fields:
+
+```
+source_system: str          # e.g. "hko_obs", "wind_obs", "hko_forecast"
+source_mode: str            # "historical" | "live" | "replay"
+available_time: datetime    # when data became available (must be explicit)
+timestamp: datetime         # when measurement was recorded
+station_id: str             # station identifier
+value: float                # generic measurement value
+data_quality_flags: int     # quality flags
+```
+
+Historical and live source data must produce the same canonical structure. If `available_time` is not supplied by the live source, it must be derived using the model spec.
+
+### 4.8.4 Shared Feature Builder Contract
+
+Every model exposes a single shared feature builder function:
+
+```python
+def build_features(decision_time, canonical_sources, spec, mode):
+    """Used for historical, live, and replay feature computation."""
+```
+
+This function:
+1. Filters all sources by `available_time <= decision_time` (never `timestamp <= decision_time` unless derived)
+2. Computes features consistently across all three modes
+3. Returns a DataFrame indexed by `decision_time`
+
+### 4.8.5 Fixed Feature Vector
+
+Every model uses the feature list saved during training:
+
+```python
+with open(feature_list_path) as f:
+    FEATURE_COLS = json.load(f)
+missing = [c for c in FEATURE_COLS if c not in feature_df.columns]
+if missing:
+    raise ValueError(f"Missing required features: {missing}")
+X = feature_df[FEATURE_COLS]
+```
+
+Rules: Do not infer feature order dynamically; do not add live-only features; fail fast if trained features are missing.
+
+### 4.8.6 Model 2A Feature Spec
+
+The Model 2A spec (`config/model_2a_feature_spec.yaml`) defines:
+
+| Parameter | Value |
+|-----------|-------|
+| Active hours | 06:00 – 23:50 |
+| Decision grid | 10 minutes |
+| Target | `remaining_upside = max(actual_high_today - max_so_far, 0)` |
+| Prediction formula | `pred_tmax_qXX = max_so_far + upside_qXX` |
+| Temperature cleaning | Valid range [0, 40]; anomaly filter before anchors |
+| Spike detection | `temp_change_1m_abs >= 5` |
+| Feature tolerances | Feature-level pass/fail thresholds for parity check |
+| Late-day guardrail | If hour >= 18 and `pred_tmax_q50 > max_so_far + 0.5`, flag as unreasonable |
+| Classifier window | `classifier_reliable_window = hour >= 15` |
+| Stop conditions | 8 conditions: parity < 95%, missing temp, stale data, etc. |
+
+### 4.8.7 Model 2A Inference Guardrails
+
+```python
+# pred_tmax_qXX must equal max_so_far + upside_qXX (not temp_current + upside_qXX)
+assert abs(pred_tmax_q50 - (max_so_far + upside_q50)) < 1e-6
+
+# Late-day guardrail
+late_day_flag = int(hour >= 18 and pred_tmax_q50 > max_so_far + 0.5)
+
+# Classifier reliable window
+classifier_reliable = int(hour >= 15)  # do not treat zero_prob as actionable before 15
+```
+
+### 4.8.8 Extension Pattern for Future Models
+
+Future models (Model B - rainfall, Model C - nowcast, UV, warning) can reuse the generic framework by adding:
+
+1. A new canonical schema (e.g. `rainfall_canonical`, `nowcast_canonical`)
+2. Source adapters converting raw data to the new canonical schema
+3. Feature builder extending `build_features()` with new source dependencies
+4. Model spec YAML with rain-specific quality rules
+5. The generic `run_realtime_inference()` and parity check remain unchanged
+
+---
+
 ## 5. Inference & Prediction Logic (`models/intraday_inference.py`)
 
 ### 5.1 Feature Assembly
@@ -1516,10 +1651,28 @@ Weather_Bot_Qwen/
 │       ├── sidebar.py           # Global sidebar (date picker, sync)
 │       ├── strategy_card.py     # Per-strategy card with toggle & PnL
 │       └── strategy_builder.py  # Strategy creation form & gate tuning
+├── config/                 # Configuration files
+│   ├── generic_realtime_parity_framework.yaml  # Generic framework spec
+│   ├── model_2a_feature_spec.yaml              # Model 2A feature spec
+│   └── paper_strategies.json                   # 8 paper strategies
 ├── features/               # Feature builders & dataset constructors
+│   ├── source_adapters_base.py         # Generic canonical source adapter
+│   ├── shared_feature_builder_base.py  # Shared feature builder contract
+│   ├── model_2a_source_adapters.py     # Model 2A canonical adapters
+│   ├── model_2a_feature_builder.py     # Model 2A feature builder
 │   ├── build_intraday_ml_dataset.py
 │   ├── build_intraday_lookup.py
 │   └── build_intraday_minute_features.py   # Model A features
+├── inference/              # Real-time inference framework
+│   ├── realtime_inference_base.py      # Generic 11-step inference flow
+│   └── model_2a_realtime_inference.py  # Model 2A end-to-end inference
+├── monitoring/             # Production ML monitoring
+│   ├── inference_parity_check_base.py  # Generic replay parity check
+│   ├── daily_shadow_eval_base.py       # Generic shadow evaluation
+│   ├── data_quality_checks_base.py     # Generic data quality checks
+│   ├── model_2a_inference_parity_check.py  # Model 2A parity check
+│   ├── model_2a_daily_shadow_eval.py       # Model 2A shadow eval
+│   └── model_2a_data_quality_checks.py     # Model 2A data quality
 ├── models/                 # Training, inference, saved models
 │   ├── train_intraday_ml.py
 │   ├── intraday_inference.py
@@ -1530,6 +1683,7 @@ Weather_Bot_Qwen/
 │   ├── train_minute_model_b_restricted.py  # B_restricted: ≥2023-06-01 control
 │   ├── train_minute_model_c.py             # Model C training (+nowcast)
 │   ├── train_model_2a.py                   # Model 2A training (+wind + forecast)
+│   ├── validate_model_2a.py                # Model 2A validation
 │   ├── intraday_minute_ml/                 # Model A artifacts (38 features)
 │   ├── intraday_minute_ml_model_b/         # Model B artifacts (46 features)
 │   ├── intraday_minute_ml_model_c/         # Model C artifacts (83 features)
@@ -1558,6 +1712,7 @@ Weather_Bot_Qwen/
 │   ├── kelly_betting.py
 │   ├── clob_slippage.py
 │   └── rebalancer.py
+├── logs/                   # Inference logs (parquet)
 ├── reports/                # Validation reports & audit logs
 ├── tests/                  # Pytest test suite (92 gate tests)
 │   └── test_gates.py
@@ -1576,17 +1731,19 @@ Weather_Bot_Qwen/
 
 ## 11. Future Roadmap
 
-### Near-Term: Minute-Level Model Evolution
+### Near-Term: Model Development & Framework Rollout
 
 1. **Model B (Rainfall History)**: ✅ Trained and integrated — marginal improvement (+0.5pp cov80, -0.032 rain MAE). Rain/no-rain gap persists.
-2. **Model C (Nowcast)**: Add 37 spatial nowcast features on top of Model B. Script: `models/train_minute_model_c.py`.
-3. **Restricted Experiment (A vs B)**: ✅ Done. Within the rainfall-available period (≥2023-06-01, 109K train rows), rainfall features reduce rain bias (−0.128) and rain MAE (−0.067). But data volume (pre-2023 history) dominates overall performance.
+2. **Model C (Nowcast)**: ✅ Trained and integrated. 37 spatial nowcast features on top of Model B. OOT MAE=0.602°C, cov80=85.0%.
+3. **Restricted Experiment (A vs B)**: ✅ Done. Within the rainfall-available period (≥2023-06-01, 109K train rows), rainfall features reduce rain bias (−0.128) and rain MAE (−0.067).
 4. **Interval Calibration**: ✅ Done. Residual-based calibration for rain rows (p10=-1.97, p90=+0.55) achieves 80% rain-regime coverage. See §4.4.10.
-5. **Dashboard Integration**: ✅ Model B added to summary row, comparison tabs, model selector.
+5. **Dashboard Integration**: ✅ Model B/C added to summary row, comparison tabs, model selector.
 6. **Model G (Gap+Max)**: ✅ Trained and integrated. Forecast-gap + max_so_far features; OOT cov80=84.3%.
 7. **Model 2A (Core+Wind)**: ✅ Trained and integrated. 45 features including wind station data, pressure, dew point; OOT MAE=0.306°C, cov80=88.7%, PR-AUC=0.987.
-8. **Backtesting**: Run Minute Model B/C through the paper-trader backtest pipeline to measure PnL impact.
-9. **Scheduled Retraining**: Automate weekly retraining of all minute models as new HKO minute data accumulates.
+8. **Real-Time Inference Parity Framework**: ✅ Implemented. Generic framework with Model 2A spec; reusable for Models B/C/D/E/G and future rainfall/nowcast/UV/warning models.
+9. **Backtesting**: Run Minute Model B/C through the paper-trader backtest pipeline to measure PnL impact.
+10. **Scheduled Retraining**: Automate weekly retraining of all minute models as new HKO minute data accumulates.
+11. **Framework Rollout**: Apply real-time inference parity framework to Models B/C/D/E/G.
 
 ### Medium-Term: Infrastructure & Quality
 *   **Model Quality**: Automated data-quality reports, by-hour validation, scheduled retraining.

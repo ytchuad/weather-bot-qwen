@@ -401,15 +401,25 @@ python -m execution.auto_runner --list           # list enabled strategies
 
 ✅ Model A inference integrated in dashboard (model selector, comparison tab)
 
+✅ Model B — rainfall-augmented minute model (8 rainfall features, 46 features total)
+
+✅ Model C — full nowcast minute model (37 spatial nowcast features, 83 features total)
+
+✅ Model G (Gap+Max) — forecast-gap + max_so_far based intraday model
+
+✅ Model 2A (Core+Wind) — 45 features incl. wind station data, pressure, dew point; OOT MAE=0.306°C, cov80=88.7%
+
+✅ Real-Time Inference Parity Framework — generic production ML parity framework separating (A) generic framework from (B) model-specific specs
+
 ## Roadmap
 
-### Near‑Term: Minute Model Evolution
+### Near‑Term: Model & Framework
 
-- **Model B** — Train rainfall‑augmented minute model (add 8 rainfall history features to Model A)
-- **Model C** — Train full minute model with 37 spatial nowcast features
+- **Model D/E Tmin** — Cross-midnight and morning-minimum minute models (already trained)
 - Backtest Models B/C through paper‑trader pipeline to measure PnL impact
 - Dashboard integration for Models B/C (model selector + comparison tab)
 - Scheduled weekly retraining of all minute models
+- **Framework rollout** — Apply real-time inference parity framework to Models B/C/D/E/G
 
 ### Model & Data Quality
 
@@ -473,10 +483,25 @@ Weather_Bot_Qwen/
 │       ├── strategy_card.py     # per-strategy card with toggle & PnL
 │       └── strategy_builder.py  # strategy creation form & gate tuning
 ├── features/               # feature builders & dataset constructors
+│   ├── source_adapters_base.py   # generic canonical source adapter
+│   ├── shared_feature_builder_base.py  # shared feature builder contract
+│   ├── model_2a_source_adapters.py  # Model 2A canonical source adapters
+│   └── model_2a_feature_builder.py  # Model 2A shared feature builder
+├── inference/              # real-time inference framework
+│   ├── realtime_inference_base.py  # generic inference flow
+│   └── model_2a_realtime_inference.py # Model 2A inference
+├── monitoring/             # production ML monitoring
+│   ├── inference_parity_check_base.py  # generic replay parity
+│   ├── daily_shadow_eval_base.py       # generic shadow eval
+│   ├── data_quality_checks_base.py     # generic data quality checks
+│   ├── model_2a_inference_parity_check.py  # Model 2A parity check
+│   ├── model_2a_daily_shadow_eval.py       # Model 2A shadow eval
+│   └── model_2a_data_quality_checks.py     # Model 2A data quality
 ├── models/                 # training, inference, saved models
 │   ├── train_minute_model_a.py   # Model A (temp+RH, 5-min)
-│   ├── train_minute_model_b.py   # [planned] Model B (+rain hist)
-│   └── train_minute_model_c.py   # [planned] Model C (+nowcast)
+│   ├── train_minute_model_b.py   # Model B (+rain hist)
+│   ├── train_minute_model_c.py   # Model C (+nowcast)
+│   ├── train_model_2a.py         # Model 2A (+wind + forecast)
 ├── execution/              # strategy runner, Kelly, slippage, rebalancer
 │   ├── strategy_account.py       # StrategyAccount dataclass + persistence
 │   ├── strategy_runner.py        # cycle execution dispatch
@@ -490,6 +515,8 @@ Weather_Bot_Qwen/
 │   ├── clob_slippage.py
 │   └── rebalancer.py
 ├── config/                 # paper_strategies.json (8 strategies)
+│   ├── generic_realtime_parity_framework.yaml  # generic framework spec
+│   └── model_2a_feature_spec.yaml              # Model 2A feature spec
 ├── tests/                  # pytest test suite (92 gate tests)
 ├── .github/workflows/
 │   ├── daily_update.yml         # daily data sync
