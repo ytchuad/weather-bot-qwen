@@ -119,6 +119,15 @@ def predict_intraday_all(
         )
 
     rain_kw = rain_kwargs or {}
+    # Inject nowcast features for Model C (silently merge, no crash if missing)
+    try:
+        from features.nowcast_loader import get_nowcast_features
+        nc = get_nowcast_features(snapshot_time=state.get("time_now"))
+        if nc:
+            rain_kw.update(nc)
+    except Exception:
+        pass
+
     hour_now = state["time_now"].hour
     minutes_since_midnight = hour_now * 60 + state["time_now"].minute
 
@@ -189,8 +198,9 @@ def predict_intraday_all(
         rh_current=state.get("rh_now", 50.0),
         temp_buffer=state.get("df_today", pd.DataFrame()).get("temp", pd.Series()).dropna().tolist() if state.get("df_today") is not None else None,
         rh_buffer=state.get("df_today", pd.DataFrame()).get("rh", pd.Series()).dropna().tolist() if state.get("df_today") is not None else None,
-        # Model 2A data
+        # Model 2A / Model G pressure data
         pressure_current=pressure_kw.get("pressure_current"),
+        pressure_30m_ago=pressure_kw.get("pressure_30m_ago"),
         pressure_change_60m=pressure_kw.get("pressure_change_60m", 0.0),
         pressure_change_180m=pressure_kw.get("pressure_change_180m", 0.0),
         wind_ref_mean=wind_kw.get("wind_ref_mean", 0.0),

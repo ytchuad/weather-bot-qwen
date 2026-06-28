@@ -2153,8 +2153,8 @@ def predict_intraday_tmax_all(
     time_since_max_so_far=None, hour=None, minutes_since_midnight=None,
     rh_current=50.0, temp_buffer=None, rh_buffer=None,
     time_since_min_so_far=None,
-    # Model 2A data
-    pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
+    # Model 2A / Model G pressure data
+    pressure_current=None, pressure_30m_ago=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
     wind_ref_mean=0.0, wind_ref_max=0.0,
     wind_victoria_harbour_mean=0.0, wind_victoria_harbour_max=0.0,
     wind_highland_mean=0.0, wind_highland_max=0.0,
@@ -2258,7 +2258,8 @@ def predict_intraday_tmax_all(
                 time_since_min=time_since_min_so_far or 0.0,
                 temp_buffer=temp_buffer, rh_buffer=rh_buffer,
                 hour=hour, minute=current_datetime.minute if current_datetime else None,
-                forecast_tmax=forecast_tmax, pressure=None,
+                forecast_tmax=forecast_tmax,
+                pressure=pressure_current, pressure_30m_ago=pressure_30m_ago,
             )
         except Exception as e:
             logger.warning("Model G prediction failed: %s", e)
@@ -2305,12 +2306,6 @@ def predict_intraday_tmax_model_g(current_datetime, max_so_far, temp_now,
                                   forecast_tmax=None, pressure=None, pressure_30m_ago=None,
                                   **kwargs):
     """Predict remaining upside using Model G (forecast_gap + max_so_far model)."""
-    from app.services.weather_service import get_pressure_with_ttl_cache
-
-    if pressure is None:
-        pressure_data = get_pressure_with_ttl_cache()
-        pressure = pressure_data.get("pressure") if pressure_data else None
-        pressure_30m_ago = pressure_data.get("pressure_30m_ago") if pressure_data else None
 
     h = hour if hour is not None else (current_datetime.hour if current_datetime else 12)
     m = minute if minute is not None else (current_datetime.minute if current_datetime else 0)
@@ -2454,8 +2449,21 @@ def predict_intraday_tmax_model_2a(
         dew_point_current = temp_now - 5
 
     dew_point_spread = temp_now - dew_point_current
+    # Compute dew_point deltas from buffer via Magnus formula (matching training diff(6))
     dew_point_change_60m = 0.0
     dew_point_spread_change_60m = 0.0
+    if idx >= 6 and rh_idx >= 6 and dew_point_current is not None:
+        try:
+            import math as _m
+            _a, _b = 17.625, 243.04
+            _t6 = temp_arr[idx-6]
+            _rh6 = rh_arr[rh_idx-6]
+            _gamma6 = _m.log(_rh6 / 100.0) + (_a * _t6) / (_b + _t6)
+            _dp6 = (_b * _gamma6) / (_a - _gamma6)
+            dew_point_change_60m = dew_point_current - _dp6
+            dew_point_spread_change_60m = (temp_now - dew_point_current) - (_t6 - _dp6)
+        except Exception:
+            pass
 
     forecast_gap = forecast_tmax - max_so_far if forecast_tmax is not None else 0.0
     forecast_range = forecast_tmax - forecast_tmin if forecast_tmax is not None and forecast_tmin is not None else 0.0

@@ -240,6 +240,11 @@ def get_intraday_state(target_date_str: str) -> dict | None:
     max_so_far = float(df_today["temp"].cummax().iloc[-1])
     min_so_far = float(df_today["temp"].cummin().iloc[-1])
 
+    # 30-min ago temp
+    time_threshold_30 = time_now - pd.Timedelta(minutes=25)
+    df_30m = df_combined[df_combined["datetime"] <= time_threshold_30]
+    temp_30m_ago = float(df_30m["temp"].iloc[-1]) if not df_30m.empty else temp_now
+
     # 60-min ago temp
     time_threshold_60 = time_now - pd.Timedelta(minutes=55)
     df_60m = df_combined[df_combined["datetime"] <= time_threshold_60]
@@ -250,8 +255,22 @@ def get_intraday_state(target_date_str: str) -> dict | None:
     df_120m = df_combined[df_combined["datetime"] <= time_threshold_120]
     temp_120m_ago = float(df_120m["temp"].iloc[-1]) if not df_120m.empty else temp_now
 
+    # Time since max/min were last observed
+    time_since_max = 0.0
+    time_since_min = 0.0
+    if not df_today.empty:
+        max_idxs = df_today.index[df_today["temp"] == max_so_far]
+        if len(max_idxs) > 0:
+            time_of_max = df_today.loc[max_idxs[-1], "datetime"]
+            time_since_max = max(0.0, (time_now - time_of_max).total_seconds() / 60.0)
+        min_idxs = df_today.index[df_today["temp"] == min_so_far]
+        if len(min_idxs) > 0:
+            time_of_min = df_today.loc[min_idxs[-1], "datetime"]
+            time_since_min = max(0.0, (time_now - time_of_min).total_seconds() / 60.0)
+
     return {
         "temp_now": temp_now,
+        "temp_30m_ago": temp_30m_ago,
         "temp_60m_ago": temp_60m_ago,
         "temp_120m_ago": temp_120m_ago,
         "max_so_far": max_so_far,
@@ -259,10 +278,10 @@ def get_intraday_state(target_date_str: str) -> dict | None:
         "time_now": time_now,
         "df_today": df_today,
         "rh_now": rh_now,
-        "temp_change_30m": temp_now - temp_60m_ago,   # approximate fallback
+        "temp_change_30m": temp_now - temp_30m_ago,
         "temp_change_60m": temp_now - temp_60m_ago,
-        "time_since_max": 0.0,
-        "time_since_min": 0.0,
+        "time_since_max": time_since_max,
+        "time_since_min": time_since_min,
     }
 
 
@@ -549,12 +568,16 @@ def fetch_pressure_live() -> pd.DataFrame:
 
 
 def compute_pressure_kwargs() -> dict:
-    """Compute pressure_current, pressure_change_60m, pressure_change_180m from live CSV."""
+    """Compute pressure_current, pressure_30m_ago, pressure_change_60m/180m from live CSV."""
     df = fetch_pressure_live()
     if df.empty:
-        return {"pressure_current": None, "pressure_change_60m": 0.0, "pressure_change_180m": 0.0}
+        return {"pressure_current": None, "pressure_30m_ago": None,
+                "pressure_change_60m": 0.0, "pressure_change_180m": 0.0}
     now = hkt_now()
     latest = float(df["pressure"].iloc[-1])
+    t_30 = now - timedelta(minutes=30)
+    idx_30 = (df["datetime"] - t_30).abs().idxmin()
+    p_30 = float(df.loc[idx_30, "pressure"])
     t_60 = now - timedelta(minutes=60)
     idx_60 = (df["datetime"] - t_60).abs().idxmin()
     p_60 = float(df.loc[idx_60, "pressure"])
@@ -563,6 +586,7 @@ def compute_pressure_kwargs() -> dict:
     p_180 = float(df.loc[idx_180, "pressure"])
     return {
         "pressure_current": latest,
+        "pressure_30m_ago": p_30,
         "pressure_change_60m": latest - p_60,
         "pressure_change_180m": latest - p_180,
     }
