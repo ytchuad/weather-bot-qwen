@@ -44,14 +44,16 @@ def check_data_sources():
         "features_flat": [],
     }
 
-    # ── 1. HKO Live Temp/RH ──────────────────────────────────────────
+    # ── 1. HKO Live Temp/RH (Observatory, from RHRREAD API) ───────────
     try:
         dt, temp, rh = fetch_live_hko_temp_rh()
         features = []
+        record_time = dt.strftime("%H:%M:%S") if dt else "None"
+        features.append({"name": "record_time", "value": record_time, "status": "ok" if dt else "warning"})
         if temp is not None:
-            features.append({"name": "temp_current", "value": f"{temp:.1f} °C", "status": "ok"})
+            features.append({"name": "observatory_temp", "value": f"{temp:.1f} °C", "status": "ok"})
         else:
-            features.append({"name": "temp_current", "value": "None", "status": "error"})
+            features.append({"name": "observatory_temp", "value": "None", "status": "error"})
         if rh is not None:
             features.append({"name": "rh_current", "value": f"{rh:.0f} %", "status": "ok"})
             a, b = 17.625, 243.04
@@ -65,7 +67,7 @@ def check_data_sources():
             "name": "HKO Live Temp/RH",
             "url": HKO_RHRREAD_URL,
             "status": status,
-            "message": f"Temp: {temp}°C, RH: {rh}%" if temp else "No data",
+            "message": f"Observatory: {temp}°C (recorded {record_time})" if temp else "No data",
             "last_update": _now_str(),
             "features": features,
         })
@@ -315,6 +317,10 @@ def check_data_sources():
             row_count = len(df)
             latest_time = df["datetime"].max() if not df.empty else None
             temp_std = float(df["temp"].std()) if not df.empty else 0.0
+            last_temp = float(df["temp"].iloc[-1]) if not df.empty else None
+            model_temp = state.get("temp_now")
+            features.append({"name": "raw_buffer_temp", "value": f"{last_temp:.1f} °C" if last_temp else "None", "status": "ok" if last_temp else "error"})
+            features.append({"name": "temp_model_input", "value": f"{model_temp:.1f} °C" if model_temp else "None", "status": "ok" if model_temp else "error"})
             features.append({"name": "rows", "value": str(row_count), "status": "ok" if row_count >= 30 else "warning"})
             features.append({"name": "latest_timestamp", "value": str(latest_time), "status": "ok"})
             features.append({"name": "temp_std", "value": f"{temp_std:.2f}", "status": "ok" if temp_std > 0.1 else "warning"})
