@@ -26,7 +26,6 @@ export default function Layout({ children }: { children: ReactNode }) {
     <div className="relative flex flex-col h-screen bg-[#09090b] text-slate-400 overflow-hidden">
       {/* 全局环境光与材质背景层 */}
       <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
-        {/* 微噪点哑光材质 */}
         <div 
           className="absolute inset-0 opacity-[0.03]" 
           style={{ 
@@ -34,13 +33,11 @@ export default function Layout({ children }: { children: ReactNode }) {
           }}
         ></div>
         
-        {/* 环境呼吸光 1 (左上 蓝色) */}
         <div 
           className="absolute w-[600px] h-[600px] rounded-full blur-[120px] opacity-[0.2] bg-[#0284c7] top-[-200px] left-[-100px]"
           style={{ animation: "pulseGlow 8s infinite alternate" }}
         ></div>
         
-        {/* 环境呼吸光 2 (右下 青色) */}
         <div 
           className="absolute w-[500px] h-[500px] rounded-full blur-[120px] opacity-[0.2] bg-[#155e75] bottom-[-150px] right-[-100px]"
           style={{ animation: "pulseGlow 10s infinite alternate-reverse" }}
@@ -56,15 +53,17 @@ export default function Layout({ children }: { children: ReactNode }) {
 
       {/* 悬浮黑曜石导航栏 */}
       <nav className="sticky top-4 z-50 px-4 mt-4">
-        <div className="obsidian-nav mx-auto max-w-5xl flex items-center justify-between px-6 py-2.5 rounded-full">
-          <div className="flex items-center gap-8">
+        <div className="obsidian-nav mx-auto max-w-5xl flex items-center justify-between px-4 sm:px-6 py-2.5 rounded-full">
+          <div className="flex items-center gap-4 sm:gap-8">
             <div className="flex items-center gap-2.5">
-              <div className="w-7 h-7 border border-white/10 rounded-md flex items-center justify-center bg-[#09090b] shadow-inner">
+              <div className="w-7 h-7 border border-white/10 rounded-md flex items-center justify-center bg-[#09090b] shadow-inner shrink-0">
                 <div className="w-2.5 h-2.5 border border-cyan-400/50 rotate-45 bg-cyan-400/10"></div>
               </div>
-              <span className="text-white font-medium text-sm uppercase tracking-[0.2em]">Weather Quant</span>
+              {/* 手机端隐藏 Logo 文字，腾出空间 */}
+              <span className="hidden sm:block text-white font-medium text-sm uppercase tracking-[0.2em]">Weather Quant</span>
             </div>
             
+            {/* 桌面端导航 (带文字) */}
             <div className="hidden md:flex items-center gap-2">
               {navItems.map((item) => {
                 const active = loc.pathname === item.to
@@ -86,9 +85,32 @@ export default function Layout({ children }: { children: ReactNode }) {
                 )
               })}
             </div>
+
+            {/* 手机端导航 (纯图标) */}
+            <div className="flex md:hidden items-center gap-1">
+              {navItems.map((item) => {
+                const active = loc.pathname === item.to
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={[
+                      "flex items-center justify-center p-2 rounded-full transition-all duration-300",
+                      active
+                        ? "bg-cyan-500/10 text-cyan-400"
+                        : "text-slate-500 hover:text-slate-300 hover:bg-white/5"
+                    ].join(" ")}
+                  >
+                    <Icon className="w-4 h-4" />
+                  </Link>
+                )
+              })}
+            </div>
           </div>
 
           <div className="flex items-center gap-4 text-[11px] font-mono text-slate-400">
+            {/* 手机端隐藏 Live 时间，腾出空间 */}
             <div className="hidden md:flex items-center gap-2">
               <span className={`w-1 h-1 rounded-full ${isLive ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-amber-500"}`}></span>
               <span>LIVE • {lastUpdate.toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" })}</span>
