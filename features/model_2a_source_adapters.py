@@ -12,9 +12,10 @@ import numpy as np
 from typing import Optional
 
 STATION_GROUP_MAP = {
-    "京士柏": "urban",
-    "長洲": "offshore",
-    "大老山": "highland",
+    "參考": "ref",
+    "離岸": "offshore",
+    "高山": "highland",
+    "未知": "victoria_harbour",
 }
 
 VICTORIA_HARBOUR_STATIONS = ["京士柏", "啟德", "九龍天星碼頭"]

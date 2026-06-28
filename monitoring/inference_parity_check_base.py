@@ -73,6 +73,8 @@ def run_parity_check(
     total_feature_checks = 0
     spike_detection_count = 0
 
+    feature_value_fields = _get_feature_value_fields(spec)
+
     for idx, row in inference_log.iterrows():
         decision_time = row.get("decision_time")
         if decision_time is None:
@@ -90,10 +92,7 @@ def run_parity_check(
         else:
             continue
 
-        live_features = row.get("feature_values", {})
-        if isinstance(live_features, str):
-            import json
-            live_features = json.loads(live_features)
+        live_features = _extract_live_features(row, feature_value_fields)
 
         if isinstance(live_features, dict):
             for fname, live_val in live_features.items():
@@ -200,3 +199,41 @@ def _count_violations(flags):
     if isinstance(flags, dict):
         return sum(1 for v in flags.values() if v)
     return 0
+
+
+def _get_feature_value_fields(spec: dict) -> list:
+    """Extract numeric feature field names from inference_log_schema."""
+    log_fields = spec.get("inference_log_schema", {}).get("fields", [])
+    skip_names = {
+        "model_name", "model_version", "decision_time", "run_timestamp",
+        "source_mode", "source_systems", "source_timestamps",
+        "source_available_times", "guardrail_flags", "feature_parity_status",
+        "any_source_missing_flag", "wind_missing_flag", "forecast_missing_flag",
+        "temp_anomaly_flag", "temp_spike_flag", "classifier_reliable_window",
+        "late_day_unreasonable_upside_flag", "feature_parity_status",
+        "zero_prob",
+    }
+    return [f for f in log_fields if f not in skip_names]
+
+
+def _extract_live_features(row: pd.Series, feature_value_fields: list) -> dict:
+    """Extract live feature values from an inference log row.
+
+    Tries feature_values dict first, then falls back to individual columns.
+    """
+    live_feat = row.get("feature_values")
+    if isinstance(live_feat, str):
+        import json
+        try:
+            live_feat = json.loads(live_feat)
+        except (json.JSONDecodeError, ValueError):
+            live_feat = None
+
+    if isinstance(live_feat, dict) and len(live_feat) > 0:
+        return live_feat
+
+    result = {}
+    for fname in feature_value_fields:
+        if fname in row.index:
+            result[fname] = row[fname]
+    return result

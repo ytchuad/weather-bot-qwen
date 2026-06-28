@@ -22,9 +22,9 @@ def load_model_spec(spec_path: str) -> dict:
         spec = yaml.safe_load(f)
 
     required_keys = [
-        "model_name", "model_version", "feature_versions",
+        "model_name", "model_version",
         "feature_list_path", "active_hours", "decision_grid_minutes",
-        "availability_rule", "canonical_sources", "feature_groups",
+        "availability_rule", "canonical_sources",
         "feature_tolerances", "data_quality_rules",
         "inference_log_schema", "guardrails", "stop_conditions",
     ]
