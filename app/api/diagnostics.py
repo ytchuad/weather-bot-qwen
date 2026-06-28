@@ -12,7 +12,13 @@ logger = logging.getLogger(__name__)
 
 
 def _now_str() -> str:
-    return datetime.now().strftime("%H:%M:%S")
+    from app.config import HKT_OFFSET
+    return (datetime.utcnow() + HKT_OFFSET).strftime("%H:%M:%S")
+
+
+def _hkt_now() -> datetime:
+    from app.config import HKT_OFFSET
+    return datetime.utcnow() + HKT_OFFSET
 
 
 @router.get("/sources")
@@ -31,9 +37,11 @@ def check_data_sources():
         get_nowcast_rainfall,
     )
 
+    all_features_flat = []
     results = {
-        "checked_at": datetime.now().isoformat(),
+        "checked_at": _hkt_now().isoformat(),
         "sources": [],
+        "features_flat": [],
     }
 
     # ── 1. HKO Live Temp/RH ──────────────────────────────────────────
@@ -334,5 +342,20 @@ def check_data_sources():
             "status": "error", "message": str(e),
             "last_update": _now_str(), "features": [],
         })
+
+    # Flatten all features into features_flat table
+    for src in results["sources"]:
+        domain = src["name"]
+        source_url = src["url"]
+        updated = src["last_update"]
+        for feat in src.get("features", []):
+            results["features_flat"].append({
+                "domain": domain,
+                "feature": feat["name"],
+                "source": source_url,
+                "value": feat["value"],
+                "status": feat["status"],
+                "updated": updated,
+            })
 
     return results
