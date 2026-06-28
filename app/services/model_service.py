@@ -128,8 +128,13 @@ def predict_intraday_all(
         compute_wind_kwargs,
         hkt_now,
     )
-    pressure_kw = compute_pressure_kwargs()
-    wind_kw = compute_wind_kwargs()
+    pressure_kw = {}
+    wind_kw = {}
+    try:
+        pressure_kw = compute_pressure_kwargs()
+        wind_kw = compute_wind_kwargs()
+    except Exception as _e:
+        logger.warning("Failed to collect live pressure/wind data: %s", _e)
 
     # Compute forecast freshness from HKO XML ModelTime
     forecast_age_minutes = None

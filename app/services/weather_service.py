@@ -553,6 +553,7 @@ def fetch_pressure_live() -> pd.DataFrame:
         df = pd.read_csv(io.StringIO(r.text))
         df["datetime"] = pd.to_datetime(df["Date"], format="%Y/%m/%d %H:%M")
         df = df.drop(columns=["Date"]).dropna()
+        df = df.rename(columns={"Pressure": "pressure"})
         return df
     except Exception as e:
         logger.warning("fetch_pressure_live failed: %s", e)
