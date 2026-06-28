@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { Activity, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-react"
+import { RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-react"
 
 export default function Diagnostics() {
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
@@ -118,7 +118,7 @@ export default function Diagnostics() {
                 </tr>
               </thead>
               <tbody>
-                {data?.features_flat?.map((f: any, i: number) => (
+                {data?.features_flat?.map((f: any) => (
                   <tr
                     key={`${f.domain}-${f.feature}`}
                     className="border-t border-white/[0.03] text-slate-300 hover:bg-white/[0.02] transition-colors"
