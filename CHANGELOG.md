@@ -1,6 +1,37 @@
 # Changelog
 
-## [Unreleased] - 2026-06-28
+## [Unreleased] - 2026-06-29
+
+### Added
+- **Strategy Snapshot Logger**: SQLite-based persistence for per-cycle snapshots
+  - `features/strategy_snapshot_logger.py` — writes/reads snapshots (timestamp, Polymarket weighted temp, model predicted temp, actual temp) after each strategy cycle
+  - Enabled by piggybacking on the existing background scheduler — no separate data collection thread needed
+  - Snapshots recorded automatically every ~5 min per running strategy
+- **Models Comparison Chart (Hub page)**: New ECharts line chart showing all models vs Polymarket vs actual temperature
+  - `GET /api/charts/models-comparison` endpoint — reads from SQLite, returns all model prediction arrays
+  - `app/frontend/src/components/ModelsComparisonChart.tsx` — renders 9+ lines with color-coded legend
+  - Snapshot logger now stores `all_model_predictions` (JSON column) from all models in `run_all_models()` results
+- **Strategy Temperature Tracking Chart**: New ECharts line chart in the Strategies page
+  - Three lines: Polymarket weighted-average temperature, strategy model predicted temperature, actual HKO observed temperature
+  - Trade markers on the actual-temperature line (buy/sell annotations)
+  - Accessible via "Chart" button on each StrategyCard
+  - API endpoint: `GET /api/strategies/{sid}/chart?date=YYYY-MM-DD`
+  - Frontend component: `app/frontend/src/components/StrategyChart.tsx`
+  - Data served from SQLite — zero model loading, zero live API calls on page load
+
+### Changed
+- `app/api/strategies.py`:
+  - `_build_strategy_context()` now returns `markets`, `post_mean`, `is_min_temp`, `target_date_str` for snapshot writing
+  - `_scheduler_loop()` writes a snapshot to SQLite after each successful strategy cycle
+  - New `GET /{sid}/chart` endpoint returns pure time-series arrays for the frontend
+  - New `_load_chart_trades()` helper reads trade events from paper_trade_audit.parquet for chart markers
+- `app/frontend/src/pages/Strategies.tsx` — added "Chart" button to each StrategyCard, toggling the new StrategyChart component
+- `app/frontend/src/components/StrategyChart.tsx` — new ECharts line chart with Polymarket/model/actual temperature series and trade markers
+- `app/frontend/src/api/client.ts` — added `fetchStrategyChart()` function
+- `app/frontend/src/types/index.ts` — added `StrategyChartData`, `StrategyChartTrade` interfaces
+- `models/intraday_inference.py` — removed `_maybe_st_cache_resource()` (Streamlit `st.cache_resource` shim, no longer needed)
+
+## [2026-06-28]
 
 ### Added
 - **Real-Time Inference Parity Framework**: Generic production ML parity framework

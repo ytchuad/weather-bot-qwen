@@ -133,3 +133,29 @@ export interface StrategyTrade {
   reason?: string | null
   reason_code?: string
 }
+
+export interface StrategyChartTrade {
+  time: string
+  bucket: string
+  action: string
+  qty: number
+  side?: string
+}
+
+export interface StrategyChartData {
+  strategy_key: string
+  slug: string
+  date: string
+  timestamps: string[]
+  market_temps: (number | null)[]
+  model_temps: (number | null)[]
+  actual_temps: (number | null)[]
+  trades: StrategyChartTrade[]
+}
+
+export interface ModelsComparisonData {
+  timestamps: string[]
+  market_temps: (number | null)[]
+  actual_temps: (number | null)[]
+  models: Record<string, (number | null)[]>
+}

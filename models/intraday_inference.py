@@ -54,13 +54,6 @@ _model_cache = {}
 _active_model_key = 'baseline'
 
 
-def _maybe_st_cache_resource(func):
-    try:
-        import streamlit as _st
-        return _st.cache_resource(func)
-    except ImportError:
-        return func
-
 
 def _get_lgb():
     import lightgbm as _lgb
@@ -96,7 +89,6 @@ def _load_single_model(model_dir):
             cache[clf_name] = None
     return cache
 
-@_maybe_st_cache_resource
 def _get_cached_models():
     """Cached model loading — returns a new dict, no module-level side effects."""
     result = {}

@@ -43,6 +43,20 @@ The system is structured into three distinct layers:
 *   **Simulation**: Slippage modeling, dynamic rebalancing, and PnL tracking.
 *   **Strategy-Centric Architecture**: Self-contained strategies with per-strategy capital, model selection, market template, and gate pipeline.
 *   **Headless Auto-Runner**: GitHub Actions cron (every 5 min) runs enabled strategies outside Streamlit.
+*   **Strategy Snapshot Logger**: `features/strategy_snapshot_logger.py` — SQLite persistence for per-cycle snapshots (Polymarket weighted temp, model predicted temp, actual observed temp). Feeds the frontend chart without re-running models or live APIs.
+
+### Layer D: Frontend Presentation Layer
+*   **Stack**: React 19 + TypeScript + Vite + TailwindCSS v4 + ECharts (`echarts-for-react`) + TanStack Query.
+*   **Models Comparison Chart (Hub page)**: `ModelsComparisonChart.tsx` renders an ECharts multi-line chart below the ConsensusTrack, showing all models vs Polymarket vs actual temperature trajectories with scrollable legend.
+*   **Strategy Temperature Tracking Chart**: Each StrategyCard has a "Chart" button that expands an ECharts line chart with three series:
+    *   Polymarket weighted-average temperature (bucket prices as weights)
+    *   Strategy model predicted temperature (posterior mean, i.e. `max_so_far + predicted_upside`)
+    *   HKO actual observed temperature
+    *   Trade markers annotated on the actual-temperature line (buy/sell)
+*   **Read/Write Separation**:
+    *   **Write path**: After each successful strategy cycle, `strategy_snapshot_logger.write_snapshot()` appends a row to SQLite (piggybacking on the existing background scheduler).
+    *   **Read path**: The frontend chart fetches `GET /api/strategies/{sid}/chart`. The API reads SQLite directly — zero model loading, zero live API calls.
+*   **Database**: `data/strategy_snapshots.db` (SQLite, WAL mode); ~288 rows per strategy per day (one every 5 minutes).
 
 ---
 
@@ -1744,6 +1758,8 @@ Weather_Bot_Qwen/
 9. **Backtesting**: Run Minute Model B/C through the paper-trader backtest pipeline to measure PnL impact.
 10. **Scheduled Retraining**: Automate weekly retraining of all minute models as new HKO minute data accumulates.
 11. **Framework Rollout**: Apply real-time inference parity framework to Models B/C/D/E/G.
+12. **Strategy Snapshot Logger & Chart**: ✅ Done. SQLite-backed per-cycle snapshots; frontend ECharts chart displaying Polymarket weighted temp, model predicted temp, and actual temp.
+13. **Models Comparison Chart (Hub page)**: ✅ Done. Hub page multi-line chart showing all models vs market vs actual temperature, sourced from the `all_model_predictions` JSON column in snapshots.
 
 ### Medium-Term: Infrastructure & Quality
 *   **Model Quality**: Automated data-quality reports, by-hour validation, scheduled retraining.

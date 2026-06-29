@@ -40,6 +40,11 @@ data/hko_chunks/
 data/hko_history_checkpoint.txt
 data/hko_history_errors.txt
 
+# Strategy snapshot SQLite — written by background scheduler
+data/strategy_snapshots.db
+data/strategy_snapshots.db-shm
+data/strategy_snapshots.db-wal
+
 # Paper-trader runtime data
 data/paper_trader/
 data/paper_trader_test/

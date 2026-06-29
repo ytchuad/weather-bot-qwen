@@ -11,7 +11,8 @@ import {
   runAllStrategies
 } from "../api/client"
 import type { Suggestion, StrategyCreate, Strategy, StrategyTrade } from "../types"
-import { TrendingUp, Wallet, Percent, Activity, Plus, Beaker, Settings2, Play } from "lucide-react"
+import { TrendingUp, Wallet, Percent, Activity, Plus, Beaker, Settings2, Play, BarChart3 } from "lucide-react"
+import StrategyChart from "../components/StrategyChart"
 
 const TODAY = new Date().toISOString().slice(0, 10)
 
@@ -58,6 +59,7 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
   const queryClient = useQueryClient()
   const [isExpanded, setIsExpanded] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
+  const [showChart, setShowChart] = useState(false)
   
   // 编辑表单状态
   const [editCapital, setEditCapital] = useState(strategy.capital)
@@ -155,13 +157,24 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
         </span>
         <div className="flex gap-1">
           <button 
-            onClick={() => { setIsExpanded(!isExpanded); setIsEditing(false); }}
+            onClick={() => { setShowChart(!showChart); setIsExpanded(false); setIsEditing(false); }}
+            className={`text-[10px] px-2 py-1 rounded-sm border transition-colors ${
+              showChart
+                ? "bg-cyan-500/10 border-cyan-500/30 text-cyan-400"
+                : "bg-white/[0.03] border-white/[0.04] text-slate-400 hover:text-cyan-400"
+            }`}
+          >
+            <BarChart3 size={10} className="inline mr-1" />
+            Chart
+          </button>
+          <button 
+            onClick={() => { setIsExpanded(!isExpanded); setIsEditing(false); setShowChart(false); }}
             className="text-[10px] px-2 py-1 rounded-sm bg-white/[0.03] border border-white/[0.04] text-slate-400 hover:text-cyan-400 transition-colors"
           >
             {isExpanded ? "Hide" : "Trades"}
           </button>
           <button 
-            onClick={() => { setIsEditing(!isEditing); setIsExpanded(false); }}
+            onClick={() => { setIsEditing(!isEditing); setIsExpanded(false); setShowChart(false); }}
             className="text-[10px] px-2 py-1 rounded-sm bg-white/[0.03] border border-white/[0.04] text-slate-400 hover:text-cyan-400 transition-colors"
           >
             {isEditing ? "Cancel" : "Edit"}
@@ -232,6 +245,14 @@ function StrategyCard({ strategy }: { strategy: Strategy }) {
           >
             {updateMutation.isPending ? "Saving..." : "Save Changes"}
           </button>
+        </div>
+      )}
+
+      {/* 圖表展開視圖 */}
+      {showChart && (
+        <div className="mt-4 pt-4 border-t border-white/[0.04]">
+          <div className="text-[10px] text-slate-400 uppercase tracking-[0.2em] mb-3">Temperature Tracking</div>
+          <StrategyChart strategyId={strategy.id} date={new Date().toISOString().slice(0, 10)} />
         </div>
       )}
 

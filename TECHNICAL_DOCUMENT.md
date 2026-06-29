@@ -40,6 +40,20 @@
 *   **模擬**：滑點建模、動態再平衡、損益追蹤。
 *   **策略中心架構**：每個策略為獨立實體，擁有自己的資金、模型、市場模板和閘門管線。
 *   **無頭自動執行器**：GitHub Actions cron（每 5 分鐘）在 Streamlit 之外執行啟用的策略。
+*   **策略快照記錄器**：`features/strategy_snapshot_logger.py` — SQLite 儲存每次策略週期的快照（Polymarket 加權溫度、模型預測溫度、實際觀測溫度），為前端圖表提供資料，不需重新載入模型或呼叫 API。
+
+### D層：前端展示層
+*   **技術棧**：React 19 + TypeScript + Vite + TailwindCSS v4 + ECharts (`echarts-for-react`) + TanStack Query。
+*   **模型比較圖表 (Hub 首頁)**：`ModelsComparisonChart.tsx` 在 ConsensusTrack 下方渲染 ECharts 多線圖，顯示所有模型 vs Polymarket vs 實際溫度的歷史軌跡，支援圖例滾動與縮放。
+*   **策略溫度追蹤圖表**：每個策略卡片上的「Chart」按鈕展開 ECharts 折線圖，顯示三條曲線：
+    *   Polymarket 加權平均溫度（以桶價格為權重）
+    *   策略模型預測溫度（posterior mean，即 `max_so_far + predicted_upside`）
+    *   HKO 實際觀測溫度
+    *   曲線上的交易標記（買入/賣出註釋）
+*   **讀寫分離架構**：
+    *   **寫入路徑**：背景排程 (`_scheduler_loop`) 每次成功執行策略後，由 `strategy_snapshot_logger.write_snapshot()` 寫入一筆記錄。
+    *   **讀取路徑**：前端圖表請求 `GET /api/strategies/{sid}/chart`，直接讀取 SQLite，零模型載入、零即時 API 呼叫。
+*   **資料庫**：`data/strategy_snapshots.db`（SQLite，WAL 模式），每策略每日期 ~288 筆（每 5 分鐘一筆）。
 
 ---
 
@@ -1649,6 +1663,8 @@ Model 2A spec (`config/model_2a_feature_spec.yaml`) 定義：
 9. **回測**：將分鐘模型 B/C 通過模擬交易回溯測試管道，衡量損益影響。
 10. **排程再訓練**：隨著新 HKO 分鐘數據累積，自動化每週再訓練所有分鐘模型。
 11. **框架推廣**：將即時推論同軌框架應用至模型 B/C/D/E/G。
+12. **策略快照記錄器與圖表**：✅ 已完成。SQLite 儲存每次策略週期快照；前端 ECharts 圖表展示 Polymarket 加權溫度、模型預測溫度、實際氣溫三條曲線。
+13. **模型比較圖表 (Hub 首頁)**：✅ 已完成。Hub 頁面展示所有模型 vs 市場 vs 實際溫度的多線圖，資料來自 snapshot 中的 `all_model_predictions` JSON 欄位。
 
 ### 中期：基礎設施與品質
 *   **模型品質**：自動化數據品質報告、按小時驗證、排程再訓練。

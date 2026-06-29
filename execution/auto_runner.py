@@ -71,6 +71,11 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
     from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now, compute_rain_kwargs
     from app.services.market_service import fetch_today_event, fetch_event_markets
     from app.services.model_service import run_all_models
+    from features.strategy_snapshot_logger import (
+        write_snapshot,
+        calc_pm_weighted_temp,
+        calc_model_predicted_temp,
+    )
 
     store = StrategyAccountStore()
 
@@ -177,6 +182,39 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
             sid, result.get("status"),
             len(result.get("decisions", [])),
         )
+
+        # ── write snapshot for chart ─────────────────────────
+        if result.get("status") == "completed":
+            try:
+                pm_temp = calc_pm_weighted_temp(markets, prices_dict)
+                actual_temp = state.get("temp_now") if state else None
+                max_so_far = state.get("max_so_far") if state else None
+                post_mean = results.get(model, {}).get("mean") if results else None
+                model_predicted = calc_model_predicted_temp(max_so_far, post_mean)
+
+                all_model_preds = {}
+                if results:
+                    for mk, pred in results.items():
+                        if mk != "_intraday_error" and pred.get("mean") is not None:
+                            all_model_preds[mk] = pred["mean"]
+
+                write_snapshot({
+                    "timestamp": hkt_now().isoformat(),
+                    "snapshot_date": target_date_str,
+                    "slug": slug,
+                    "strategy_key": sid,
+                    "model_key": model,
+                    "pm_weighted_temp": pm_temp,
+                    "model_predicted_temp": model_predicted,
+                    "actual_temp": actual_temp,
+                    "max_so_far": max_so_far,
+                    "predicted_upside": post_mean,
+                    "model_std": context.get("model_std", 1.5),
+                    "all_model_predictions": all_model_preds,
+                })
+            except Exception as snap_err:
+                logger.warning("Failed to write snapshot for %s: %s", sid, snap_err)
+
         return result
 
     except Exception as exc:

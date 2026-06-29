@@ -5,6 +5,7 @@ import WeatherCards from "../components/WeatherCards"
 import BucketChart from "../components/BucketChart"
 import ComparisonChart from "../components/ComparisonChart"
 import ConsensusTrack from "../components/ConsensusTrack"
+import ModelsComparisonChart from "../components/ModelsComparisonChart"
 import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
 import { GitCompare } from "lucide-react"
 
@@ -32,7 +33,7 @@ export default function Hub() {
   })
 
   const eventSlug = todayEventData?.event?.slug ?? null
-  const { data: eventData } = useQuery({
+  const { data: eventData, isError: isMarketError } = useQuery({
     queryKey: ["event", eventSlug],
     queryFn: () => fetchEvent(eventSlug!, isMinTemp),
     enabled: !!eventSlug,
@@ -168,6 +169,21 @@ export default function Hub() {
         />
       </div>
 
+      {/* Models vs Market — Temperature Tracking */}
+      <div className="px-4 md:px-8 mb-6 mt-6">
+        <div className="bg-[#0f1013] border border-white/[0.06] rounded-md p-6 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)]">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h2 className="text-[10px] text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-2">
+                <span className="w-4 h-px bg-slate-500"></span> Models vs Market — Temperature Tracking
+              </h2>
+              <p className="text-xl font-light text-white tracking-tight">Historical Prediction Trajectory</p>
+            </div>
+          </div>
+          <ModelsComparisonChart date={date} />
+        </div>
+      </div>
+
       <div className="flex flex-col lg:flex-row gap-6 px-4 md:px-8 pb-8">
         <aside className="w-full lg:w-1/3 lg:min-w-[300px] lg:max-w-[400px] flex flex-col border border-white/[0.06] bg-[#09090b] rounded-md max-h-[600px] overflow-hidden">
           <div className="p-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
@@ -222,8 +238,13 @@ export default function Hub() {
               <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Loading chart data...</div>
             ) : isError ? (
               <div className="w-full h-full flex flex-col items-center justify-center text-rose-400 text-sm text-center px-4">
-                Failed to load chart data.
+                Failed to load model predictions.
                 <span className="text-slate-500 text-xs mt-2">{(error as Error)?.message || "API Error"}</span>
+              </div>
+            ) : isMarketError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center text-amber-400 text-sm text-center px-4">
+                Polymarket data unavailable.
+                <span className="text-slate-500 text-xs mt-2">Displaying model probabilities only.</span>
               </div>
             ) : compareMode ? (
               <ComparisonChart

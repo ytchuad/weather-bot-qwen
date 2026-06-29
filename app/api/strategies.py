@@ -15,6 +15,12 @@ from app.services.model_service import calculate_kelly, run_all_models
 from execution.strategy_account import StrategyAccount, StrategyAccountStore
 from app.services.market_service import fetch_today_event, fetch_event_markets
 from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now
+from features.strategy_snapshot_logger import (
+    write_snapshot,
+    read_snapshots,
+    calc_pm_weighted_temp,
+    calc_model_predicted_temp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -291,6 +297,93 @@ def _find_market_price(markets: list[dict], bucket_name: str) -> float | None:
 
 # ── Run All Strategies Endpoint ──────────────────────────────────────────────
 
+@router.get("/{sid}/chart")
+def get_strategy_chart(
+    sid: str,
+    date: str | None = None,
+    slug: str | None = None,
+    model_key: str | None = None,
+):
+    """Return time-series data for the strategy chart.
+
+    Reads from the snapshot SQLite database — no models or APIs are touched.
+    Returns raw arrays for the frontend ECharts component to render.
+    """
+    from app.services.weather_service import hkt_now as _hkt_now
+    target_date = date or _hkt_now().strftime("%Y-%m-%d")
+
+    rows = read_snapshots(
+        strategy_key=sid,
+        slug=slug,
+        date=target_date,
+        model_key=model_key,
+    )
+
+    if not rows:
+        return {
+            "strategy_key": sid,
+            "slug": slug or "",
+            "date": target_date,
+            "timestamps": [],
+            "market_temps": [],
+            "model_temps": [],
+            "actual_temps": [],
+            "trades": [],
+        }
+
+    # Load trades from audit log for the same strategy/date
+    trades = _load_chart_trades(sid, target_date, slug)
+
+    return {
+        "strategy_key": sid,
+        "slug": rows[0].get("slug", slug or ""),
+        "date": target_date,
+        "timestamps": [r["timestamp"] for r in rows],
+        "market_temps": [r.get("pm_weighted_temp") for r in rows],
+        "model_temps": [r.get("model_predicted_temp") for r in rows],
+        "actual_temps": [r.get("actual_temp") for r in rows],
+        "trades": trades,
+    }
+
+
+def _load_chart_trades(
+    sid: str,
+    date: str,
+    slug: str | None = None,
+) -> list[dict]:
+    """Load trade events from the audit log for chart markers."""
+    import pandas as pd
+    from pathlib import Path
+
+    audit_path = Path("data/paper_trade_audit.parquet")
+    if not audit_path.exists():
+        return []
+
+    try:
+        df = pd.read_parquet(audit_path)
+        df = df[df["strategy_key"] == sid] if "strategy_key" in df.columns else df
+        if slug and "slug" in df.columns:
+            df = df[df["slug"] == slug]
+        if "timestamp" in df.columns:
+            df = df[df["timestamp"].str.startswith(date)]
+
+        records = []
+        for _, r in df.iterrows():
+            action = r.get("action", "")
+            if action in ("EXIT_ZERO", "EXIT_DUST", "FLIP", "EXIT", "NEW", "INCREASE", "DECREASE"):
+                records.append({
+                    "time": r.get("timestamp", ""),
+                    "bucket": r.get("bucket", ""),
+                    "action": action,
+                    "qty": float(r.get("qty_after", 0)) - float(r.get("qty_before", 0)),
+                    "side": r.get("side_after") or r.get("side_before", ""),
+                })
+        return records[-200:]
+    except Exception as e:
+        logger.warning("Failed to load trades for chart: %s", e)
+        return []
+
+
 @router.post("/run-all")
 def run_all_strategies():
     """Run all enabled strategies once. Used by frontend polling and manual triggers."""
@@ -351,7 +444,9 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
     
     prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
     token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
-    
+
+    post_mean = results.get(model, {}).get("mean") if results else None
+
     return dict(
         capital=acct.capital,
         model_key=model,
@@ -369,6 +464,12 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
         model_std=1.5,
         recent_price_volatility=0.0,
         hours_to_settlement=24.0,
+        # snapshot extras
+        markets=markets,
+        post_mean=post_mean,
+        is_min_temp=is_min_temp,
+        target_date_str=target_date_str,
+        all_results=results,
     )
 
 
@@ -415,6 +516,40 @@ def _scheduler_loop():
                     )
                     logger.info("Strategy %s executed: %s", acct.id, result.get("status"))
                     store.set_last_run(acct.id)
+
+                    # ── write snapshot for chart ─────────────────────────
+                    if result.get("status") == "completed":
+                        try:
+                            markets = context.get("markets", [])
+                            prices_dict = context.get("prices_dict", {})
+                            pm_temp = calc_pm_weighted_temp(markets, prices_dict)
+                            actual_temp = context.get("temp_now")
+                            max_so_far = context.get("max_so_far")
+                            post_mean = context.get("post_mean")
+                            model_predicted = calc_model_predicted_temp(max_so_far, post_mean)
+
+                            all_results = context.get("all_results", {})
+                            all_model_preds = {}
+                            for mk, pred in all_results.items():
+                                if mk != "_intraday_error" and pred.get("mean") is not None:
+                                    all_model_preds[mk] = pred["mean"]
+
+                            write_snapshot({
+                                "timestamp": hkt_now().isoformat(),
+                                "snapshot_date": context.get("target_date_str", hkt_now().strftime("%Y-%m-%d")),
+                                "slug": context.get("slug", ""),
+                                "strategy_key": acct.id,
+                                "model_key": acct.model,
+                                "pm_weighted_temp": pm_temp,
+                                "model_predicted_temp": model_predicted,
+                                "actual_temp": actual_temp,
+                                "max_so_far": max_so_far,
+                                "predicted_upside": post_mean,
+                                "model_std": context.get("model_std", 1.5),
+                                "all_model_predictions": all_model_preds,
+                            })
+                        except Exception as snap_err:
+                            logger.warning("Failed to write snapshot for %s: %s", acct.id, snap_err)
                 
         except Exception as exc:
             logger.exception("Scheduler error: %s", exc)

@@ -27,6 +27,8 @@ import type {
   StrategyCreate,
   StrategyUpdate,
   PortfolioStats,
+  StrategyChartData,
+  ModelsComparisonData,
 } from "../types"
 
 export function fetchPredictions(
@@ -146,6 +148,22 @@ export function deleteStrategy(id: string): Promise<{ status: string; id: string
 // Run all enabled strategies
 export function runAllStrategies(): Promise<{ results: unknown[]; total: number }> {
   return post("/strategies/run-all", {})
+}
+
+// Models comparison chart (Hub page)
+export function fetchModelsComparison(date: string): Promise<ModelsComparisonData> {
+  return get(`/charts/models-comparison?date=${encodeURIComponent(date)}`)
+}
+
+// Strategy chart
+export function fetchStrategyChart(
+  sid: string,
+  date: string,
+  slug?: string,
+): Promise<StrategyChartData> {
+  let q = `date=${encodeURIComponent(date)}`
+  if (slug) q += `&slug=${encodeURIComponent(slug)}`
+  return get(`/strategies/${sid}/chart?${q}`)
 }
 
 
