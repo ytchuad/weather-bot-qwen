@@ -1,6 +1,29 @@
 # Changelog
 
-## [Unreleased] - 2026-06-29
+## [Unreleased] - 2026-06-30
+
+### Added
+- **Auto-seed default strategy accounts on startup**: if `data/strategy_accounts.json` is empty, `start_scheduler()` copies from `config/default_strategy_accounts.json` (two accounts: `enhanced_v1_paper` with model_a, `enhanced_v2_paper` with baseline)
+- **`context_json` column in snapshot DB**: stores weather state (temp lags, rh, time_since_*), forecast, rainfall data quality flags, and per-model stds for offline debugging
+- **Hub KPI summary cards**: Model Expected (°C), Market Expected (°C), Expected Bucket row above the temperature tracking chart
+- **ModelGrid confidence interval track**: visual ±1σ bar + mean dot per model card
+- **WeatherCards redesign**: from card grid to compact horizontal bar layout
+
+### Changed
+- `app/api/strategies.py`:
+  - `_build_strategy_context()` now assembles `context_json` dict with ~20 diagnostic variables
+  - `start_scheduler()` calls `_seed_default_accounts_if_empty()` before launching the thread
+  - Snapshot write passes `context_json` to the logger
+- `features/strategy_snapshot_logger.py`: added `context_json TEXT` column + migration; updated `write_snapshot()` and `read_snapshots()`
+- `execution/auto_runner.py`: assembles and passes `context_json` on snapshot write
+- `app/frontend/src/pages/Hub.tsx`: removed ConsensusTrack; added KPI cards, bucket midpoint parser, tempRange computation for ModelGrid
+- `app/frontend/src/components/BucketChart.tsx`: default view changed to "prob", simplified JSX
+- `app/frontend/src/components/ModelGrid.tsx`: added `tempRange` prop, confidence interval track bar, top bucket label, Model G label
+- `app/frontend/src/components/ModelsComparisonChart.tsx`: reduced height 400→300px, simplified returns
+- `app/frontend/src/components/WeatherCards.tsx`: redesigned to horizontal bar layout
+- `config/default_strategy_accounts.json` (new): tracked default accounts file for HF Spaces seeding
+
+## [2026-06-29]
 
 ### Added
 - **Strategy Snapshot Logger**: SQLite-based persistence for per-cycle snapshots
