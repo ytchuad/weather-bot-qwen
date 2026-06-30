@@ -126,7 +126,7 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </nav>
 
-      <div className="relative z-10 flex-1 overflow-hidden overflow-y-auto custom-scrollbar mt-6">
+      <div className="relative z-10 flex-1 overflow-hidden overflow-y-auto [&::-webkit-scrollbar]:hidden mt-6">
         {children}
       </div>
 

@@ -133,19 +133,19 @@ export default function Hub() {
     return totalProb > 0 ? (weightedSum / totalProb).toFixed(1) : null
   }, [marketPrices])
 
-  // 計算最高機率桶
+  // 計算最高機率桶 (Polymarket)
   const expectedBucket = useMemo(() => {
-    if (!activeModelProbs || Object.keys(activeModelProbs).length === 0) return null
+    if (!marketPrices || Object.keys(marketPrices).length === 0) return null
     let maxProb = 0
     let bucketName = ""
-    for (const [bucket, prob] of Object.entries(activeModelProbs)) {
+    for (const [bucket, prob] of Object.entries(marketPrices)) {
       if (prob > maxProb) {
         maxProb = prob
         bucketName = bucket
       }
     }
     return maxProb > 0 ? { name: bucketName, prob: (maxProb * 100).toFixed(0) } : null
-  }, [activeModelProbs])
+  }, [marketPrices])
 
   // 計算所有可見模型的溫度範圍，用於 ModelGrid 的置信區間軌
   const tempRange = useMemo(() => {
@@ -173,7 +173,7 @@ export default function Hub() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full max-w-[1600px] mx-auto overflow-y-auto custom-scrollbar">
+    <div className="flex flex-col w-full max-w-[1600px] mx-auto">
       <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 p-4 md:p-8 pb-0">
         <div>
           <p className="text-[10px] text-cyan-400/80 mono tracking-[0.2em] uppercase mb-2">Institutional Terminal</p>

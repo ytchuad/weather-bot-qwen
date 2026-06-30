@@ -22,6 +22,8 @@
 - `app/frontend/src/components/ModelsComparisonChart.tsx`: reduced height 400→300px, simplified returns
 - `app/frontend/src/components/WeatherCards.tsx`: redesigned to horizontal bar layout
 - `config/default_strategy_accounts.json` (new): tracked default accounts file for HF Spaces seeding
+- `app/frontend/src/pages/Hub.tsx`: "Expected Bucket" now shows Polymarket highest-probability bucket (was model)
+- **Scroll fix**: removed nested double scroll containers; Hub no longer has its own `overflow-y-auto`, Layout is the single scroll layer; scrollbar hidden via `[&::-webkit-scrollbar]:hidden`
 
 ## [2026-06-29]
 
