@@ -24,6 +24,7 @@
 - `config/default_strategy_accounts.json` (new): tracked default accounts file for HF Spaces seeding
 - `app/frontend/src/pages/Hub.tsx`: "Expected Bucket" now shows Polymarket highest-probability bucket (was model)
 - **Scroll fix**: removed nested double scroll containers; Hub no longer has its own `overflow-y-auto`, Layout is the single scroll layer; scrollbar hidden via `[&::-webkit-scrollbar]:hidden`
+- `app/frontend/src/pages/Hub.tsx`: "Model Expected" now shows 1/std-weighted average of all visible models (was active model's mean); order & visible keys persisted to localStorage
 
 ## [2026-06-29]
 

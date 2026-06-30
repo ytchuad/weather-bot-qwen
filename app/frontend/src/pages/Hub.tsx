@@ -31,8 +31,20 @@ export default function Hub() {
   const [compareMode, setCompareMode] = useState(false)
 
   const [activeKey, setActiveKey] = useState<string | null>(null)
-  const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(null)
-  const [order, setOrder] = useState<string[]>([])
+
+  const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
+    try {
+      const saved = localStorage.getItem("visibleKeys")
+      return saved ? new Set(JSON.parse(saved)) : null
+    } catch { return null }
+  })
+
+  const [order, setOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("modelOrder")
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["predictions", date, isMinTemp],
@@ -73,14 +85,21 @@ export default function Hub() {
         setOrder(prev => {
           const existingOrder = prev.filter(k => keys.includes(k))
           const newKeys = keys.filter(k => !prev.includes(k))
-          return [...existingOrder, ...newKeys]
+          const merged = [...existingOrder, ...newKeys]
+          localStorage.setItem("modelOrder", JSON.stringify(merged))
+          return merged
         })
         setActiveKey(prev => (prev && keys.includes(prev)) ? prev : keys[0])
         setVisibleKeys(prev => {
-          if (!prev) return new Set(keys)
-          const current = new Set(prev)
-          keys.forEach(k => { if (!prev.has(k)) current.add(k) })
-          return current
+          if (prev) {
+            const current = new Set(prev)
+            keys.forEach(k => current.add(k))
+            localStorage.setItem("visibleKeys", JSON.stringify([...current]))
+            return current
+          }
+          const init = new Set(keys)
+          localStorage.setItem("visibleKeys", JSON.stringify([...init]))
+          return init
         })
       }
     }
@@ -112,11 +131,20 @@ export default function Hub() {
     })
   }, [data, marketPrices])
 
-  // 計算模型預期溫度
+  // 計算模型預期溫度 (可見模型的 1/std 加權平均)
   const modelExpectedTemp = useMemo(() => {
-    if (!activeKey || !data?.models?.[activeKey]) return null
-    return data.models[activeKey].mean?.toFixed(1) ?? null
-  }, [activeKey, data])
+    if (!data?.models || !visibleKeys) return null
+    let weightedSum = 0
+    let totalWeight = 0
+    for (const [key, pred] of Object.entries(data.models)) {
+      if (visibleKeys.has(key) && pred.mean != null) {
+        const w = pred.std > 0 ? 1 / pred.std : 10
+        weightedSum += pred.mean * w
+        totalWeight += w
+      }
+    }
+    return totalWeight > 0 ? (weightedSum / totalWeight).toFixed(1) : null
+  }, [data, visibleKeys])
 
   // 計算市場加權預期溫度
   const marketExpectedTemp = useMemo(() => {
@@ -149,16 +177,22 @@ export default function Hub() {
 
   // 計算所有可見模型的溫度範圍，用於 ModelGrid 的置信區間軌
   const tempRange = useMemo(() => {
-    if (!displayModels || displayModels.length === 0) return { min: 20, max: 35 }
+    if (!data?.models || !visibleKeys) return { min: 20, max: 35 }
     let min = 100, max = -100
-    displayModels.forEach(([_, pred]) => {
-      min = Math.min(min, pred.mean - (pred.std || 1))
-      max = Math.max(max, pred.mean + (pred.std || 1))
-    })
+    for (const [key, pred] of Object.entries(data.models)) {
+      if (visibleKeys.has(key)) {
+        min = Math.min(min, pred.mean - (pred.std || 1))
+        max = Math.max(max, pred.mean + (pred.std || 1))
+      }
+    }
     return { min: min - 1, max: max + 1 }
-  }, [displayModels])
+  }, [data, visibleKeys])
 
-  const handleReorder = (newOrder: string[]) => setOrder(newOrder)
+  const handleReorder = (newOrder: string[]) => {
+    setOrder(newOrder)
+    localStorage.setItem("modelOrder", JSON.stringify(newOrder))
+  }
+
   const handleToggleVisible = (key: string) => {
     setVisibleKeys(prev => {
       const current = new Set(prev || [])
@@ -168,6 +202,7 @@ export default function Hub() {
       } else {
         current.add(key)
       }
+      localStorage.setItem("visibleKeys", JSON.stringify([...current]))
       return current
     })
   }
