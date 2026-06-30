@@ -62,7 +62,8 @@ CREATE TABLE IF NOT EXISTS snapshots (
     model_std                REAL,
     position_size            REAL DEFAULT 0,
     position_value           REAL DEFAULT 0,
-    all_model_predictions    TEXT
+    all_model_predictions    TEXT,
+    context_json             TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_lookup
@@ -88,6 +89,7 @@ def _get_conn() -> sqlite3.Connection:
 def _migrate(conn: sqlite3.Connection) -> None:
     """Add columns that may be missing in databases created by older code."""
     _add_column_if_missing(conn, "snapshots", "all_model_predictions", "TEXT")
+    _add_column_if_missing(conn, "snapshots", "context_json", "TEXT")
 
 
 def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
@@ -101,13 +103,16 @@ def write_snapshot(record: dict) -> None:
     conn = _get_conn()
     all_preds = record.get("all_model_predictions")
     all_preds_json = json.dumps(all_preds) if isinstance(all_preds, dict) else (all_preds or "{}")
+    ctx = record.get("context_json")
+    ctx_json = json.dumps(ctx) if isinstance(ctx, dict) else (ctx or None)
     conn.execute(
         """INSERT INTO snapshots
            (timestamp, snapshot_date, slug, strategy_key, model_key,
             pm_weighted_temp, model_predicted_temp, actual_temp,
             max_so_far, predicted_upside, model_std,
-            position_size, position_value, all_model_predictions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            position_size, position_value, all_model_predictions,
+            context_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             record["timestamp"],
             record["snapshot_date"],
@@ -123,6 +128,7 @@ def write_snapshot(record: dict) -> None:
             _as_float(record.get("position_size", 0)),
             _as_float(record.get("position_value", 0)),
             all_preds_json,
+            ctx_json,
         ),
     )
     conn.commit()
@@ -165,6 +171,11 @@ def read_snapshots(
                 r["all_model_predictions"] = json.loads(r["all_model_predictions"])
             except (json.JSONDecodeError, TypeError):
                 r["all_model_predictions"] = {}
+        if isinstance(r.get("context_json"), str):
+            try:
+                r["context_json"] = json.loads(r["context_json"])
+            except (json.JSONDecodeError, TypeError):
+                r["context_json"] = {}
         results.append(r)
     return results
 

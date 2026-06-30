@@ -447,6 +447,35 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
 
     post_mean = results.get(model, {}).get("mean") if results else None
 
+    model_stds = {}
+    if results:
+        for mk, pred in results.items():
+            if mk != "_intraday_error" and pred.get("std") is not None:
+                model_stds[mk] = pred["std"]
+
+    context_json = {}
+    if state:
+        for k in ("temp_30m_ago", "temp_60m_ago", "temp_120m_ago",
+                  "min_so_far", "rh_now", "temp_change_30m", "temp_change_60m",
+                  "time_since_max", "time_since_min"):
+            v = state.get(k)
+            if v is not None:
+                context_json[k] = v
+    if hko:
+        for k in ("max_since_midnight", "min_since_midnight", "forecast_max", "forecast_min"):
+            v = hko.get(k)
+            if v is not None:
+                context_json[k] = v
+    for k in ("rain_60m", "rain_120m", "rain_data_ok",
+              "rainfall_60m_missing_flag", "rainfall_120m_missing_flag",
+              "rainfall_30m_missing_flag", "rainfall_data_age_minutes",
+              "rain_data_gap_flag", "rain_regime"):
+        v = rain_kwargs.get(k)
+        if v is not None:
+            context_json[k] = v
+    if model_stds:
+        context_json["model_stds"] = model_stds
+
     return dict(
         capital=acct.capital,
         model_key=model,
@@ -470,6 +499,7 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
         is_min_temp=is_min_temp,
         target_date_str=target_date_str,
         all_results=results,
+        context_json=context_json,
     )
 
 
@@ -547,6 +577,7 @@ def _scheduler_loop():
                                 "predicted_upside": post_mean,
                                 "model_std": context.get("model_std", 1.5),
                                 "all_model_predictions": all_model_preds,
+                                "context_json": context.get("context_json"),
                             })
                         except Exception as snap_err:
                             logger.warning("Failed to write snapshot for %s: %s", acct.id, snap_err)

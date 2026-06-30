@@ -198,6 +198,35 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
                         if mk != "_intraday_error" and pred.get("mean") is not None:
                             all_model_preds[mk] = pred["mean"]
 
+                # ── assemble context_json for debugging ──
+                _ctx = {}
+                if state:
+                    for k in ("temp_30m_ago", "temp_60m_ago", "temp_120m_ago",
+                              "min_so_far", "rh_now", "temp_change_30m", "temp_change_60m",
+                              "time_since_max", "time_since_min"):
+                        v = state.get(k)
+                        if v is not None:
+                            _ctx[k] = v
+                if hko:
+                    for k in ("max_since_midnight", "min_since_midnight", "forecast_max", "forecast_min"):
+                        v = hko.get(k)
+                        if v is not None:
+                            _ctx[k] = v
+                for k in ("rain_60m", "rain_120m", "rain_data_ok",
+                          "rainfall_60m_missing_flag", "rainfall_120m_missing_flag",
+                          "rainfall_30m_missing_flag", "rainfall_data_age_minutes",
+                          "rain_data_gap_flag", "rain_regime"):
+                    v = rain_kwargs.get(k)
+                    if v is not None:
+                        _ctx[k] = v
+                if results:
+                    _stds = {}
+                    for mk, pred in results.items():
+                        if mk != "_intraday_error" and pred.get("std") is not None:
+                            _stds[mk] = pred["std"]
+                    if _stds:
+                        _ctx["model_stds"] = _stds
+
                 write_snapshot({
                     "timestamp": hkt_now().isoformat(),
                     "snapshot_date": target_date_str,
@@ -211,6 +240,7 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
                     "predicted_upside": post_mean,
                     "model_std": context.get("model_std", 1.5),
                     "all_model_predictions": all_model_preds,
+                    "context_json": _ctx,
                 })
             except Exception as snap_err:
                 logger.warning("Failed to write snapshot for %s: %s", sid, snap_err)
