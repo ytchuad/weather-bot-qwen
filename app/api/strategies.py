@@ -562,11 +562,31 @@ def start_scheduler():
     global _scheduler_thread, _scheduler_alive
     if _scheduler_thread and _scheduler_thread.is_alive():
         return
+
+    _seed_default_accounts_if_empty()
     
     _scheduler_alive = True
     _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="strategy-scheduler")
     _scheduler_thread.start()
     logger.info("Background strategy scheduler started")
+
+
+def _seed_default_accounts_if_empty() -> None:
+    """Seed default strategy accounts if none exist and a default file is present."""
+    from pathlib import Path
+    store = StrategyAccountStore()
+    if store.list():
+        return
+    default_path = Path("config/default_strategy_accounts.json")
+    if not default_path.exists():
+        logger.warning("No default accounts file at %s — skip seeding", default_path)
+        return
+    import json
+    raw = json.loads(default_path.read_text(encoding="utf-8"))
+    entries = raw.get("strategies", {})
+    for sid, data in entries.items():
+        store.save(StrategyAccount.from_dict(data))
+    logger.info("Seeded %d default strategy accounts from %s", len(entries), default_path)
 
 
 def stop_scheduler():

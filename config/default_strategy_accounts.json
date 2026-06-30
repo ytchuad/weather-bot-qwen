@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "strategies": {
+    "enhanced_v1_paper": {
+      "id": "enhanced_v1_paper",
+      "label": "Enhanced V1 (Model A)",
+      "model": "model_a",
+      "capital": 500.0,
+      "initial_capital": 500.0,
+      "market_template": "hk-tmax",
+      "status": "running",
+      "scheduler_on": true,
+      "last_run": null,
+      "params": {
+        "bias": 0,
+        "std_mult": 1,
+        "kelly_fraction": 0.25
+      },
+      "from_strategy_key": "enhanced_v1_paper",
+      "gate_config_override": null
+    },
+    "enhanced_v2_paper": {
+      "id": "enhanced_v2_paper",
+      "label": "Enhanced V2",
+      "model": "baseline",
+      "capital": 500.0,
+      "initial_capital": 500.0,
+      "market_template": "hk-tmax",
+      "status": "running",
+      "scheduler_on": true,
+      "last_run": null,
+      "params": {
+        "bias": 0,
+        "std_mult": 1,
+        "kelly_fraction": 0.25
+      },
+      "from_strategy_key": "enhanced_v2_paper",
+      "gate_config_override": null
+    }
+  }
+}
