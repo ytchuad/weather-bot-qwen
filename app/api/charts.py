@@ -109,34 +109,40 @@ def get_bucket_probs_chart(
     if not bucket:
         bucket = sorted(all_buckets)[0] if all_buckets else ""
 
-    timestamps: list[str] = []
-    models: dict[str, list[float | None]] = {}
-    market_prices: list[float | None] = []
+    # Two-pass approach to ensure array alignment:
+    #   1st pass — discover all model keys across all snapshots
+    #   2nd pass — fill arrays at correct indices
+
+    timestamps: list[str] = [r["timestamp"] for r in rows]
+    all_model_keys: set[str] = set()
 
     for r in rows:
-        ts = r["timestamp"]
-        timestamps.append(ts)
         ctx = r.get("context_json") or {}
         mp = ctx.get("model_probs") or {}
         for mk, probs in mp.items():
             if isinstance(probs, dict):
-                if mk not in models:
-                    models[mk] = []
-                models[mk].append(probs.get(bucket))
-        # ensure every model key has a value for this timestamp
-        for mk in list(models.keys()):
-            if len(models[mk]) < len(timestamps):
-                models[mk].append(None)
+                all_model_keys.update(probs.keys())
+
+    sorted_model_keys = sorted(all_model_keys)
+
+    models: dict[str, list[float | None]] = {
+        mk: [None] * len(rows) for mk in sorted_model_keys
+    }
+    market_prices: list[float | None] = [None] * len(rows)
+
+    for i, r in enumerate(rows):
+        ctx = r.get("context_json") or {}
+        mp = ctx.get("model_probs") or {}
+        for mk, probs in mp.items():
+            if isinstance(probs, dict) and mk in models:
+                models[mk][i] = probs.get(bucket)
 
         mkt = ctx.get("market_prices") or {}
-        market_prices.append(mkt.get(bucket))
-
-    sorted_model_keys = sorted(models.keys())
-    sorted_models: dict[str, list[float | None]] = {k: models[k] for k in sorted_model_keys}
+        market_prices[i] = mkt.get(bucket)
 
     return {
         "timestamps": timestamps,
-        "models": sorted_models,
+        "models": models,
         "market_prices": market_prices,
         "bucket": bucket,
         "available_buckets": sorted(all_buckets),
