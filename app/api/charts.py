@@ -121,7 +121,7 @@ def get_bucket_probs_chart(
         mp = ctx.get("model_probs") or {}
         for mk, probs in mp.items():
             if isinstance(probs, dict):
-                all_model_keys.update(probs.keys())
+                all_model_keys.add(mk)
 
     sorted_model_keys = sorted(all_model_keys)
 
