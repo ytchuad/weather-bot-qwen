@@ -2549,6 +2549,12 @@ def predict_intraday_tmax_model_2a(
                 prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
                 prob_max_reached = 1.0 if prob_max_reached > th else 0.0
 
+    prob_not_reached = 1.0 - prob_max_reached
+    remaining_upside_p10 *= prob_not_reached
+    remaining_upside_p25 *= prob_not_reached
+    remaining_upside_p50 *= prob_not_reached
+    remaining_upside_p75 *= prob_not_reached
+    remaining_upside_p90 *= prob_not_reached
     pred_tmax_p10 = max_so_far + remaining_upside_p10
     pred_tmax_p25 = max_so_far + remaining_upside_p25
     pred_tmax_p50 = max_so_far + remaining_upside_p50

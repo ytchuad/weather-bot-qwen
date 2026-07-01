@@ -2,6 +2,10 @@
 
 ## [Unreleased] - 2026-07-01
 
+### Fixed
+- **Model 2A late-night upside quantization**: Quantile predictions (`remaining_upside_q*`) are now conditioned on the classifier output via `remaining_upside_q* *= (1 - prob_max_reached)`. Previously the classifier correctly detected the daily max was reached (zero_prob ~99% after 22:00), but the quantile models independently predicted positive remaining upside, inflating bucket probabilities (e.g. 76% instead of 99%+ for the realized bucket). This is a principled Bayesian composition: classifier gives P(upside=0), quantiles predict conditional distribution when upside > 0.
+- **Forecast fallback for late hours**: In `model_service.py`, when the HKO forecast API is unavailable after 20:00, the fallback now uses `max_so_far` directly instead of `max_so_far + 2°C`. At late hours the daily max is finalized, so adding +2°C created a false `forecast_gap` signal that pushed quantile predictions upward.
+
 ### Added
 - **Bucket Probability Time-Series Chart**: new `BucketProbsChart.tsx` component + `GET /api/charts/bucket-probs` endpoint. Reads per-bucket model probabilities and Polymarket prices from `context_json['model_probs']` + `context_json['market_prices']` in snapshot DB. Includes bucket dropdown selector and ECharts multi-line chart (models + market price over time).
 - **Trajectory / Bucket toggle on Hub**: the "Models vs Market — Temperature Tracking" card now has a `[Trajectory │ Bucket]` toggle to switch between historical prediction trajectory (existing `ModelsComparisonChart`) and per-bucket probability time series (new `BucketProbsChart`). Both share the same card, x-axis format, and 120s refetch interval.

@@ -180,8 +180,14 @@ def predict_intraday_all(
         current_datetime=state["time_now"],
         temp_60min_ago=state.get("temp_60m_ago", state["temp_now"]),
         temp_now=state["temp_now"],
-        forecast_tmax=forecast_max if forecast_max is not None else (state.get("max_so_far", 30.0) + DEFAULT_TMAX_FORECAST_DELTA),
-        forecast_tmin=forecast_min if forecast_min is not None else (state.get("min_so_far", 10.0) + DEFAULT_TMIN_FORECAST_DELTA),
+        forecast_tmax=forecast_max if forecast_max is not None else (
+            state.get("max_so_far", 30.0) if hour_now >= 20 else
+            state.get("max_so_far", 30.0) + DEFAULT_TMAX_FORECAST_DELTA
+        ),
+        forecast_tmin=forecast_min if forecast_min is not None else (
+            state.get("min_so_far", 10.0) if hour_now >= 20 else
+            state.get("min_so_far", 10.0) + DEFAULT_TMIN_FORECAST_DELTA
+        ),
         temp_120m_ago=state.get("temp_120m_ago", state["temp_60m_ago"]),
         max_so_far=state.get("max_so_far"),
         min_so_far=state.get("min_so_far"),
