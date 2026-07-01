@@ -43,6 +43,11 @@ export default function BucketProbsChart({ date, bucket: selectedBucket, onBucke
     Object.entries(data.models).forEach(([key, values]) => {
       series.push({ name: MODEL_LABELS[key] || key, type: "line", data: padArray(values, maxLen), smooth: true, symbol: "none", connectNulls: true, lineStyle: { width: 1.5, color: MODEL_COLORS[key] || "#94a3b8", opacity: 0.8 }, itemStyle: { color: MODEL_COLORS[key] || "#94a3b8" }, z: 1 })
     })
+
+    const allValues: (number | null)[] = [...(data.market_prices ?? []), ...Object.values(data.models).flat()]
+    const maxVal = allValues.reduce<number>((m, v) => (v != null && v > m ? v : m), 0)
+    const yMax = maxVal > 0 ? Math.min(maxVal * 1.15, 1) : 1
+
     return {
       backgroundColor: "transparent", grid: { left: "2%", right: "2%", bottom: "5%", top: "15%", containLabel: true },
       tooltip: { trigger: "axis", backgroundColor: "#0f1013", borderColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderRadius: 4, textStyle: { color: "#e2e8f0", fontFamily: "JetBrains Mono, monospace", fontSize: 11 }, extraCssText: "box-shadow: 0 10px 40px -10px rgba(0,0,0,0.8); backdrop-filter: blur(4px);", formatter: (params: any) => {
@@ -53,7 +58,7 @@ export default function BucketProbsChart({ date, bucket: selectedBucket, onBucke
       } },
       legend: { data: ["Polymarket Price", ...Object.keys(data.models).map(k => MODEL_LABELS[k] || k)], textStyle: { color: "#94a3b8", fontSize: 10, fontFamily: "JetBrains Mono" }, top: 0, type: "scroll" },
       xAxis: { type: "category", boundaryGap: false, data: timestamps, axisLine: { lineStyle: { color: "rgba(255,255,255,0.1)" } }, axisTick: { show: false }, axisLabel: { color: "#64748b", fontSize: 10, fontFamily: "JetBrains Mono", margin: 12 } },
-      yAxis: { type: "value", min: 0, max: 1, axisLabel: { color: "#64748b", fontSize: 10, fontFamily: "JetBrains Mono", formatter: "{value}%" }, splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } }, axisLine: { show: false }, axisTick: { show: false } },
+      yAxis: { type: "value", min: 0, max: yMax, axisLabel: { color: "#64748b", fontSize: 10, fontFamily: "JetBrains Mono", formatter: (v: number) => `${(v * 100).toFixed(0)}%` }, splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } }, axisLine: { show: false }, axisTick: { show: false } },
       series,
     }
   }, [data])
