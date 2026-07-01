@@ -29,6 +29,7 @@ import type {
   PortfolioStats,
   StrategyChartData,
   ModelsComparisonData,
+  BucketProbsData,
 } from "../types"
 
 export function fetchPredictions(
@@ -153,6 +154,13 @@ export function runAllStrategies(): Promise<{ results: unknown[]; total: number 
 // Models comparison chart (Hub page)
 export function fetchModelsComparison(date: string): Promise<ModelsComparisonData> {
   return get(`/charts/models-comparison?date=${encodeURIComponent(date)}`)
+}
+
+// Bucket probability time-series chart
+export function fetchBucketProbs(date: string, bucket?: string): Promise<BucketProbsData> {
+  let q = `date=${encodeURIComponent(date)}`
+  if (bucket) q += `&bucket=${encodeURIComponent(bucket)}`
+  return get(`/charts/bucket-probs?${q}`)
 }
 
 // Strategy chart

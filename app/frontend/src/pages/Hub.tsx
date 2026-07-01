@@ -5,6 +5,7 @@ import WeatherCards from "../components/WeatherCards"
 import BucketChart from "../components/BucketChart"
 import ComparisonChart from "../components/ComparisonChart"
 import ModelsComparisonChart from "../components/ModelsComparisonChart"
+import BucketProbsChart from "../components/BucketProbsChart"
 import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
 import { GitCompare } from "lucide-react"
 
@@ -29,6 +30,8 @@ export default function Hub() {
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [isMinTemp, setIsMinTemp] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
+  const [viewMode, setViewMode] = useState<"trajectory" | "bucket">("trajectory")
+  const [selectedBucket, setSelectedBucket] = useState("")
 
   const [activeKey, setActiveKey] = useState<string | null>(null)
 
@@ -250,16 +253,20 @@ export default function Hub() {
         </div>
       </div>
 
-      {/* 歷史溫度追蹤圖 (全寬) */}
+      {/* 歷史溫度追蹤圖 / 桶機率時間序列 (全寬) */}
       <div className="px-4 md:px-8 mb-6">
         <div className="obsidian-card rounded-md p-6">
           <div className="flex justify-between items-center mb-4">
             <div>
               <h2 className="text-[10px] text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><span className="w-4 h-px bg-slate-500"></span> Models vs Market — Temperature Tracking</h2>
-              <p className="text-lg font-light text-white tracking-tight">Historical Prediction Trajectory</p>
+              <p className="text-lg font-light text-white tracking-tight">{viewMode === "trajectory" ? "Historical Prediction Trajectory" : "Per-Bucket Probability"}</p>
+            </div>
+            <div className="flex gap-1 bg-[#0f1013] border border-white/[0.06] p-1 rounded-md shrink-0">
+              <button onClick={() => setViewMode("trajectory")} className={`px-3 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${viewMode === "trajectory" ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>Trajectory</button>
+              <button onClick={() => setViewMode("bucket")} className={`px-3 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${viewMode === "bucket" ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>Bucket</button>
             </div>
           </div>
-          <ModelsComparisonChart date={date} />
+          {viewMode === "trajectory" ? <ModelsComparisonChart date={date} /> : <BucketProbsChart date={date} bucket={selectedBucket} onBucketChange={setSelectedBucket} />}
         </div>
       </div>
 

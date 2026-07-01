@@ -221,11 +221,20 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
                         _ctx[k] = v
                 if results:
                     _stds = {}
+                    _probs = {}
                     for mk, pred in results.items():
-                        if mk != "_intraday_error" and pred.get("std") is not None:
-                            _stds[mk] = pred["std"]
+                        if mk != "_intraday_error":
+                            if pred.get("std") is not None:
+                                _stds[mk] = pred["std"]
+                            if pred.get("probs"):
+                                _probs[mk] = pred["probs"]
                     if _stds:
                         _ctx["model_stds"] = _stds
+                    if _probs:
+                        _ctx["model_probs"] = _probs
+                # Polymarket prices per bucket
+                if prices_dict:
+                    _ctx["market_prices"] = prices_dict
 
                 write_snapshot({
                     "timestamp": hkt_now().isoformat(),

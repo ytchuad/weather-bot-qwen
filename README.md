@@ -11,6 +11,11 @@ app_port: 7860
 
 **HKO daily maximum / minimum temperature probabilistic forecasting and intraday nowcasting research system, with optional paper‑trading simulation layer.**
 
+## New in This Release
+
+- **Bucket Probability Time-Series Chart**: Hub page now has a `[Trajectory │ Bucket]` toggle on the "Models vs Market — Temperature Tracking" card. "Trajectory" shows the existing temperature tracking (model predictions vs Polymarket vs actual). "Bucket" shows per-bucket model probabilities and Polymarket prices over time, with a dropdown to select which bucket to view.
+- **Per-bucket probabilities stored in snapshots**: Each snapshot now records per-model per-bucket probabilities (`model_probs`) and market prices (`market_prices`) in `context_json`, enabling historical debugging of model vs market probability evolution.
+
 ---
 
 ## Disclaimer

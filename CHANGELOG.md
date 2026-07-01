@@ -1,8 +1,11 @@
 # Changelog
 
-## [Unreleased] - 2026-06-30
+## [Unreleased] - 2026-07-01
 
 ### Added
+- **Bucket Probability Time-Series Chart**: new `BucketProbsChart.tsx` component + `GET /api/charts/bucket-probs` endpoint. Reads per-bucket model probabilities and Polymarket prices from `context_json['model_probs']` + `context_json['market_prices']` in snapshot DB. Includes bucket dropdown selector and ECharts multi-line chart (models + market price over time).
+- **Trajectory / Bucket toggle on Hub**: the "Models vs Market — Temperature Tracking" card now has a `[Trajectory │ Bucket]` toggle to switch between historical prediction trajectory (existing `ModelsComparisonChart`) and per-bucket probability time series (new `BucketProbsChart`). Both share the same card, x-axis format, and 120s refetch interval.
+- **Per-bucket probabilities stored in snapshots**: `_build_strategy_context()` and `auto_runner.py` now save `model_probs` (per-model per-bucket probabilities) and `market_prices` in `context_json` at every snapshot write.
 - **Auto-seed default strategy accounts on startup**: if `data/strategy_accounts.json` is empty, `start_scheduler()` copies from `config/default_strategy_accounts.json` (two accounts: `enhanced_v1_paper` with model_a, `enhanced_v2_paper` with baseline)
 - **`context_json` column in snapshot DB**: stores weather state (temp lags, rh, time_since_*), forecast, rainfall data quality flags, and per-model stds for offline debugging
 - **Hub KPI summary cards**: Model Expected (°C), Market Expected (°C), Expected Bucket row above the temperature tracking chart

@@ -475,6 +475,17 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
             context_json[k] = v
     if model_stds:
         context_json["model_stds"] = model_stds
+    # per-bucket probabilities for each model
+    if results:
+        _probs = {}
+        for mk, pred in results.items():
+            if mk != "_intraday_error" and pred.get("probs"):
+                _probs[mk] = pred["probs"]
+        if _probs:
+            context_json["model_probs"] = _probs
+    # Polymarket prices per bucket
+    if prices_dict:
+        context_json["market_prices"] = prices_dict
 
     return dict(
         capital=acct.capital,

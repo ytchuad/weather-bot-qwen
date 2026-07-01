@@ -159,3 +159,11 @@ export interface ModelsComparisonData {
   actual_temps: (number | null)[]
   models: Record<string, (number | null)[]>
 }
+
+export interface BucketProbsData {
+  timestamps: string[]
+  models: Record<string, (number | null)[]>
+  market_prices: (number | null)[]
+  bucket: string
+  available_buckets: string[]
+}
