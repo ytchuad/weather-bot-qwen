@@ -2412,20 +2412,20 @@ def predict_intraday_tmax_model_2a(
 
     temp_arr = np.array(list(temp_buffer) if temp_buffer else [temp_now])
     idx = len(temp_arr) - 1
-    temp_change_30m = temp_now - (temp_arr[idx-3] if idx >= 3 else temp_arr[0])
-    temp_change_60m = temp_now - (temp_arr[idx-6] if idx >= 6 else temp_arr[0])
+    temp_change_30m = temp_now - (temp_arr[idx-30] if idx >= 30 else temp_arr[0])
+    temp_change_60m = temp_now - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
     temp_slope_30m = temp_change_30m / 30.0
     temp_slope_60m = temp_change_60m / 60.0
 
-    start_vol = max(0, idx - 5)
+    start_vol = max(0, idx - 59)
     temp_volatility_60m = float(np.std(temp_arr[start_vol:idx+1], ddof=1)) if (idx - start_vol) >= 1 else 0.0
     temp_acceleration_60m = temp_slope_30m - (temp_slope_30m - (
-        temp_arr[idx-3] - (temp_arr[idx-6] if idx >= 6 else temp_arr[0])
+        temp_arr[idx-30] - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
     ) / 30.0)
 
     rh_arr = np.array(list(rh_buffer) if rh_buffer else [humidity])
     rh_idx = len(rh_arr) - 1
-    rh_change_60m = humidity - (rh_arr[rh_idx-6] if rh_idx >= 6 else rh_arr[0])
+    rh_change_60m = humidity - (rh_arr[rh_idx-60] if rh_idx >= 60 else rh_arr[0])
 
     # Compute dew_point_current via Magnus formula if not provided
     if dew_point_current is None and humidity is not None and temp_now is not None:
@@ -2444,16 +2444,16 @@ def predict_intraday_tmax_model_2a(
     # Compute dew_point deltas from buffer via Magnus formula (matching training diff(6))
     dew_point_change_60m = 0.0
     dew_point_spread_change_60m = 0.0
-    if idx >= 6 and rh_idx >= 6 and dew_point_current is not None:
+    if idx >= 60 and rh_idx >= 60 and dew_point_current is not None:
         try:
             import math as _m
             _a, _b = 17.625, 243.04
-            _t6 = temp_arr[idx-6]
-            _rh6 = rh_arr[rh_idx-6]
-            _gamma6 = _m.log(_rh6 / 100.0) + (_a * _t6) / (_b + _t6)
-            _dp6 = (_b * _gamma6) / (_a - _gamma6)
-            dew_point_change_60m = dew_point_current - _dp6
-            dew_point_spread_change_60m = (temp_now - dew_point_current) - (_t6 - _dp6)
+            _t60 = temp_arr[idx-60]
+            _rh60 = rh_arr[rh_idx-60]
+            _gamma60 = _m.log(_rh60 / 100.0) + (_a * _t60) / (_b + _t60)
+            _dp60 = (_b * _gamma60) / (_a - _gamma60)
+            dew_point_change_60m = dew_point_current - _dp60
+            dew_point_spread_change_60m = (temp_now - dew_point_current) - (_t60 - _dp60)
         except Exception:
             pass
 

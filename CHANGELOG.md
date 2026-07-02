@@ -3,6 +3,7 @@
 ## [Unreleased] - 2026-07-01
 
 ### Fixed
+- **Model 2A `temp_change_30m`/`temp_change_60m` lookback indices**: `predict_intraday_tmax_model_2a` used `idx-3` / `idx-6` (3/6 minute lookback) instead of `idx-30` / `idx-60` (30/60 minute), making these features ~10x more sensitive to HKO CSV jitter than intended. Same fix applied to `temp_volatility_60m` (window widened from 6 to 60 readings), `temp_acceleration_60m`, `rh_change_60m`, and dew-point deltas (`_t6`→`_t60`). This was the root cause of Model 2A/Model G predictions fluctuating more than their std between 30-second calls, causing Per-Bucket Probability chart to disagree with live Model vs Market Dynamics.
 - **`GET /api/charts/bucket-probs` array alignment**: Single-pass padding logic caused model probability arrays to be shorter than timestamps when older snapshots lacked `model_probs`. Rewritten to two-pass: first discover all model keys, then pre-allocate arrays with `None` and fill at correct indices.
 - **Bucket-probs endpoint collecting bucket names as model keys**: First pass used `probs.keys()` (bucket names like "33-34") instead of `mk` (model key), causing all model data to be lost and legend to display bucket names instead of model names.
 - **BucketProbsChart y-axis formatting**: Formatter used `"{value}%"` which displayed raw values (0→"0%", 0.5→"0.5%") instead of multiplying by 100. Fixed to `(v) => \`${(v*100).toFixed(0)}%\``. Also changed static `max: 1` to dynamic `max(allValues)*1.15` for better scale when data is clustered at low probabilities.
