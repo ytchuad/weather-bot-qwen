@@ -516,6 +516,39 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
     )
 
 
+def _write_cycle_snapshot(context: dict, acct) -> None:
+    """Write a snapshot record from strategy context regardless of cycle status."""
+    markets = context.get("markets", [])
+    prices_dict = context.get("prices_dict", {})
+    pm_temp = calc_pm_weighted_temp(markets, prices_dict)
+    actual_temp = context.get("temp_now")
+    max_so_far = context.get("max_so_far")
+    post_mean = context.get("post_mean")
+    model_predicted = calc_model_predicted_temp(max_so_far, post_mean)
+
+    all_results = context.get("all_results", {})
+    all_model_preds = {}
+    for mk, pred in all_results.items():
+        if mk != "_intraday_error" and pred.get("mean") is not None:
+            all_model_preds[mk] = pred["mean"]
+
+    write_snapshot({
+        "timestamp": hkt_now().isoformat(),
+        "snapshot_date": context.get("target_date_str", hkt_now().strftime("%Y-%m-%d")),
+        "slug": context.get("slug", ""),
+        "strategy_key": acct.id,
+        "model_key": acct.model,
+        "pm_weighted_temp": pm_temp,
+        "model_predicted_temp": model_predicted,
+        "actual_temp": actual_temp,
+        "max_so_far": max_so_far,
+        "predicted_upside": post_mean,
+        "model_std": context.get("model_std", 1.5),
+        "all_model_predictions": all_model_preds,
+        "context_json": context.get("context_json"),
+    })
+
+
 def _scheduler_loop():
     """Background thread that runs enabled strategies on cooldown interval."""
     global _scheduler_alive
@@ -550,6 +583,12 @@ def _scheduler_loop():
                 
                 context = _build_strategy_context(acct)
                 if context:
+                    # ── write snapshot (always, before strategy cycle) ───
+                    try:
+                        _write_cycle_snapshot(context, acct)
+                    except Exception as snap_err:
+                        logger.warning("Failed to write snapshot for %s: %s", acct.id, snap_err)
+
                     result = run_single_strategy_cycle(
                         strategy_key=acct.id,
                         strategy_config=sdef,
@@ -559,41 +598,6 @@ def _scheduler_loop():
                     )
                     logger.info("Strategy %s executed: %s", acct.id, result.get("status"))
                     store.set_last_run(acct.id)
-
-                    # ── write snapshot for chart ─────────────────────────
-                    if result.get("status") == "completed":
-                        try:
-                            markets = context.get("markets", [])
-                            prices_dict = context.get("prices_dict", {})
-                            pm_temp = calc_pm_weighted_temp(markets, prices_dict)
-                            actual_temp = context.get("temp_now")
-                            max_so_far = context.get("max_so_far")
-                            post_mean = context.get("post_mean")
-                            model_predicted = calc_model_predicted_temp(max_so_far, post_mean)
-
-                            all_results = context.get("all_results", {})
-                            all_model_preds = {}
-                            for mk, pred in all_results.items():
-                                if mk != "_intraday_error" and pred.get("mean") is not None:
-                                    all_model_preds[mk] = pred["mean"]
-
-                            write_snapshot({
-                                "timestamp": hkt_now().isoformat(),
-                                "snapshot_date": context.get("target_date_str", hkt_now().strftime("%Y-%m-%d")),
-                                "slug": context.get("slug", ""),
-                                "strategy_key": acct.id,
-                                "model_key": acct.model,
-                                "pm_weighted_temp": pm_temp,
-                                "model_predicted_temp": model_predicted,
-                                "actual_temp": actual_temp,
-                                "max_so_far": max_so_far,
-                                "predicted_upside": post_mean,
-                                "model_std": context.get("model_std", 1.5),
-                                "all_model_predictions": all_model_preds,
-                                "context_json": context.get("context_json"),
-                            })
-                        except Exception as snap_err:
-                            logger.warning("Failed to write snapshot for %s: %s", acct.id, snap_err)
                 
         except Exception as exc:
             logger.exception("Scheduler error: %s", exc)

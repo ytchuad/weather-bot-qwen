@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import backtest, charts, diagnostics, health, markets, predictions, strategies, weather
+from app.api import backtest, charts, data, diagnostics, health, markets, predictions, strategies, weather
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ app.include_router(strategies.router)
 app.include_router(backtest.router)
 app.include_router(diagnostics.router)
 app.include_router(charts.router)
+app.include_router(data.router)
 
 _frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 

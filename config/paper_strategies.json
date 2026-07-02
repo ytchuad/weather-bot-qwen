@@ -130,6 +130,7 @@
       },
       "override": {
         "entry": {
+          "min_hour": 8,
           "regime_thresholds": {
             "rain_08_12": { "min_edge": 0.06 }
           }
@@ -216,6 +217,55 @@
         "exit": {
           "edge_reversal_threshold": -0.04,
           "stop_prob": 0.08
+        }
+      }
+    },
+    "enhanced_v3_aggressive_paper": {
+      "label": "Enhanced V3 Aggressive (Model G)",
+      "module": "execution.strategy_engine",
+      "entry_point": "run_config_rebalance_cycle",
+      "paper_only": true,
+      "description": "Aggressive model_g strategy: lower edge thresholds, looser boundary proximity, wider sizing",
+      "exposure_limits": null,
+      "entry_rules": {
+        "min_hour": 8,
+        "only_on_event_date": true
+      },
+      "override": {
+        "entry": {
+          "regime_thresholds": {
+            "day_08_12": { "min_edge": 0.02, "exposure_cap": 0.60 },
+            "rain_08_12": { "min_edge": 0.04, "exposure_cap": 0.50 },
+            "slot_12_16": { "min_edge": 0.01, "exposure_cap": 0.40 }
+          },
+          "boundary_proximity": {
+            "min_standardized_distance": 0.35,
+            "aggressive_reduction_threshold": 0.2,
+            "aggressive_reduction_multiplier": 0.7
+          }
+        },
+        "position_sizing": {
+          "time_window_multiplier": [
+            { "hours": [8, 10], "value": 0.8 },
+            { "hours": [10, 14], "value": 1.0 },
+            { "hours": [14, 16], "value": 1.0 },
+            { "hours": [16, 24], "value": 0.4 }
+          ],
+          "max_per_bucket": 0.20,
+          "total_max": 0.60
+        },
+        "rebalance": {
+          "material_prob_pp": 3,
+          "material_ev_pp": 1
+        },
+        "exit": {
+          "edge_reversal_threshold": -0.07,
+          "stop_prob": 0.03,
+          "time_to_settlement": {
+            "taper_start_hours": 3,
+            "strong_taper_hours": 1,
+            "strong_taper_multiplier": 0.5
+          }
         }
       }
     },

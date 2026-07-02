@@ -26,8 +26,22 @@ function parseBucketMidpoint(bucket: string): number | null {
   return null
 }
 
+function getHKTDateString(): string {
+  const formatter = new Intl.DateTimeFormat("zh-HK", {
+    timeZone: "Asia/Hong_Kong",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+  const parts = formatter.formatToParts(new Date())
+  const year = parts.find((p) => p.type === "year")?.value || ""
+  const month = parts.find((p) => p.type === "month")?.value || ""
+  const day = parts.find((p) => p.type === "day")?.value || ""
+  return `${year}-${month}-${day}`
+}
+
 export default function Hub() {
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(getHKTDateString())
   const [isMinTemp, setIsMinTemp] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
   const [viewMode, setViewMode] = useState<"trajectory" | "bucket">("trajectory")

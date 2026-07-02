@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased] - 2026-07-02
+
+### Changed
+- **Snapshot writing separated from strategy cycle status**: `_scheduler_loop` now writes snapshots before calling `run_single_strategy_cycle()`, so snapshots are recorded from the earliest available weather data (~00:15 HKT) regardless of `min_hour` or `check_entry_rules` gates. Extracted snapshot logic into `_write_cycle_snapshot()` helper.
+- **`enhanced_v1_paper` min_hour reverted to 8**: Was temporarily 0 for early snapshots; no longer needed after snapshot/strategy separation.
+
 ## [Unreleased] - 2026-07-01
 
 ### Fixed

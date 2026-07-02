@@ -43,7 +43,17 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path("data/strategy_snapshots.db")
+EXPORT_DIR = Path("data/export")
 _LOCAL = threading.local()
+
+CSV_FIELDS = [
+    "timestamp", "snapshot_date", "slug", "strategy_key", "model_key",
+    "pm_weighted_temp", "model_predicted_temp", "actual_temp",
+    "max_so_far", "predicted_upside", "model_std",
+    "position_size", "position_value",
+    "all_model_predictions", "context_json",
+]
+JSON_FIELDS = {"all_model_predictions", "context_json"}
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS snapshots (
@@ -82,6 +92,7 @@ def _get_conn() -> sqlite3.Connection:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA_SQL)
         _migrate(conn)
+        import_from_csv(conn)
         _LOCAL.conn = conn
     return _LOCAL.conn
 
@@ -90,6 +101,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     """Add columns that may be missing in databases created by older code."""
     _add_column_if_missing(conn, "snapshots", "all_model_predictions", "TEXT")
     _add_column_if_missing(conn, "snapshots", "context_json", "TEXT")
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_ts_strat
+        ON snapshots(timestamp, strategy_key)
+    """)
 
 
 def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
@@ -101,37 +116,9 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, co
 
 def write_snapshot(record: dict) -> None:
     conn = _get_conn()
-    all_preds = record.get("all_model_predictions")
-    all_preds_json = json.dumps(all_preds) if isinstance(all_preds, dict) else (all_preds or "{}")
-    ctx = record.get("context_json")
-    ctx_json = json.dumps(ctx) if isinstance(ctx, dict) else (ctx or None)
-    conn.execute(
-        """INSERT INTO snapshots
-           (timestamp, snapshot_date, slug, strategy_key, model_key,
-            pm_weighted_temp, model_predicted_temp, actual_temp,
-            max_so_far, predicted_upside, model_std,
-            position_size, position_value, all_model_predictions,
-            context_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            record["timestamp"],
-            record["snapshot_date"],
-            record["slug"],
-            record["strategy_key"],
-            record["model_key"],
-            _as_float(record.get("pm_weighted_temp")),
-            _as_float(record.get("model_predicted_temp")),
-            _as_float(record.get("actual_temp")),
-            _as_float(record.get("max_so_far")),
-            _as_float(record.get("predicted_upside")),
-            _as_float(record.get("model_std")),
-            _as_float(record.get("position_size", 0)),
-            _as_float(record.get("position_value", 0)),
-            all_preds_json,
-            ctx_json,
-        ),
-    )
+    _insert_row(conn, record)
     conn.commit()
+    _append_to_csv(record)
 
 
 def read_snapshots(
@@ -231,8 +218,6 @@ def calc_model_predicted_temp(
     max_so_far: float | None,
     post_mean: float | None,
 ) -> float | None:
-    if max_so_far is not None and post_mean is not None:
-        return max_so_far + post_mean
     return post_mean
 
 
@@ -289,6 +274,95 @@ def read_models_comparison(
                     existing["model_predictions"][mk] = val
 
     return list(merged.values())
+
+
+def _insert_row(conn: sqlite3.Connection, record: dict) -> None:
+    """Low-level INSERT without CSV/export side-effects."""
+    all_preds = record.get("all_model_predictions")
+    all_preds_json = json.dumps(all_preds) if isinstance(all_preds, dict) else (all_preds or "{}")
+    ctx = record.get("context_json")
+    ctx_json = json.dumps(ctx) if isinstance(ctx, dict) else (ctx or None)
+    conn.execute(
+        """INSERT OR IGNORE INTO snapshots
+           (timestamp, snapshot_date, slug, strategy_key, model_key,
+            pm_weighted_temp, model_predicted_temp, actual_temp,
+            max_so_far, predicted_upside, model_std,
+            position_size, position_value, all_model_predictions,
+            context_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            record["timestamp"],
+            record["snapshot_date"],
+            record["slug"],
+            record["strategy_key"],
+            record["model_key"],
+            _as_float(record.get("pm_weighted_temp")),
+            _as_float(record.get("model_predicted_temp")),
+            _as_float(record.get("actual_temp")),
+            _as_float(record.get("max_so_far")),
+            _as_float(record.get("predicted_upside")),
+            _as_float(record.get("model_std")),
+            _as_float(record.get("position_size", 0)),
+            _as_float(record.get("position_value", 0)),
+            all_preds_json,
+            ctx_json,
+        ),
+    )
+
+
+def _append_to_csv(record: dict) -> None:
+    """Append one snapshot row to the daily CSV export file."""
+    import csv
+    date = record.get("snapshot_date", "unknown")
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    path = EXPORT_DIR / f"{date}.csv"
+    is_new = not path.exists()
+    try:
+        with open(path, "a", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
+            if is_new:
+                writer.writeheader()
+            row = dict(record)
+            for jf in JSON_FIELDS:
+                if jf in row and isinstance(row[jf], (dict, list)):
+                    row[jf] = json.dumps(row[jf], ensure_ascii=False)
+            writer.writerow(row)
+    except Exception as e:
+        logger.warning("Failed to append to CSV %s: %s", path, e)
+
+
+def import_from_csv(conn: sqlite3.Connection) -> int:
+    """Import snapshot rows from CSV exports into SQLite.
+
+    Called once at startup to restore data from git-tracked CSV files.
+    Skips rows where (timestamp, strategy_key) already exist.
+    """
+    import csv
+    if not EXPORT_DIR.exists():
+        return 0
+    count = 0
+    for csv_path in sorted(EXPORT_DIR.glob("*.csv")):
+        try:
+            with open(csv_path, newline="") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    for jf in JSON_FIELDS:
+                        if jf in row and isinstance(row[jf], str):
+                            try:
+                                row[jf] = json.loads(row[jf])
+                            except (json.JSONDecodeError, TypeError):
+                                pass
+                    try:
+                        _insert_row(conn, row)
+                        count += 1
+                    except sqlite3.IntegrityError:
+                        pass
+            conn.commit()
+        except Exception as e:
+            logger.warning("Failed to import CSV %s: %s", csv_path, e)
+    if count:
+        logger.info("Imported %d snapshot(s) from CSV exports", count)
+    return count
 
 
 def _as_float(v: Any) -> float | None:
