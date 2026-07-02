@@ -433,6 +433,8 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
         rain_kwargs=rain_kwargs,
         markets=markets,
         forecast_aws_val=forecast_aws,
+        forecast_max=hko.get("forecast_max") if hko else None,
+        forecast_min=hko.get("forecast_min") if hko else None,
         is_today=True,
     )
     
