@@ -135,6 +135,7 @@ def predict_intraday_all(
     from ..services.weather_service import (
         compute_pressure_kwargs,
         compute_wind_kwargs,
+        fetch_hko_ilens_forecast,
         hkt_now,
     )
     pressure_kw = {}
@@ -243,12 +244,39 @@ def predict_intraday_all(
         if k in _ALLOWED_RAIN_KWARGS and k not in common:
             common[k] = v
 
+    # Fetch i-lens forecast (same source as training) for Model 2A1
+    ilens_forecast = None
+    ilens_forecast_tmax = None
+    ilens_forecast_tmin = None
+    ilens_forecast_age_minutes = None
+    ilens_forecast_lead_days = None
+    try:
+        ilens_forecast = fetch_hko_ilens_forecast(target_date_str)
+        if ilens_forecast:
+            ilens_forecast_tmax = ilens_forecast.get("forecast_tmax")
+            ilens_forecast_tmin = ilens_forecast.get("forecast_tmin")
+            if ilens_forecast.get("forecast_issue_date") and ilens_forecast.get("forecast_issue_time"):
+                _issue = pd.to_datetime(
+                    f"{ilens_forecast['forecast_issue_date']} {ilens_forecast['forecast_issue_time']}"
+                )
+                _issue_hkt = _issue.tz_localize("Asia/Hong_Kong") if hasattr(_issue, 'tz_localize') else _issue
+                _now = hkt_now()
+                ilens_forecast_age_minutes = (_now - _issue_hkt).total_seconds() / 60
+                _target_dt = pd.to_datetime(target_date_str, format="%Y%m%d")
+                ilens_forecast_lead_days = (_target_dt.date() - _issue_hkt.date()).days
+    except Exception as _e:
+        logger.debug("Could not fetch i-lens forecast: %s", _e)
+
     try:
         if is_min_temp:
             raw_preds = predict_intraday_tmin_all(**common)
         else:
             common_tmax = dict(common)
             common_tmax["time_since_max_so_far"] = state.get("time_since_max", 0.0)
+            common_tmax["ilens_forecast_tmax"] = ilens_forecast_tmax
+            common_tmax["ilens_forecast_tmin"] = ilens_forecast_tmin
+            common_tmax["ilens_forecast_age_minutes"] = ilens_forecast_age_minutes
+            common_tmax["ilens_forecast_lead_days"] = ilens_forecast_lead_days
             raw_preds = predict_intraday_tmax_all(**common_tmax)
     except Exception as e:
         logger.warning("predict_intraday_all failed: %s", e)

@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 _short_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_SHORT)
 _medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
 _intraday_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_SHORT)
+_ilens_forecast_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_MEDIUM)
+
+ILENS_FORECAST_URL = "https://i-lens.hk/hkweather/daily_extract.php"
 
 logger = logging.getLogger(__name__)
 
@@ -782,6 +785,72 @@ def compute_wind_kwargs() -> dict:
     result["wind_all_change_60m"] = float(now_mean - past_mean)
     _last_wind_kwargs = result
     return result
+
+
+@cached(_ilens_forecast_cache, key=lambda target_date_str, **kw: (target_date_str,))
+def fetch_hko_ilens_forecast(target_date_str: str | None = None) -> dict | None:
+    """Fetch HKO 9-day forecast from i-lens (same source as training data).
+
+    Parses the same HTML table as ilens_forecast_days.py to extract
+    the latest forecast revision (max forecast_issue_date) for the
+    given target_date. Returns forecast_max_temp, forecast_min_temp.
+
+    Training source: https://i-lens.hk/hkweather/daily_extract.php?date=YYYY-MM-DD
+    """
+    from bs4 import BeautifulSoup
+    import re
+    from datetime import timezone, timedelta
+
+    tz_hkt = timezone(timedelta(hours=8))
+    if target_date_str is None:
+        target_date_str = (datetime.now(tz_hkt)).strftime("%Y-%m-%d")
+
+    url = f"{ILENS_FORECAST_URL}?date={target_date_str}"
+    try:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        r.raise_for_status()
+    except Exception:
+        logger.warning("Failed to fetch i-lens forecast for %s", target_date_str)
+        return None
+
+    try:
+        soup = BeautifulSoup(r.text, "html.parser")
+        # Find table by h2 header "香港天文台對 ... 所作出的天氣預測"
+        h2 = soup.find("h2", string=re.compile("香港天文台對.*所作出的天氣預測"))
+        table = h2.find_next("table") if h2 else None
+        if not table:
+            tables = soup.find_all("table")
+            for t in tables:
+                headers = t.find_all("th")
+                if any("發佈日期" in h.get_text(strip=True) for h in headers):
+                    table = t
+                    break
+        if not table:
+            return None
+
+        rows = table.find_all("tr")
+        best = None
+        latest_issue_date = None
+        for row in rows[1:]:
+            cols = row.find_all("td")
+            if len(cols) < 8:
+                continue
+            clean = [c.get_text(strip=True) for c in cols]
+            if not re.match(r"^\d{4}-\d{2}-\d{2}$", clean[0]):
+                continue
+            # Track the row with the latest forecast_issue_date
+            if latest_issue_date is None or clean[0] > latest_issue_date:
+                latest_issue_date = clean[0]
+                best = {
+                    "forecast_issue_date": clean[0],
+                    "forecast_issue_time": clean[1],
+                    "forecast_tmin": float(clean[2]) if len(clean) > 2 and clean[2] else None,
+                    "forecast_tmax": float(clean[3]) if len(clean) > 3 and clean[3] else None,
+                }
+        return best
+    except Exception as e:
+        logger.warning("Failed to parse i-lens forecast HTML: %s", e)
+        return None
 
 
 def get_nowcast_rainfall() -> float | None:
