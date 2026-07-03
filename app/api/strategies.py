@@ -501,6 +501,12 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
     # Polymarket prices per bucket
     if prices_dict:
         context_json["market_prices"] = prices_dict
+    # Log all Model 2A features for stability diagnostics
+    if results and "model_2a" in results:
+        _m2a_raw = results["model_2a"].get("raw", {})
+        _m2a_f = _m2a_raw.get("_features")
+        if _m2a_f:
+            context_json["model_2a_features"] = _m2a_f
 
     return dict(
         capital=acct.capital,

@@ -2551,6 +2551,17 @@ def predict_intraday_tmax_model_2a(
         "wind_data_age_minutes": wind_data_age_minutes if wind_data_age_minutes is not None else 8,
     }
 
+    _features_log = {}
+    for __k, __v in features.items():
+        if isinstance(__v, (np.floating,)):
+            _features_log[__k] = float(__v)
+        elif isinstance(__v, (np.integer,)):
+            _features_log[__k] = int(__v)
+        elif isinstance(__v, (np.bool_,)):
+            _features_log[__k] = bool(__v)
+        else:
+            _features_log[__k] = __v
+
     active = _get_active()
     feature_cols = active['feature_cols']
     model_features = active['upside_q50'].feature_name()
@@ -2607,6 +2618,7 @@ def predict_intraday_tmax_model_2a(
         'pred_tmax_p75': pred_tmax_p75,
         'pred_tmax_p90': pred_tmax_p90,
         'sample_count': None,
+        '_features': _features_log,
     }
 
 
