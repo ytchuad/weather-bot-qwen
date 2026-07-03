@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased] - 2026-07-03
+
+### Fixed
+- **Model 2A 5-10 min prediction fluctuation (root cause)**: `predict_intraday_tmax_model_2a()` was recomputing `temp_change_30m`, `temp_change_60m`, `temp_volatility_60m`, `temp_acceleration_60m`, `rh_change_60m`, `dew_point_change_60m`, and `dew_point_spread_change_60m` from the raw `temp_buffer`/`rh_buffer` arrays every call. These buffers changed between scheduler ticks because `get_intraday_state()` cache expires every ~60s and the HKO CSV merge+dropped-duplicates produce slightly different `df_today` each time. At 09:03→09:08, identical scalar context features produced a 0.62°C swing due to buffer content changes.
+  - `get_intraday_state()` now pre-computes all buffer-derived features (`temp_volatility_60m`, `temp_acceleration_60m`, `rh_change_60m`, `dew_point_change_60m`, `dew_point_spread_change_60m`) as deterministic scalars from `df_today` using `.iloc[-30]` / `.iloc[-60]`
+  - `predict_intraday_tmax_model_2a()` now accepts `temp_change_30m_pre`, `temp_change_60m_pre`, `temp_volatility_60m_pre`, `temp_acceleration_60m_pre`, `rh_change_60m_pre`, `dew_point_change_60m_pre`, `dew_point_spread_change_60m_pre` parameters — when provided, uses them instead of buffer-based computation (fallback preserved for other callers)
+  - New state fields passed through `model_service.py` `common` dict → `predict_intraday_tmax_all` → `predict_intraday_tmax_model_2a`
+- **`time_since_max` binary flip not fully smoothed**: When `temp_now == max_so_far`, `time_since_max` drops from N to 0 instantly. Pre-computed features eliminate indirect buffer coupling, but this feature is still computed as-is (will benefit from future smoothing).
+- **Dew point delta computation**: Moved from always-buffer-based (`idx`/`rh_idx`) to pre-computed preferred + buffer fallback, fixing a `NameError` when pre-computed features were provided.
+
+### Added
+- **Buffer debug info in context_json**: `buffer_len`, `temp_at_idx30`, `temp_at_idx60`, `rh_at_idx60` now logged in each snapshot for monitoring Model 2A buffer stability.
+- New pre-computed state fields exposed in context_json: `temp_volatility_60m`, `temp_acceleration_60m`, `rh_change_60m`, `dew_point_change_60m`, `dew_point_spread_change_60m`.
+
 ## [Unreleased] - 2026-07-02
 
 ### Changed

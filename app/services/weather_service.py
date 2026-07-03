@@ -268,6 +268,42 @@ def get_intraday_state(target_date_str: str) -> dict | None:
             time_of_min = df_today.loc[min_idxs[-1], "datetime"]
             time_since_min = max(0.0, (time_now - time_of_min).total_seconds() / 60.0)
 
+    # Pre-compute buffer-derived features for Model 2A stability
+    temp_volatility_60m = 0.0
+    if len(df_today) >= 10:
+        temp_vals = df_today["temp"].values[-60:] if len(df_today) >= 60 else df_today["temp"].values
+        temp_volatility_60m = float(np.std(temp_vals[-60:], ddof=1) if len(temp_vals) >= 2 else 0.0)
+
+    temp_acceleration_60m = 0.0
+    if len(df_today) >= 60:
+        _t30 = float(df_today["temp"].iloc[-30])
+        _t60 = float(df_today["temp"].iloc[-60])
+        _s30 = (temp_now - _t30) / 30.0
+        _s60 = (_t30 - _t60) / 30.0
+        temp_acceleration_60m = _s30 - _s60
+
+    rh_change_60m = 0.0
+    if "rh" in df_today.columns and len(df_today) >= 60 and df_today["rh"].iloc[-60] is not None:
+        rh_change_60m = rh_now - float(df_today["rh"].iloc[-60])
+
+    # Pre-compute dew point features for Model 2A stability
+    dew_point_change_60m = 0.0
+    dew_point_spread_change_60m = 0.0
+    if len(df_today) >= 60 and rh_change_60m != 0.0:
+        try:
+            import math as _m
+            _a, _b = 17.625, 243.04
+            _t60 = float(df_today["temp"].iloc[-60])
+            _rh60 = float(df_today["rh"].iloc[-60])
+            _gamma = _m.log(rh_now / 100.0) + (_a * temp_now) / (_b + temp_now)
+            _dp0 = (_b * _gamma) / (_a - _gamma)
+            _gamma60 = _m.log(_rh60 / 100.0) + (_a * _t60) / (_b + _t60)
+            _dp60 = (_b * _gamma60) / (_a - _gamma60)
+            dew_point_change_60m = _dp0 - _dp60
+            dew_point_spread_change_60m = (temp_now - _dp0) - (_t60 - _dp60)
+        except Exception:
+            pass
+
     return {
         "temp_now": temp_now,
         "temp_30m_ago": temp_30m_ago,
@@ -282,6 +318,11 @@ def get_intraday_state(target_date_str: str) -> dict | None:
         "temp_change_60m": temp_now - temp_60m_ago,
         "time_since_max": time_since_max,
         "time_since_min": time_since_min,
+        "temp_volatility_60m": temp_volatility_60m,
+        "temp_acceleration_60m": temp_acceleration_60m,
+        "rh_change_60m": rh_change_60m,
+        "dew_point_change_60m": dew_point_change_60m,
+        "dew_point_spread_change_60m": dew_point_spread_change_60m,
     }
 
 

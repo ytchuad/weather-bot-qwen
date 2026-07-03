@@ -2142,6 +2142,8 @@ def predict_intraday_tmax_all(
     rainfall_30m_filled=0.0, rainfall_30m_missing_flag=1,
     rainfall_data_age_minutes=0.0, rain_data_gap_flag=0,
     temp_change_30min=None, temp_change_60min=None,
+    temp_volatility_60m=None, temp_acceleration_60m=None, rh_change_60m=None,
+    dew_point_change_60m=None, dew_point_spread_change_60m=None,
     time_since_max_so_far=None, hour=None, minutes_since_midnight=None,
     rh_current=50.0, temp_buffer=None, rh_buffer=None,
     time_since_min_so_far=None,
@@ -2263,6 +2265,13 @@ def predict_intraday_tmax_all(
                 current_datetime, max_so_far, temp_now,
                 humidity=rh_current, min_so_far=min_so_far,
                 time_since_max=time_since_max_so_far or 0.0,
+                temp_change_30m_pre=temp_change_30min,
+                temp_change_60m_pre=temp_change_60min,
+                temp_volatility_60m_pre=temp_volatility_60m,
+                temp_acceleration_60m_pre=temp_acceleration_60m,
+                rh_change_60m_pre=rh_change_60m,
+                dew_point_change_60m_pre=dew_point_change_60m,
+                dew_point_spread_change_60m_pre=dew_point_spread_change_60m,
                 temp_buffer=temp_buffer, rh_buffer=rh_buffer,
                 hour=hour, minute=current_datetime.minute if current_datetime else None,
                 forecast_tmax=forecast_tmax, forecast_tmin=forecast_tmin,
@@ -2395,6 +2404,10 @@ def predict_intraday_tmax_model_2a(
     humidity=50.0, pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
     dew_point_current=None,
     min_so_far=None, time_since_max=0.0,
+    temp_change_30m_pre=None, temp_change_60m_pre=None,
+    temp_volatility_60m_pre=None, temp_acceleration_60m_pre=None,
+    rh_change_60m_pre=None,
+    dew_point_change_60m_pre=None, dew_point_spread_change_60m_pre=None,
     temp_buffer=None, rh_buffer=None,
     forecast_tmax=None, forecast_tmin=None,
     forecast_age_minutes=None, forecast_lead_days=None,
@@ -2405,27 +2418,42 @@ def predict_intraday_tmax_model_2a(
     obs_data_age_minutes=None, wind_data_age_minutes=None,
     hour=None, minute=None,
 ):
-    """Predict remaining upside using Model 2A (core baseline with forecast + wind)."""
+    """Predict remaining upside using Model 2A (core baseline with forecast + wind).
+
+    Uses pre-computed features (temp_change_30m_pre, etc.) when available to
+    avoid buffer instability. Falls back to buffer-based computation when
+    pre-computed values are not provided.
+    """
     h = hour if hour is not None else (current_datetime.hour if current_datetime else 12)
     m = minute if minute is not None else (current_datetime.minute if current_datetime else 0)
     dt = current_datetime
 
     temp_arr = np.array(list(temp_buffer) if temp_buffer else [temp_now])
     idx = len(temp_arr) - 1
-    temp_change_30m = temp_now - (temp_arr[idx-30] if idx >= 30 else temp_arr[0])
-    temp_change_60m = temp_now - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
-    temp_slope_30m = temp_change_30m / 30.0
-    temp_slope_60m = temp_change_60m / 60.0
-
-    start_vol = max(0, idx - 59)
-    temp_volatility_60m = float(np.std(temp_arr[start_vol:idx+1], ddof=1)) if (idx - start_vol) >= 1 else 0.0
-    temp_acceleration_60m = temp_slope_30m - (temp_slope_30m - (
-        temp_arr[idx-30] - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
-    ) / 30.0)
-
     rh_arr = np.array(list(rh_buffer) if rh_buffer else [humidity])
     rh_idx = len(rh_arr) - 1
-    rh_change_60m = humidity - (rh_arr[rh_idx-60] if rh_idx >= 60 else rh_arr[0])
+
+    if temp_change_30m_pre is not None:
+        temp_change_30m = temp_change_30m_pre
+        temp_change_60m = temp_change_60m_pre if temp_change_60m_pre is not None else 0.0
+        temp_slope_30m = temp_change_30m / 30.0
+        temp_slope_60m = temp_change_60m / 60.0
+        temp_volatility_60m = temp_volatility_60m_pre if temp_volatility_60m_pre is not None else 0.0
+        temp_acceleration_60m = temp_acceleration_60m_pre if temp_acceleration_60m_pre is not None else 0.0
+        rh_change_60m = rh_change_60m_pre if rh_change_60m_pre is not None else 0.0
+    else:
+        temp_change_30m = temp_now - (temp_arr[idx-30] if idx >= 30 else temp_arr[0])
+        temp_change_60m = temp_now - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+        temp_slope_30m = temp_change_30m / 30.0
+        temp_slope_60m = temp_change_60m / 60.0
+
+        start_vol = max(0, idx - 59)
+        temp_volatility_60m = float(np.std(temp_arr[start_vol:idx+1], ddof=1)) if (idx - start_vol) >= 1 else 0.0
+        temp_acceleration_60m = temp_slope_30m - (temp_slope_30m - (
+            temp_arr[idx-30] - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+        ) / 30.0)
+
+        rh_change_60m = humidity - (rh_arr[rh_idx-60] if rh_idx >= 60 else rh_arr[0])
 
     # Compute dew_point_current via Magnus formula if not provided
     if dew_point_current is None and humidity is not None and temp_now is not None:
@@ -2441,10 +2469,11 @@ def predict_intraday_tmax_model_2a(
         dew_point_current = temp_now - 5
 
     dew_point_spread = temp_now - dew_point_current
-    # Compute dew_point deltas from buffer via Magnus formula (matching training diff(6))
-    dew_point_change_60m = 0.0
-    dew_point_spread_change_60m = 0.0
-    if idx >= 60 and rh_idx >= 60 and dew_point_current is not None:
+    # Pre-computed dew point deltas (preferred) or fallback to buffer
+    if dew_point_change_60m_pre is not None:
+        dew_point_change_60m = dew_point_change_60m_pre
+        dew_point_spread_change_60m = dew_point_spread_change_60m_pre if dew_point_spread_change_60m_pre is not None else 0.0
+    elif idx >= 60 and rh_idx >= 60 and dew_point_current is not None:
         try:
             import math as _m
             _a, _b = 17.625, 243.04
@@ -2455,7 +2484,11 @@ def predict_intraday_tmax_model_2a(
             dew_point_change_60m = dew_point_current - _dp60
             dew_point_spread_change_60m = (temp_now - dew_point_current) - (_t60 - _dp60)
         except Exception:
-            pass
+            dew_point_change_60m = 0.0
+            dew_point_spread_change_60m = 0.0
+    else:
+        dew_point_change_60m = 0.0
+        dew_point_spread_change_60m = 0.0
 
     forecast_gap = forecast_tmax - max_so_far if forecast_tmax is not None else 0.0
     forecast_range = forecast_tmax - forecast_tmin if forecast_tmax is not None and forecast_tmin is not None else 0.0

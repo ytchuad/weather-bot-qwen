@@ -459,7 +459,10 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
     if state:
         for k in ("temp_30m_ago", "temp_60m_ago", "temp_120m_ago",
                   "min_so_far", "rh_now", "temp_change_30m", "temp_change_60m",
-                  "time_since_max", "time_since_min"):
+                  "time_since_max", "time_since_min",
+                  "temp_volatility_60m", "temp_acceleration_60m",
+                  "rh_change_60m", "dew_point_change_60m",
+                  "dew_point_spread_change_60m"):
             v = state.get(k)
             if v is not None:
                 context_json[k] = v
@@ -475,6 +478,16 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
         v = rain_kwargs.get(k)
         if v is not None:
             context_json[k] = v
+    # buffer debug info for Model 2A stability monitoring
+    if state and state.get("df_today") is not None:
+        _df = state["df_today"]
+        context_json["buffer_len"] = len(_df)
+        if len(_df) >= 30:
+            context_json["temp_at_idx30"] = float(_df["temp"].iloc[-30])
+        if len(_df) >= 60:
+            context_json["temp_at_idx60"] = float(_df["temp"].iloc[-60])
+            if "rh" in _df.columns and _df["rh"].iloc[-60] is not None:
+                context_json["rh_at_idx60"] = float(_df["rh"].iloc[-60])
     if model_stds:
         context_json["model_stds"] = model_stds
     # per-bucket probabilities for each model
