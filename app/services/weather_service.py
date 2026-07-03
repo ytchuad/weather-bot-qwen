@@ -589,7 +589,8 @@ def get_accumulated_rain_today() -> float | None:
 
 HKO_PRESSURE_CSV_URL = "https://www.hko.gov.hk/wxinfo/awsgis/hko_pre.csv"
 
-_pressure_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_SHORT)
+_pressure_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_MEDIUM)
+_last_pressure_kwargs: dict | None = None
 
 
 @cached(_pressure_cache)
@@ -610,8 +611,11 @@ def fetch_pressure_live() -> pd.DataFrame:
 
 def compute_pressure_kwargs() -> dict:
     """Compute pressure_current, pressure_30m_ago, pressure_change_60m/180m from live CSV."""
+    global _last_pressure_kwargs
     df = fetch_pressure_live()
     if df.empty:
+        if _last_pressure_kwargs is not None:
+            return _last_pressure_kwargs
         return {"pressure_current": None, "pressure_30m_ago": None,
                 "pressure_change_60m": 0.0, "pressure_change_180m": 0.0}
     now = hkt_now()
@@ -625,12 +629,14 @@ def compute_pressure_kwargs() -> dict:
     t_180 = now - timedelta(minutes=180)
     idx_180 = (df["datetime"] - t_180).abs().idxmin()
     p_180 = float(df.loc[idx_180, "pressure"])
-    return {
+    result = {
         "pressure_current": latest,
         "pressure_30m_ago": p_30,
         "pressure_change_60m": latest - p_60,
         "pressure_change_180m": latest - p_180,
     }
+    _last_pressure_kwargs = result
+    return result
 
 
 # ── wind live (i-Lens DG_WIND) ─────────────────────────────────────────
@@ -719,7 +725,8 @@ def _parse_wind_from_html(html: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-_wind_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_SHORT)
+_wind_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_MEDIUM)
+_last_wind_kwargs: dict | None = None
 
 
 @cached(_wind_cache)
@@ -741,8 +748,11 @@ def fetch_wind_live() -> pd.DataFrame:
 
 def compute_wind_kwargs() -> dict:
     """Compute wind features from live i-Lens data."""
+    global _last_wind_kwargs
     df = fetch_wind_live()
     if df.empty:
+        if _last_wind_kwargs is not None:
+            return _last_wind_kwargs
         return {
             "wind_ref_mean": 0.0, "wind_ref_max": 0.0,
             "wind_victoria_harbour_mean": 0.0, "wind_victoria_harbour_max": 0.0,
@@ -770,6 +780,7 @@ def compute_wind_kwargs() -> dict:
     past = all_ts[all_ts["timestamp"] <= t_60]
     past_mean = past["wind_speed"].iloc[-1] if not past.empty else now_mean
     result["wind_all_change_60m"] = float(now_mean - past_mean)
+    _last_wind_kwargs = result
     return result
 
 
