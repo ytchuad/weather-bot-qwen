@@ -113,12 +113,7 @@ export default function Hub() {
         })
         setActiveKey(prev => (prev && keys.includes(prev)) ? prev : keys[0])
         setVisibleKeys(prev => {
-          if (prev) {
-            const current = new Set(prev)
-            keys.forEach(k => { if (!prev.has(k)) current.add(k) })
-            localStorage.setItem("visibleKeys", JSON.stringify([...current]))
-            return current
-          }
+          if (prev) return prev
           const init = new Set(keys)
           localStorage.setItem("visibleKeys", JSON.stringify([...init]))
           return init
