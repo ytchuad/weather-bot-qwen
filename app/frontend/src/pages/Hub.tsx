@@ -7,7 +7,7 @@ import ComparisonChart from "../components/ComparisonChart"
 import ModelsComparisonChart from "../components/ModelsComparisonChart"
 import BucketProbsChart from "../components/BucketProbsChart"
 import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
-import { GitCompare } from "lucide-react"
+import { GitCompare, Settings } from "lucide-react"
 
 // 解析溫度桶的中間值，用於計算市場加權平均溫度
 function parseBucketMidpoint(bucket: string): number | null {
@@ -24,6 +24,10 @@ function parseBucketMidpoint(bucket: string): number | null {
   const singleMatch = bucket.match(/(\d+)°?C/)
   if (singleMatch) return parseFloat(singleMatch[1])
   return null
+}
+
+const MODEL_LABELS: Record<string, string> = {
+  "9d": "9-Day XGBoost", "aws": "AWS High-Freq", "baseline": "Baseline Intraday", "model_a": "Model A", "model_b": "Model B (Rain)", "model_c": "Model C (Nowcast)", "model_g": "Model G (Gap+Max)", "model_2a": "Model 2A (Core+Wind)", "model_2a1": "Model 2A1 (i-lens)",
 }
 
 function getHKTDateString(): string {
@@ -44,6 +48,7 @@ export default function Hub() {
   const [date, setDate] = useState(getHKTDateString())
   const [isMinTemp, setIsMinTemp] = useState(false)
   const [compareMode, setCompareMode] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [viewMode, setViewMode] = useState<"trajectory" | "bucket">("trajectory")
   const [selectedBucket, setSelectedBucket] = useState("")
 
@@ -236,6 +241,9 @@ export default function Hub() {
           <div className="flex gap-1 bg-[#0f1013] border border-white/[0.06] p-1 rounded-md shrink-0">
             <button onClick={() => setIsMinTemp(false)} className={`px-4 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${!isMinTemp ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>TMAX</button>
             <button onClick={() => setIsMinTemp(true)} className={`px-4 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${isMinTemp ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>TMIN</button>
+            <button onClick={() => setShowSettings(true)} className="px-2 py-1.5 text-slate-400 hover:text-slate-200 transition-colors" title="Model Visibility Settings">
+              <Settings size={14} />
+            </button>
           </div>
         </div>
       </header>
@@ -280,7 +288,7 @@ export default function Hub() {
               <button onClick={() => setViewMode("bucket")} className={`px-3 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${viewMode === "bucket" ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>Bucket</button>
             </div>
           </div>
-          {viewMode === "trajectory" ? <ModelsComparisonChart date={date} /> : <BucketProbsChart date={date} bucket={selectedBucket} onBucketChange={setSelectedBucket} />}
+          {viewMode === "trajectory" ? <ModelsComparisonChart date={date} visibleKeys={visibleKeys ?? undefined} /> : <BucketProbsChart date={date} bucket={selectedBucket} onBucketChange={setSelectedBucket} visibleKeys={visibleKeys ?? undefined} />}
         </div>
       </div>
 
@@ -310,6 +318,29 @@ export default function Hub() {
           </div>
         </section>
       </div>
+
+      {showSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
+          <div className="bg-slate-900 border border-white/[0.06] rounded-lg p-6 w-[320px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xs text-slate-300 uppercase tracking-[0.2em]">Model Visibility</h3>
+              <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-slate-300 text-sm">&times;</button>
+            </div>
+            <div className="space-y-1">
+              {order.map(key => (
+                <label key={key} className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/[0.03] cursor-pointer">
+                  <input type="checkbox" checked={visibleKeys?.has(key) ?? true} onChange={() => handleToggleVisible(key)} className="accent-cyan-500" />
+                  <span className="text-sm text-slate-200">{MODEL_LABELS[key] || key}</span>
+                </label>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-4 pt-3 border-t border-white/[0.06]">
+              <button onClick={() => { const all = new Set(order); setVisibleKeys(all); localStorage.setItem("visibleKeys", JSON.stringify([...all])) }} className="flex-1 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest bg-cyan-500/20 text-cyan-400 rounded hover:bg-cyan-500/30 transition-colors">Show All</button>
+              <button onClick={() => { setVisibleKeys(new Set()); localStorage.setItem("visibleKeys", JSON.stringify([])) }} className="flex-1 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest bg-white/[0.03] text-slate-400 rounded hover:bg-white/[0.06] transition-colors">Hide All</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

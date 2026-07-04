@@ -12,6 +12,16 @@ const MODEL_LABELS: Record<string, string> = {
   "9d": "9-Day XGBoost", "aws": "AWS High-Freq", "baseline": "Baseline Intraday", "model_a": "Model A", "model_b": "Model B (Rain)", "model_c": "Model C (Nowcast)", "model_g": "Model G (Gap+Max)", "model_2a": "Model 2A (Core+Wind)", "model_2a1": "Model 2A1 (i-lens)",
 }
 
+function sortBuckets(a: string, b: string) {
+  const parse = (s: string) => {
+    if (s.startsWith("<") || s.includes(" or below")) return -999
+    if (s.startsWith(">=") || s.includes(" or higher")) return 999
+    const num = parseFloat(s.split("-")[0])
+    return isNaN(num) ? 0 : num
+  }
+  return parse(a) - parse(b)
+}
+
 function parseTime(ts: string): string {
   try { const d = new Date(ts); if (!isNaN(d.getTime())) return d.toLocaleTimeString("en-HK", { hour: "2-digit", minute: "2-digit", hour12: false }) } catch { /* */ }
   if (ts.length >= 16) return ts.slice(11, 16)
@@ -26,7 +36,7 @@ function padArray(arr: (number | null)[] | undefined, len: number): (number | nu
   return [...arr, ...new Array(len - arr.length).fill(null)]
 }
 
-export default function BucketProbsChart({ date, bucket: selectedBucket, onBucketChange }: { date: string; bucket: string; onBucketChange: (b: string) => void }) {
+export default function BucketProbsChart({ date, bucket: selectedBucket, onBucketChange, visibleKeys }: { date: string; bucket: string; onBucketChange: (b: string) => void; visibleKeys?: Set<string> }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["bucketProbs", date, selectedBucket],
     queryFn: () => fetchBucketProbs(date, selectedBucket),
@@ -37,14 +47,15 @@ export default function BucketProbsChart({ date, bucket: selectedBucket, onBucke
     if (!data || !data.timestamps?.length) return {}
     const timestamps = data.timestamps.map(parseTime)
     const maxLen = timestamps.length
+    const visibleModelEntries = Object.entries(data.models).filter(([key]) => !visibleKeys || visibleKeys.has(key))
     const series: any[] = [
       { name: "Polymarket Price", type: "line", data: padArray(data.market_prices, maxLen), smooth: true, symbol: "diamond", symbolSize: 6, connectNulls: true, lineStyle: { width: 2.5, color: "#fbbf24", type: "dashed", shadowBlur: 8, shadowColor: "rgba(251, 191, 36, 0.4)" }, itemStyle: { color: "#fbbf24" }, z: 10 },
     ]
-    Object.entries(data.models).forEach(([key, values]) => {
+    visibleModelEntries.forEach(([key, values]) => {
       series.push({ name: MODEL_LABELS[key] || key, type: "line", data: padArray(values, maxLen), smooth: true, symbol: "none", connectNulls: true, lineStyle: { width: 1.5, color: MODEL_COLORS[key] || "#94a3b8", opacity: 0.8 }, itemStyle: { color: MODEL_COLORS[key] || "#94a3b8" }, z: 1 })
     })
 
-    const allValues: (number | null)[] = [...(data.market_prices ?? []), ...Object.values(data.models).flat()]
+    const allValues: (number | null)[] = [...(data.market_prices ?? []), ...visibleModelEntries.map(([, v]) => v).flat()]
     const maxVal = allValues.reduce<number>((m, v) => (v != null && v > m ? v : m), 0)
     const yMax = maxVal > 0 ? Math.min(maxVal * 1.15, 1) : 1
 
@@ -56,14 +67,14 @@ export default function BucketProbsChart({ date, bucket: selectedBucket, onBucke
         params.forEach((p: any) => { if (p.value != null) html += `<div style="display:flex;justify-content:space-between;gap:24px"><span style="color:${p.color}">${p.seriesName}</span><span style="color:#e2e8f0;font-weight:600">${(p.value * 100).toFixed(1)}%</span></div>` })
         return html
       } },
-      legend: { data: ["Polymarket Price", ...Object.keys(data.models).map(k => MODEL_LABELS[k] || k)], textStyle: { color: "#94a3b8", fontSize: 10, fontFamily: "JetBrains Mono" }, top: 0, type: "scroll" },
+      legend: { data: ["Polymarket Price", ...visibleModelEntries.map(([k]) => MODEL_LABELS[k] || k)], textStyle: { color: "#94a3b8", fontSize: 10, fontFamily: "JetBrains Mono" }, top: 0, type: "scroll" },
       xAxis: { type: "category", boundaryGap: false, data: timestamps, axisLine: { lineStyle: { color: "rgba(255,255,255,0.1)" } }, axisTick: { show: false }, axisLabel: { color: "#64748b", fontSize: 10, fontFamily: "JetBrains Mono", margin: 12 } },
       yAxis: { type: "value", min: 0, max: yMax, axisLabel: { color: "#64748b", fontSize: 10, fontFamily: "JetBrains Mono", formatter: (v: number) => `${(v * 100).toFixed(0)}%` }, splitLine: { lineStyle: { color: "rgba(255,255,255,0.05)", type: "dashed" } }, axisLine: { show: false }, axisTick: { show: false } },
       series,
     }
-  }, [data])
+  }, [data, visibleKeys])
 
-  const availableBuckets = (data as BucketProbsData | undefined)?.available_buckets ?? []
+  const availableBuckets = useMemo(() => ((data as BucketProbsData | undefined)?.available_buckets ?? []).slice().sort(sortBuckets), [data])
 
   if (isLoading) return <div className="w-full h-[300px] flex items-center justify-center text-slate-500 text-sm">Loading bucket probabilities...</div>
   if (isError) return <div className="w-full h-[300px] flex items-center justify-center text-rose-400 text-sm">Failed to load bucket probabilities.</div>
