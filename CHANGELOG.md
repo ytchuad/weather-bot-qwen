@@ -4,6 +4,7 @@
 
 ### Fixed
 - **Wind parser regex lookahead**: `_parse_wind_from_html()` lookahead `(?=\s*\]\s*\}\s*[,\)])` required a second `]` after data array close, but series objects end with `]},` — only matched the last station. Changed to `(?:\}\s*[,|\]])` to match all stations.
+- **Wind station grouping**: `_WIND_STATION_GROUP_MAP` was `{"參考": "ref", "離岸": "offshore", "高山": "highland"}` — used substring matching (`if k in station`) against station names like `"昂坪"` which never contain those keywords → all 20 stations fell through to `"victoria_harbour"`. Replaced with a hardcoded station-name-to-group dict covering all 20 known i-lens stations. King's Park current wind now reads 8.0 (was 0.0).
 - **Nowcast display falsy-0 bug**: `diagnostics.py:217` used `if nc` which treats 0.0mm as falsy, showing "No nowcast data" even when data exists. Changed to `if nc is not None`.
 - **Forecast diagnostic keys**: `diagnostics.py:291-292` used `data.get("Forecast_Max", {}).get("Value")` — key didn't exist in HKO XML response. Changed to `DailyForecast[0]["ForecastMaximumTemperature"]`. Added `age > 180min` threshold so normal HKO model run intervals (~12-24h) don't show as error.
 - **RHRREAD defensive unpacking**: `cachetools` can corrupt cached tuple responses under concurrent access. Added `isinstance(_r, tuple)` checks before unpacking in `diagnostics.py:83` and `page_health.py:161,417`.

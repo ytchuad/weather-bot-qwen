@@ -642,7 +642,13 @@ def compute_pressure_kwargs() -> dict:
 # ── wind live (i-Lens DG_WIND) ─────────────────────────────────────────
 
 WIND_INSTANT_URL = "https://i-lens.hk/hkweather/instant_chart.php?chart_type=DG_WIND"
-_WIND_STATION_GROUP_MAP = {"參考": "ref", "離岸": "offshore", "高山": "highland"}
+_WIND_STATION_GROUP_MAP = {
+    "昂坪": "highland", "大老山": "highland", "流浮山": "highland", "打鼓嶺": "highland",
+    "長洲": "offshore", "長洲泳灘": "offshore", "青洲": "offshore", "南丫島": "offshore",
+    "坪洲": "offshore", "沙洲": "offshore", "塔門東": "offshore", "橫瀾島": "offshore",
+    "京士柏": "ref", "香港國際機場": "ref", "西貢": "ref", "沙田": "ref",
+    "青衣油庫": "ref", "北角": "ref", "中環碼頭": "ref", "啟德": "ref", "九龍天星碼頭": "ref",
+}
 _WIND_VICTORIA_HARBOUR_STATIONS = {"京士柏", "啟德", "九龍天星碼頭"}
 _WIND_GROUP_GROUPS = ["ref", "offshore", "highland", "victoria_harbour"]
 
@@ -657,11 +663,7 @@ def _parse_wind_from_html(html: str) -> pd.DataFrame:
     ):
         station = m.group(1)
         data_part = m.group(2)
-        station_type = "未知"
-        for k in _WIND_STATION_GROUP_MAP:
-            if k in station:
-                station_type = k
-                break
+        station_type = _WIND_STATION_GROUP_MAP.get(station, "ref")
         pts = re.findall(
             r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)\s*,\s*([0-9.]+)",
             data_part
@@ -693,7 +695,7 @@ def fetch_wind_live() -> pd.DataFrame:
         df = _parse_wind_from_html(r.text)
         if df.empty:
             return df
-        df["group"] = df["station_type"].map(_WIND_STATION_GROUP_MAP).fillna("victoria_harbour")
+        df["group"] = df["station_type"]
         df.loc[df["station"].isin(_WIND_VICTORIA_HARBOUR_STATIONS), "group"] = "victoria_harbour"
         return df
     except Exception as e:
