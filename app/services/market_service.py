@@ -152,7 +152,13 @@ def _bucket_bounds(bucket_label: str) -> tuple[float, float]:
 
 
 def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp: bool) -> str | None:
-    """Map Polymarket market question text to our bucket label."""
+    """Map Polymarket market question text to our bucket label.
+
+    Uses TMAX_BUCKETS/TMIN_BUCKETS dynamically — no hardcoded ranges.
+    Exceedance markets (or below / or higher) get their own label,
+    e.g. ``>=33``, ``<24``, and are kept as separate market entries
+    alongside the canonical range buckets.
+    """
     source = group_item_title or question
     m = re.search(r"(\d+)\s*°?C", source, re.IGNORECASE)
     if not m:
@@ -163,33 +169,25 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
     upper = "or higher" in source.lower()
 
     if is_min_temp:
-        # Polymarket TMIN uses single-degree buckets: 23 or below, 24C, ..., 33 or higher
+        # TMIN: single-degree buckets — 23 or below, 24C, …, 33 or higher
         if lower:
             return f"{temp_val} or below"
         if upper:
             return f"{temp_val} or higher"
         return f"{temp_val}C"
-    else:
-        if lower:
-            if temp_val <= 23:
-                return "<23"
-            for lo in range(23, 34):
-                if temp_val <= lo:
-                    return f"{lo}-{lo + 1}"
-            return ">=34"
-        if upper:
-            if temp_val >= 34:
-                return ">=34"
-            for lo in range(23, 34):
-                if lo == temp_val:
-                    return f"{lo}-{lo + 1}"
-            return "<23"
-        for lo in range(23, 34):
-            if temp_val == lo:
-                return f"{lo}-{lo + 1}"
-        if temp_val >= 34:
-            return ">=34"
-        return "<23"
+
+    # TMAX exceedance markets keep their own label
+    if lower:
+        return f"<{temp_val}"
+    if upper:
+        return f">={temp_val}"
+
+    # TMAX exact-range: find the canonical bucket that contains temp_val
+    for b in TMAX_BUCKETS:
+        lo, hi = _bucket_bounds(b)
+        if lo <= temp_val < hi:
+            return b
+    return TMAX_BUCKETS[0]  # fallback: <23
 
 
 # ── cached fetchers ───────────────────────────────────────────────────
