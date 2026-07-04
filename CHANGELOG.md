@@ -3,7 +3,8 @@
 ## [Unreleased] - 2026-07-04
 
 ### Fixed
-- **Wind parser rewrite**: `_parse_wind_from_html()` in `weather_service.py` used fragile brace-counting + nested regex to parse Highcharts config, causing "No stations parsed" on i-lens HTML format variations. Replaced with direct regex extraction of `name`/`data` arrays from raw HTML. Also fixed `\d+` → `[0-9.]+` to support decimal wind speeds. Model 2A wind features now correctly populated.
+- **Wind parser regex lookahead**: `_parse_wind_from_html()` lookahead `(?=\s*\]\s*\}\s*[,\)])` required a second `]` after data array close, but series objects end with `]},` — only matched the last station. Changed to `(?:\}\s*[,|\]])` to match all stations.
+- **Nowcast display falsy-0 bug**: `diagnostics.py:217` used `if nc` which treats 0.0mm as falsy, showing "No nowcast data" even when data exists. Changed to `if nc is not None`.
 - **Forecast diagnostic keys**: `diagnostics.py:291-292` used `data.get("Forecast_Max", {}).get("Value")` — key didn't exist in HKO XML response. Changed to `DailyForecast[0]["ForecastMaximumTemperature"]`. Added `age > 180min` threshold so normal HKO model run intervals (~12-24h) don't show as error.
 - **RHRREAD defensive unpacking**: `cachetools` can corrupt cached tuple responses under concurrent access. Added `isinstance(_r, tuple)` checks before unpacking in `diagnostics.py:83` and `page_health.py:161,417`.
 - **Rain data sources: removed stale parquet fallback entirely**: `compute_rain_kwargs()` in `weather_service.py` and `get_nowcast_features()` in `nowcast_loader.py` both had parquet-based fallbacks (`load_rain_15min()` / `_read_wide_all()`) that served month-old data on HF Spaces (ephemeral filesystem). Removed both fallbacks. Live fetch is the only path now; on failure, `rain_data_ok=False` / `rain_nowcast_missing_flag=1` signals models that rainfall features are unavailable.

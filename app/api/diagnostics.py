@@ -214,7 +214,7 @@ def check_data_sources():
             "name": "Gridded Nowcast",
             "url": "https://data.weather.gov.hk/weatherAPI/hko_data/F3/Gridded_rainfall_nowcast.csv",
             "status": status,
-            "message": f"Nowcast: {nc:.1f} mm" if nc else "No nowcast data",
+            "message": f"Nowcast: {nc:.1f} mm" if nc is not None else "No nowcast data",
             "last_update": _now_str(),
             "features": features,
         })

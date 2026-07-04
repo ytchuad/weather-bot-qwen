@@ -652,7 +652,7 @@ def _parse_wind_from_html(html: str) -> pd.DataFrame:
     import re
     records = []
     for m in re.finditer(
-        r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\](?=\s*\]\s*\}\s*[,\)])",
+        r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\]\s*(?:\}\s*[,|\]])",
         html, re.DOTALL
     ):
         station = m.group(1)
