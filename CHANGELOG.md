@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased] - 2026-07-04
+
+### Fixed
+- **Rain data pipeline stale**: `compute_rain_kwargs()` in `weather_service.py` preferred `load_rain_15min()` (parquet, last data June 6) over live fetch. Since parquet existed with stale data, `fetch_rainfall_live()` was never called, causing `rain_60m`/`rain_120m` to always be 0.0mm. Reversed priority: live fetch first, parquet as fallback only when live fetch fails.
+- **Model visibility persistence across refresh**: `useEffect` in `Hub.tsx` unconditionally re-added all model keys to `visibleKeys` on every page load, silently reverting user's hidden-model choices. Removed the re-add logic; saved preferences are now respected.
+- **Wind + pressure cache TTL**: `fetch_wind_stations()` and `fetch_pressure_data()` cache TTL bumped from 60s→300s, with stale-data fallback when fetch returns empty, reducing wind-driven prediction jumps from 0.96°C to ≤0.35°C.
+- **Bucket mapping `_market_question_to_bucket()` upper-case loop**: `if temp_val >= lo` was always true on first iteration (lo=23), causing ALL "or higher" markets to return `"23-24"`. Changed to `if lo == temp_val` so "33°C or higher" correctly maps to `">=33"`.
+- **Hardcoded bucket ranges removed**: Replaced `range(23, 34)` loops with dynamic `TMAX_BUCKETS` + `_bucket_bounds()`. "or higher" markets return `">=N"` format instead of being forced into range buckets.
+
+### Added
+- **model_2a1 (i-lens variant)**: New model variant that uses i-lens forecast data as input. Registered in `MODEL_COLORS`/`MODEL_LABELS` (teal `#0d9488`) in `ModelsComparisonChart.tsx`, `BucketProbsChart.tsx`, and `LABEL_MAP` in `ModelGrid.tsx`.
+- **Bucket sort order in dropdown**: `sortBuckets()` function in `BucketProbsChart.tsx` — `<23` and `or below` buckets appear first, `>=N` and `or higher` last, numeric range buckets in ascending order.
+- **Global model visibility settings UI**: Gear icon ⚙ in Hub.tsx header opens a settings modal with per-model checkboxes (Show All / Hide All buttons). Reads/writes `"visibleKeys"` in localStorage — same key as ModelGrid toggle. All charts (`ModelsComparisonChart`, `BucketProbsChart`) filter model series to visible keys.
+
 ## [Unreleased] - 2026-07-03
 
 ### Fixed

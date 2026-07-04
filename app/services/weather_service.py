@@ -426,10 +426,10 @@ def compute_rain_kwargs(
     rain_data_ok = False
 
     try:
-        # Try parquet first (for historical continuity)
-        rain_df = load_rain_15min()
+        # Live fetch first; parquet is for training only
+        rain_df = fetch_rainfall_live()
         if rain_df.empty:
-            rain_df = fetch_rainfall_live()
+            rain_df = load_rain_15min()
         if not rain_df.empty:
             rain_df = rain_df[rain_df["datetime"] <= now_dt]
             if not rain_df.empty:
