@@ -3,7 +3,7 @@
 ## [Unreleased] - 2026-07-04
 
 ### Fixed
-- **Rain data pipeline stale**: `compute_rain_kwargs()` in `weather_service.py` preferred `load_rain_15min()` (parquet, last data June 6) over live fetch. Since parquet existed with stale data, `fetch_rainfall_live()` was never called, causing `rain_60m`/`rain_120m` to always be 0.0mm. Reversed priority: live fetch first, parquet as fallback only when live fetch fails.
+- **Rain data sources: removed stale parquet fallback entirely**: `compute_rain_kwargs()` in `weather_service.py` and `get_nowcast_features()` in `nowcast_loader.py` both had parquet-based fallbacks (`load_rain_15min()` / `_read_wide_all()`) that served month-old data on HF Spaces (ephemeral filesystem). Removed both fallbacks. Live fetch is the only path now; on failure, `rain_data_ok=False` / `rain_nowcast_missing_flag=1` signals models that rainfall features are unavailable.
 - **Model visibility persistence across refresh**: `useEffect` in `Hub.tsx` unconditionally re-added all model keys to `visibleKeys` on every page load, silently reverting user's hidden-model choices. Removed the re-add logic; saved preferences are now respected.
 - **Wind + pressure cache TTL**: `fetch_wind_stations()` and `fetch_pressure_data()` cache TTL bumped from 60s→300s, with stale-data fallback when fetch returns empty, reducing wind-driven prediction jumps from 0.96°C to ≤0.35°C.
 - **Bucket mapping `_market_question_to_bucket()` upper-case loop**: `if temp_val >= lo` was always true on first iteration (lo=23), causing ALL "or higher" markets to return `"23-24"`. Changed to `if lo == temp_val` so "33°C or higher" correctly maps to `">=33"`.

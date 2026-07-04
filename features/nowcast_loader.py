@@ -24,8 +24,6 @@ from rainfall_nowcast_download_and_station_features import (
 logger = logging.getLogger(__name__)
 
 LIVE_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/F3/Gridded_rainfall_nowcast.csv"
-WIDE_ALL_PATH = Path("data/features/rainfall_nowcast/rainfall_nowcast_station_features_wide_all.parquet")
-
 RADIUS_KM = 5.0
 HEAVY_RAIN_MM = 5.0
 
@@ -99,18 +97,6 @@ def _fetch_live() -> dict:
     return feat
 
 
-def _read_wide_all() -> pd.DataFrame | None:
-    try:
-        df = pd.read_parquet(WIDE_ALL_PATH)
-        if "issue_time" not in df.columns:
-            return None
-        df = df.sort_values("issue_time")
-        return df
-    except Exception as exc:
-        logger.warning("Cannot read %s: %s", WIDE_ALL_PATH, exc)
-        return None
-
-
 def get_nowcast_features(snapshot_time: datetime | None = None) -> dict:
     live = _fetch_live()
     if live:
@@ -119,19 +105,4 @@ def get_nowcast_features(snapshot_time: datetime | None = None) -> dict:
             age = (snapshot_time - issued).total_seconds() / 60.0
             live["rain_nowcast_age_minutes"] = max(0.0, age)
         return live
-
-    wide = _read_wide_all()
-    if wide is not None and snapshot_time is not None:
-        idx = wide["issue_time"].searchsorted(snapshot_time)
-        if idx >= len(wide):
-            idx = len(wide) - 1
-        row = wide.iloc[max(0, idx)]
-        issued = row["issue_time"]
-        feat = row.drop("issue_time").to_dict()
-        feat = _filter_to_known(feat)
-        age = (snapshot_time - issued).total_seconds() / 60.0
-        feat["rain_nowcast_age_minutes"] = max(0.0, age)
-        feat["rain_nowcast_missing_flag"] = 0
-        return feat
-
     return {}
