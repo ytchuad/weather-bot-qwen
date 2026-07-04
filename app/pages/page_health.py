@@ -158,7 +158,11 @@ def _get_feature_status() -> list[dict]:
 
     # ── Temp / RH / Dew point ──────────────────────────────────────────
     try:
-        dt, temp, rh = fetch_live_hko_temp_rh()
+        _r = fetch_live_hko_temp_rh()
+        if isinstance(_r, tuple) and len(_r) >= 3:
+            dt, temp, rh = _r[0], _r[1], _r[2]
+        else:
+            dt, temp, rh = None, None, None
         if temp is not None:
             results.append({"domain": "Temp/RH", "feature": "temp_current",
                             "source": "HKO RHRREAD", "value": f"{temp:.1f} °C",
@@ -414,7 +418,11 @@ def run() -> None:
             # Test 1: HKO API reachable
             try:
                 from ..services.weather_service import fetch_live_hko_temp_rh
-                dt, temp, rh = fetch_live_hko_temp_rh()
+                _r = fetch_live_hko_temp_rh()
+                if isinstance(_r, tuple) and len(_r) >= 3:
+                    dt, temp, rh = _r[0], _r[1], _r[2]
+                else:
+                    dt, temp, rh = None, None, None
                 if temp is not None:
                     results.append({"test": "HKO Live Temp", "result": f"✅ {temp}°C at {dt}"})
                 else:

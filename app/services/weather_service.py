@@ -650,78 +650,33 @@ _WIND_GROUP_GROUPS = ["ref", "offshore", "highland", "victoria_harbour"]
 def _parse_wind_from_html(html: str) -> pd.DataFrame:
     """Parse i-Lens wind HTML into DataFrame with timestamp, station_type, station, wind_speed."""
     import re
-    from bs4 import BeautifulSoup
     records = []
-    soup = BeautifulSoup(html, "html.parser")
-    for script in soup.find_all("script"):
-        if not script.string:
-            continue
-        text = script.string
-        for m in re.finditer(r"Highcharts\.chart\([^)]+?,\s*\{", text):
-            start = m.end() - 1
-            brace_count = 0
-            i = start
-            while i < len(text):
-                ch = text[i]
-                if ch == '{':
-                    brace_count += 1
-                elif ch == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end = text.find(');', i) + 1
-                        break
-                i += 1
-            else:
+    for m in re.finditer(
+        r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\](?=\s*\]\s*\}\s*[,\)])",
+        html, re.DOTALL
+    ):
+        station = m.group(1)
+        data_part = m.group(2)
+        station_type = "未知"
+        for k in _WIND_STATION_GROUP_MAP:
+            if k in station:
+                station_type = k
+                break
+        pts = re.findall(
+            r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)\s*,\s*([0-9.]+)",
+            data_part
+        )
+        for y_str, mon_str, d_str, h_str, min_str, val_str in pts:
+            try:
+                ts = datetime(int(y_str), int(mon_str) + 1, int(d_str), int(h_str), int(min_str))
+                records.append({
+                    "timestamp": ts,
+                    "station_type": station_type,
+                    "station": station,
+                    "wind_speed": float(val_str),
+                })
+            except ValueError:
                 continue
-            config_str = text[start:end + 1]
-            title_m = re.search(r"text\s*:\s*'([^']+)'", config_str)
-            if not title_m:
-                continue
-            title = title_m.group(1)
-            station_type = "未知"
-            for k in _WIND_STATION_GROUP_MAP:
-                if k in title:
-                    station_type = k
-                    break
-            series_match = re.search(r"series\s*:\s*\[", config_str)
-            if not series_match:
-                continue
-            arr_start = series_match.end() - 1
-            bracket_count = 0
-            i = arr_start
-            while i < len(config_str):
-                if config_str[i] == '[':
-                    bracket_count += 1
-                elif config_str[i] == ']':
-                    bracket_count -= 1
-                    if bracket_count == 0:
-                        arr_end = i
-                        break
-                i += 1
-            else:
-                continue
-            series_content = config_str[arr_start + 1:arr_end]
-            for s in re.finditer(
-                r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\]\s*(?:\}\s*[,|\]])",
-                series_content, re.DOTALL
-            ):
-                station = s.group(1)
-                data_part = s.group(2)
-                pts = re.findall(
-                    r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)\s*,\s*(\d+)",
-                    data_part
-                )
-                for y_str, mon_str, d_str, h_str, min_str, val_str in pts:
-                    try:
-                        ts = datetime(int(y_str), int(mon_str) + 1, int(d_str), int(h_str), int(min_str))
-                    except ValueError:
-                        continue
-                    records.append({
-                        "timestamp": ts,
-                        "station_type": station_type,
-                        "station": station,
-                        "wind_speed": float(int(val_str)),
-                    })
     return pd.DataFrame(records)
 
 

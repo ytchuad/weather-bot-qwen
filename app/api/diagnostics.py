@@ -80,7 +80,11 @@ def check_data_sources():
 
     # ── 2. HKO Live Temp/RH (Observatory, RHRREAD API, for reference) ──
     try:
-        dt, temp, rh = fetch_live_hko_temp_rh()
+        _r = fetch_live_hko_temp_rh()
+        if isinstance(_r, tuple) and len(_r) >= 3:
+            dt, temp, rh = _r[0], _r[1], _r[2]
+        else:
+            dt, temp, rh = None, None, None
         features = []
         record_time = dt.strftime("%H:%M:%S") if dt else "None"
         features.append({"name": "record_time", "value": record_time, "status": "ok" if dt else "warning"})
@@ -288,17 +292,19 @@ def check_data_sources():
         r.raise_for_status()
         data = r.json()
         model_time_str = data.get("ModelTime", "")
-        forecast_max = data.get("Forecast_Max", {}).get("Value")
-        forecast_min = data.get("Forecast_Min", {}).get("Value")
+        daily = data.get("DailyForecast", [])
+        forecast_max = daily[0].get("ForecastMaximumTemperature") if daily else None
+        forecast_min = daily[0].get("ForecastMinimumTemperature") if daily else None
         features = []
         if model_time_str:
             from app.config import HKT_OFFSET
             model_dt = pd.to_datetime(str(model_time_str), format="%Y%m%d%H") + HKT_OFFSET
             age_min = (hkt_now() - model_dt).total_seconds() / 60
-            features.append({"name": "forecast_age_minutes", "value": f"{age_min:.0f} min", "status": "ok"})
+            age_stale = age_min > 180
+            features.append({"name": "forecast_age_minutes", "value": f"{age_min:.0f} min", "status": "warning" if age_stale else "ok"})
             features.append({"name": "forecast_max_temp", "value": f"{forecast_max} °C" if forecast_max else "None", "status": "ok" if forecast_max else "warning"})
             features.append({"name": "forecast_min_temp", "value": f"{forecast_min} °C" if forecast_min else "None", "status": "ok" if forecast_min else "warning"})
-            status = "ok"
+            status = "warning" if age_stale else "ok"
             msg = f"Age: {age_min:.0f}min, Max: {forecast_max}°C"
         else:
             status = "warning"
