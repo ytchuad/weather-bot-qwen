@@ -119,12 +119,13 @@ def predict_intraday_all(
         )
 
     rain_kw = rain_kwargs or {}
+    nc_features = {}
     # Inject nowcast features for Model C (silently merge, no crash if missing)
     try:
         from features.nowcast_loader import get_nowcast_features
         nc = get_nowcast_features(snapshot_time=state.get("time_now"))
         if nc:
-            rain_kw.update(nc)
+            nc_features = nc
     except Exception:
         pass
 
@@ -243,6 +244,9 @@ def predict_intraday_all(
     for k, v in rain_kw.items():
         if k in _ALLOWED_RAIN_KWARGS and k not in common:
             common[k] = v
+
+    # Inject nowcast features directly (bypass ALLOWED_RAIN_KWARGS whitelist)
+    common.update({k: v for k, v in nc_features.items() if k != "_issue_time" and k not in common})
 
     # Fetch i-lens forecast (same source as training) for Model 2A1
     ilens_forecast = None
