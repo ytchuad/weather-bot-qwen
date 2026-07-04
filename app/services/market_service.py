@@ -181,7 +181,7 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
             if temp_val >= 34:
                 return ">=34"
             for lo in range(23, 34):
-                if temp_val >= lo:
+                if lo == temp_val:
                     return f"{lo}-{lo + 1}"
             return "<23"
         for lo in range(23, 34):
