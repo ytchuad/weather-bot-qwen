@@ -5,10 +5,10 @@ import type { EChartsOption } from "echarts"
 import { fetchModelsComparison } from "../api/client"
 
 const MODEL_COLORS: Record<string, string> = {
-  "9d": "#1f77b4", "aws": "#ff7f0e", "baseline": "#636EFA", "model_a": "#00CC96", "model_b": "#AB63FA", "model_c": "#FFA15A", "model_g": "#FFB86C", "model_2a": "#FF2C97", "model_2a1": "#0d9488",
+  "9d": "#1f77b4", "aws": "#ff7f0e", "baseline": "#636EFA", "model_a": "#00CC96", "model_b": "#AB63FA", "model_c": "#FFA15A", "model_g": "#FFB86C", "model_2a": "#FF2C97", "model_2a1": "#0d9488", "model_2a_v2": "#E6007E",
 }
 const MODEL_LABELS: Record<string, string> = {
-  "9d": "9-Day XGBoost", "aws": "AWS High-Freq", "baseline": "Baseline Intraday", "model_a": "Model A", "model_b": "Model B (Rain)", "model_c": "Model C (Nowcast)", "model_g": "Model G (Gap+Max)", "model_2a": "Model 2A (Core+Wind)", "model_2a1": "Model 2A1 (i-lens)",
+  "9d": "9-Day XGBoost", "aws": "AWS High-Freq", "baseline": "Baseline Intraday", "model_a": "Model A", "model_b": "Model B (Rain)", "model_c": "Model C (Nowcast)", "model_g": "Model G (Gap+Max)", "model_2a": "Model 2A (Core+Wind)", "model_2a1": "Model 2A1 (i-lens)", "model_2a_v2": "Model 2A v2 (Offshore+Highland)",
 }
 
 function parseTime(ts: string): string {

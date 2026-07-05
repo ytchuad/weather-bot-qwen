@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased] - 2026-07-05
+
+### Added
+- **Model 2A v2**: New model variant with `wind_offshore_highland_mean/max` replacing `wind_highland_mean/max` (merges offshore + highland wind station groups). Training script: `models/train_model_2a_v2.py`. OOT: MAE=0.309°C, cov80=89.0%, PR-AUC=0.987 — performance-neutral vs v1.
+- **Model 2A v2 interval calibration**: `models/fix_model_2a_v2.py` — grid search on validation set to find asymmetric scale factors for 15-18 and 18-24 buckets. 15-18 calibrated from 94.4% → 81.7% cov80 (OOT). Factors saved to `reports/model_2a_v2_interval_calibration_factors.json`.
+- **Model 2A v2 assessment reports**: `reports/model_2a_v2_current_assessment.md`, `reports/model_2a_v2_classifier_usage_note.md`, `reports/model_2a_v2_high_drop_evidence.md`, `reports/model_2a_v2_actual_high_validation_filtered.txt/csv`, `reports/model_2a_v2_interval_calibration_report.csv`.
+
 ## [Unreleased] - 2026-07-04
 
 ### Fixed

@@ -36,13 +36,22 @@ logging.basicConfig(
 )
 
 # ---------- 工具函式 ----------
-def extract_station_type(title: str) -> str:
-    """從圖表標題中抽取分類名稱，如：高山、離岸、參考、維多利亞港"""
-    # 移除「香港」、「部分」、「八個」等修飾字
-    m = re.search(r'香港(?:部分|八個)?(.+?)(?:地區|測風站|站)?\s', title)
-    if m:
-        return m.group(1).strip()
-    return "未知"
+def extract_station_type(title: str) -> str | None:
+    """從圖表標題中抽取分類名稱。
+    
+    對應規則：
+    - "參考" / "香港八個參考測風站" → "參考"
+    - "維多利亞港" → "維多利亞港"
+    - "離岸及高地" / "離岸" / "高山" → "離岸及高地"（合併為單一群組）
+    - 其他 → None（丟棄，不產生 station_type）
+    """
+    if "參考" in title:
+        return "參考"
+    if "維多利亞港" in title:
+        return "維多利亞港"
+    if any(k in title for k in ("離岸及高地", "離岸", "高山")):
+        return "離岸及高地"
+    return None
 
 def parse_highcharts_config(script_text: str):
     """
@@ -83,6 +92,10 @@ def parse_highcharts_config(script_text: str):
             continue
         title = title_m.group(1)
         station_type = extract_station_type(title)
+        
+        # 跳過無法識別的圖表類型
+        if station_type is None:
+            continue
 
         # 擷取 series 陣列內容
         # 方式：找到 "series:" 後面的 '['，再用堆疊抓出整個陣列

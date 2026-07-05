@@ -58,7 +58,7 @@ def strategy_builder_form() -> None:
         model = st.selectbox(
             "Model",
             ["baseline", "rain_nowcast", "rain_observed", "model_a", "model_b",
-             "model_c", "model_d", "model_e", "model_g", "model_2a", "9d", "aws"],
+             "model_c", "model_d", "model_e", "model_g", "model_2a", "model_2a_v2", "9d", "aws"],
             index=0,
         )
         market_template = st.selectbox(

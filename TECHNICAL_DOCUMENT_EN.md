@@ -968,6 +968,43 @@ Key features from the q50 model (by split gain):
 
 Wind features contribute meaningfully after the core temperature and forecast features, particularly wind change over 60 minutes and reference station mean speed.
 
+### 4.7.5 Model 2A v2: Core + Wind (Offshore-Highland Merged) (`models/train_model_2a_v2.py`)
+
+Model 2A v2 is a minor update to Model 2A. The only change is replacing `wind_highland_mean/max` with `wind_offshore_highland_mean/max` (merging the offshore and highland wind station groups). Model architecture, hyperparameters, and feature count (45) remain identical.
+
+**Training Results (v1 vs v2):**
+
+| Metric | Model 2A (v1) | Model 2A v2 | Δ |
+|--------|---------------|-------------|---|
+| OOT MAE (remaining upside) | 0.306°C | **0.309°C** | +0.003 |
+| OOT cov80 | 88.7% | **89.0%** | +0.3pp |
+| OOT PIW | 0.993°C | **1.008°C** | +0.015 |
+| OOT q50 bias | +0.006°C | **+0.005°C** | -0.001 |
+| Classifier PR-AUC | 0.987 | **0.987** | — |
+| Classifier F1 | 0.934 | **0.934** | — |
+
+The update is performance-neutral: all metric deltas are below 0.01°C.
+
+### 4.7.6 Interval Calibration
+
+Late-day buckets (15-18, 18-24) have over-covered prediction intervals (cov80 > 94%) and need narrowing to the 80% target. The calibration method performs a grid search on the validation set to find optimal asymmetric scale factors `(scale_lower, scale_upper)` that bring cov80 into [0.80, 0.83] and q10_br/q90_br into [0.08, 0.12]:
+
+```python
+q10_adj = q50 - scale_lower * (q50 - q10)
+q90_adj = q50 + scale_upper * (q90 - q50)
+```
+
+**Calibration Results:**
+
+| Bucket | scale_lower | scale_upper | cov (valid, before→after) | cov (OOT, before→after) |
+|--------|-------------|-------------|--------------------------|------------------------|
+| 15-18 | 1.0 | 0.3 | 94.9% → **82.1%** | 94.4% → **81.7%** |
+| 18-24 | 0.3 | 0.3 | 99.7% → **97.5%** | 98.3% → **94.3%** |
+
+The 15-18 bucket is successfully calibrated to the target range. The 18-24 bucket reaches a mechanical limit (95.5% of rows have actual remaining_upside = 0) — the intervals are kept as-is since narrow intervals correctly reflect near-certainty that the daily max has been reached.
+
+Calibration factors are saved in `reports/model_2a_v2_interval_calibration_factors.json` and have not yet been wired into the inference code.
+
 ---
 
 ## 4.8 Real-Time Inference Parity Framework

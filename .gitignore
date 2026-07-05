@@ -60,6 +60,7 @@ data/strategy_accounts.json
 data/hk_weather_raw/
 data/hk_daily_forecast/
 data/wind_data/
+data/wind_data_past/
 
 # Model F — removed from codebase, no longer used
 models/intraday_minute_ml_model_f/

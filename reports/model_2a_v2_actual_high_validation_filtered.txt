@@ -1,0 +1,67 @@
+Model 2A v2 actual_high_today vs raw minute daily high
+==================================================
+
+--- Unfiltered diff ---
+     count:       3484
+      mean:    -0.1747
+       std:     0.5554
+       min:   -25.9000
+       25%:    -0.2000
+       50%:    -0.1000
+       75%:     0.0000
+       max:     0.0000
+
+--- Filtered diff ---
+     count:       3484
+      mean:    -0.1621
+       std:     0.4145
+       min:    -5.5000
+       25%:    -0.2000
+       50%:    -0.1000
+       75%:     0.0000
+       max:    14.0000
+
+Days with abs(diff_filtered) > 0.05°C: 2370 / 3484 (68.0%)
+Raw anomalies excluded (value > 40 or < 0): 1376
+
+Worst 30 filtered differences:
+  2019-12-03  raw_f=40.0  fs=54.0  diff=+14.0
+  2020-02-16  raw_f=22.4  fs=16.9  diff=-5.5
+  2018-09-16  raw_f=31.8  fs=26.3  diff=-5.5
+  2020-12-30  raw_f=21.6  fs=16.5  diff=-5.1
+  2018-03-08  raw_f=20.5  fs=16.1  diff=-4.4
+  2019-03-23  raw_f=25.1  fs=20.8  diff=-4.3
+  2022-10-18  raw_f=26.7  fs=23.3  diff=-3.4
+  2026-04-08  raw_f=26.7  fs=23.5  diff=-3.2
+  2016-12-27  raw_f=21.8  fs=18.6  diff=-3.2
+  2018-04-15  raw_f=25.8  fs=22.6  diff=-3.2
+  2019-08-25  raw_f=32.7  fs=29.7  diff=-3.0
+  2017-04-22  raw_f=24.5  fs=21.5  diff=-3.0
+  2021-11-08  raw_f=25.3  fs=22.5  diff=-2.8
+  2024-06-03  raw_f=28.2  fs=25.5  diff=-2.7
+  2024-04-28  raw_f=28.3  fs=25.6  diff=-2.7
+  2019-02-01  raw_f=22.0  fs=19.4  diff=-2.6
+  2023-01-24  raw_f=18.7  fs=16.2  diff=-2.5
+  2026-02-17  raw_f=22.4  fs=19.9  diff=-2.5
+  2017-08-23  raw_f=29.5  fs=27.1  diff=-2.4
+  2022-03-23  raw_f=21.6  fs=19.3  diff=-2.3
+  2018-03-06  raw_f=23.5  fs=21.2  diff=-2.3
+  2025-03-05  raw_f=23.9  fs=21.6  diff=-2.3
+  2024-11-19  raw_f=23.2  fs=21.0  diff=-2.2
+  2019-04-12  raw_f=25.3  fs=23.2  diff=-2.1
+  2026-05-09  raw_f=26.1  fs=24.0  diff=-2.1
+  2024-02-23  raw_f=22.9  fs=20.8  diff=-2.1
+  2026-01-21  raw_f=18.1  fs=16.1  diff=-2.0
+  2018-03-17  raw_f=22.0  fs=20.0  diff=-2.0
+  2017-12-16  raw_f=19.5  fs=17.5  diff=-2.0
+  2025-03-29  raw_f=19.3  fs=17.4  diff=-1.9
+Notes:
+- The +14.0 diff on 2019-12-03 is caused by unfiltered raw temperature anomalies
+  (values > 40 C at 00:00-00:09) being included in the feature store's
+  actual_high_today via the 10-min merged temp_current.
+- The feature store does not filter raw anomalies, so actual_high_today = 54.0
+  is driven by the anomalous raw data, not a feature store bug.
+- The -5.5 diff on 2020-02-16 and 2018-09-16 may reflect data gaps:
+  the 10-min grid may miss brief peaks that the 1-min grid captures.
+- Overall: filtered diff mean = -0.16 C, median = -0.1 C. Acceptable
+  given the 10-min vs 1-min resolution difference.

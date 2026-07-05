@@ -1,0 +1,236 @@
+# config/model_2a_feature_spec_v2.yaml
+# Model 2A v2 - Intraday remaining upside for daily maximum temperature prediction
+# Changes from v1: wind_offshore_highland replaces wind_highland + wind_offshore
+
+model_name: model_2a
+model_version: v2
+feature_version: v2
+feature_list_path: models/intraday_minute_ml_model_2a_v2/feature_list.json
+
+active_hours:
+  start: "06:00"
+  end: "23:50"
+
+decision_grid_minutes: 10
+
+availability_rule: "available_time <= decision_time"
+
+target_definition: "remaining_upside = max(actual_high_today - max_so_far, 0)"
+
+prediction_formula:
+  pred_tmax_q10: "max_so_far + upside_q10"
+  pred_tmax_q25: "max_so_far + upside_q25"
+  pred_tmax_q50: "max_so_far + upside_q50"
+  pred_tmax_q75: "max_so_far + upside_q75"
+  pred_tmax_q90: "max_so_far + upside_q90"
+
+canonical_sources:
+  - weather_obs
+  - wind_obs
+  - forecast
+
+# feature_groups defined in generic_realtime_parity_framework.yaml
+# Actual model features are loaded from feature_list.json at inference time.
+# This group listing is for reference / monitoring only.
+feature_groups:
+  - name: temperature_state
+    features:
+      - temp_current
+      - rh_current
+      - pressure_current
+      - dew_point_current
+      - dew_point_spread
+      - max_so_far
+      - min_so_far
+      - range_so_far
+      - drop_from_max
+      - time_since_max
+  - name: temperature_trends
+    features:
+      - temp_change_30m
+      - temp_change_60m
+      - temp_slope_30m
+      - temp_slope_60m
+      - temp_acceleration_60m
+      - temp_volatility_60m
+      - rh_change_60m
+      - dew_point_change_60m
+      - dew_point_spread_change_60m
+      - pressure_change_60m
+      - pressure_change_180m
+  - name: forecast
+    features:
+      - forecast_max_temp
+      - forecast_min_temp
+      - forecast_range
+      - forecast_gap_from_max_so_far
+      - forecast_age_minutes
+      - forecast_lead_days
+  - name: wind
+    features:
+      - wind_ref_mean
+      - wind_ref_max
+      - wind_victoria_harbour_mean
+      - wind_victoria_harbour_max
+      - wind_offshore_highland_mean
+      - wind_offshore_highland_max
+      - wind_all_change_60m
+      - wind_kings_park_current
+  - name: time_state
+    features:
+      - minutes_since_midnight
+      - month_sin
+      - month_cos
+      - day_sin
+      - day_cos
+      - is_morning
+      - is_afternoon
+      - is_evening
+  - name: data_freshness
+    features:
+      - obs_data_age_minutes
+      - wind_data_age_minutes
+
+feature_tolerances:
+  temp_current: 0.05
+  max_so_far: 0.01
+  min_so_far: 0.05
+  forecast_max_temp: 0.0
+  forecast_min_temp: 0.0
+  wind_speed: 0.1
+  wind_all_change_60m: 0.2
+  time_since_max: 5.0
+  temp_change_30m: 0.05
+  temp_change_60m: 0.1
+  temp_slope_30m: 0.01
+  temp_slope_60m: 0.01
+  obs_data_age_minutes: 5.0
+  wind_data_age_minutes: 5.0
+
+temperature_cleaning:
+  valid_min_temp: 0
+  valid_max_temp: 40
+  apply_before_anchor: true
+
+forecast_merge:
+  method: "latest forecast where forecast_issue_datetime <= decision_time and target_date matches"
+
+classifier_usage:
+  reliable_window_start_hour: 15
+
+late_day_guardrail:
+  start_hour: 18
+  max_allowed_q50_above_max_so_far: 0.5
+
+data_quality_rules:
+  weather_obs:
+    range_checks:
+      temp_current: {min: -10, max: 50}
+      rh_current: {min: 0, max: 100}
+      pressure_current: {min: 970, max: 1050}
+    max_missing_pct: 10
+  wind_obs:
+    range_checks:
+      wind_speed: {min: 0, max: 150}
+    max_missing_pct: 20
+  forecast:
+    range_checks:
+      forecast_max_temp: {min: -10, max: 50}
+      forecast_min_temp: {min: -20, max: 40}
+    max_missing_pct: 5
+  max_data_age_minutes: 30
+
+inference_log_schema:
+  fields:
+    - model_name
+    - model_version
+    - decision_time
+    - run_timestamp
+    - source_mode
+    - source_systems
+    - source_timestamps
+    - source_available_times
+    - temp_current
+    - rh_current
+    - pressure_current
+    - dew_point_current
+    - dew_point_spread
+    - max_so_far
+    - min_so_far
+    - range_so_far
+    - drop_from_max
+    - time_since_max
+    - temp_change_30m
+    - temp_change_60m
+    - temp_slope_30m
+    - temp_slope_60m
+    - temp_acceleration_60m
+    - temp_volatility_60m
+    - rh_change_60m
+    - dew_point_change_60m
+    - dew_point_spread_change_60m
+    - pressure_change_60m
+    - pressure_change_180m
+    - forecast_min_temp
+    - forecast_max_temp
+    - forecast_range
+    - forecast_gap_from_max_so_far
+    - forecast_age_minutes
+    - forecast_lead_days
+    - wind_ref_mean
+    - wind_ref_max
+    - wind_victoria_harbour_mean
+    - wind_victoria_harbour_max
+    - wind_offshore_highland_mean
+    - wind_offshore_highland_max
+    - wind_all_change_60m
+    - wind_kings_park_current
+    - minutes_since_midnight
+    - month_sin
+    - month_cos
+    - day_sin
+    - day_cos
+    - is_morning
+    - is_afternoon
+    - is_evening
+    - obs_data_age_minutes
+    - wind_data_age_minutes
+    - upside_q10
+    - upside_q25
+    - upside_q50
+    - upside_q75
+    - upside_q90
+    - pred_tmax_q10
+    - pred_tmax_q25
+    - pred_tmax_q50
+    - pred_tmax_q75
+    - pred_tmax_q90
+    - zero_prob
+    - classifier_reliable_window
+    - late_day_unreasonable_upside_flag
+    - any_source_missing_flag
+    - wind_missing_flag
+    - forecast_missing_flag
+    - temp_anomaly_flag
+    - temp_spike_flag
+    - feature_parity_status
+
+guardrails:
+  - name: prediction_formula_check
+    description: "pred_tmax_qXX must equal max_so_far + upside_qXX"
+  - name: late_day_unreasonable_upside
+    start_hour: 18
+    condition: "pred_tmax_q50 > max_so_far + 0.5"
+  - name: classifier_reliable_window
+    start_hour: 15
+    description: "Do not treat zero_prob as actionable when hour >= 18"
+
+stop_conditions:
+  - feature_parity_pass_rate_below_threshold
+  - temp_current_missing_or_anomalous
+  - wind_all_change_30m_ago_missing
+  - source_data_stale
+  - feature_outside_allowed_range
+  - prediction_formula_check_fails
+  - guardrail_violation
+  - raw_data_spike

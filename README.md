@@ -66,7 +66,8 @@ The **trading‑related modules** are separated as an optional **research, paper
 - **Model C (Nowcast)** → Model B + 37 spatial rainfall nowcast features
 - **Model D / E** → Enhanced minute-level variants
 - **Model G (Gap+Max)** → forecast-gap + max_so_far based intraday model
-- **Model 2A (Core+Wind)** → Baseline + forecast + wind station data + pressure + dew point (45 features, OOT MAE=0.222°C, PR-AUC=0.992)
+- **Model 2A (Core+Wind)** → Baseline + forecast + wind station data + pressure + dew point (45 features, OOT MAE=0.306°C, PR-AUC=0.987)
+- **Model 2A v2** → Same as 2A but with `wind_offshore_highland` replacing `wind_highland` (merged offshore+highland group); performance-neutral update (OOT MAE=0.309°C, PR-AUC=0.987)
 - **Empirical baseline fallback** (lookup tables) for quick reference
 - Calibration & probability mapping → bucket probabilities
 - **Bayesian fusion** between prior (long‑horizon) and posterior (intraday)
@@ -414,6 +415,10 @@ python -m execution.auto_runner --list           # list enabled strategies
 
 ✅ Model 2A (Core+Wind) — 45 features incl. wind station data, pressure, dew point; OOT MAE=0.306°C, cov80=88.7%
 
+✅ Model 2A v2 — offshore_highland wind group merge; OOT MAE=0.309°C, cov80=89.0% (performance-neutral)
+
+✅ Model 2A v2 interval calibration — 15-18 bucket calibrated to 82% cov80; calibration factors saved for inference integration
+
 ✅ Real-Time Inference Parity Framework — generic production ML parity framework separating (A) generic framework from (B) model-specific specs
 
 ## Roadmap
@@ -507,6 +512,8 @@ Weather_Bot_Qwen/
 │   ├── train_minute_model_b.py   # Model B (+rain hist)
 │   ├── train_minute_model_c.py   # Model C (+nowcast)
 │   ├── train_model_2a.py         # Model 2A (+wind + forecast)
+│   ├── train_model_2a_v2.py      # Model 2A v2 (offshore_highland wind)
+│   ├── fix_model_2a_v2.py        # Model 2A v2 interval calibration & assessment
 ├── execution/              # strategy runner, Kelly, slippage, rebalancer
 │   ├── strategy_account.py       # StrategyAccount dataclass + persistence
 │   ├── strategy_runner.py        # cycle execution dispatch

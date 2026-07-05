@@ -27,7 +27,7 @@ from features.model_2a_feature_builder import build_model_2a_features
 logger = logging.getLogger(__name__)
 
 HKT = timedelta(hours=8)
-MODEL_DIR = Path("models/intraday_minute_ml_model_2a")
+MODEL_DIR = Path("models/intraday_minute_ml_model_2a_v2")
 
 
 def run_model_2a_inference(

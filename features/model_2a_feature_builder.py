@@ -153,8 +153,8 @@ def build_model_2a_features(
     wind_ref_max = _wind_group_stat(wind_10min, "ref", "max")
     wind_vh_mean = _wind_group_stat(wind_10min, "victoria_harbour", "mean")
     wind_vh_max = _wind_group_stat(wind_10min, "victoria_harbour", "max")
-    wind_highland_mean = _wind_group_stat(wind_10min, "highland", "mean")
-    wind_highland_max = _wind_group_stat(wind_10min, "highland", "max")
+    wind_offshore_highland_mean = _wind_group_stat(wind_10min, "offshore_highland", "mean")
+    wind_offshore_highland_max = _wind_group_stat(wind_10min, "offshore_highland", "max")
     wind_kings_park_current = _wind_station_value(wind_10min, "京士柏")
 
     wind_all_mean_now = _wind_group_stat(wind_10min, None, "mean")
@@ -217,8 +217,8 @@ def build_model_2a_features(
         "wind_ref_max": wind_ref_max,
         "wind_victoria_harbour_mean": wind_vh_mean,
         "wind_victoria_harbour_max": wind_vh_max,
-        "wind_highland_mean": wind_highland_mean,
-        "wind_highland_max": wind_highland_max,
+        "wind_offshore_highland_mean": wind_offshore_highland_mean,
+        "wind_offshore_highland_max": wind_offshore_highland_max,
         "wind_all_change_60m": wind_all_change_60m,
         "wind_kings_park_current": wind_kings_park_current,
         "minutes_since_midnight": mins_midnight,

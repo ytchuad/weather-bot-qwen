@@ -42,9 +42,8 @@ ACTIVE_END_HOUR = 23
 
 STATION_GROUP_MAP = {
     "參考": "ref",
-    "離岸": "offshore",
-    "高山": "highland",
-    "未知": "victoria_harbour",
+    "離岸及高地": "offshore_highland",
+    "維多利亞港": "victoria_harbour",
 }
 
 # Fix 5: Explicit Victoria Harbour stations
@@ -115,6 +114,7 @@ def build_wind_features():
     for f in tqdm(all_files, desc="Wind"):
         day = pd.read_parquet(f)
         day['group'] = day['station_type'].map(STATION_GROUP_MAP)
+        day = day.dropna(subset=['group'])
 
         # Fix 5: Override Victoria Harbour stations explicitly + diagnostics
         if not _diag_printed:
@@ -321,7 +321,7 @@ def compute_wind_trends(df):
     def _w(g):
         g = g.copy()
         # Fix 3: wind_{prefix}_change_60m uses mean column, wind_{prefix}_max_60m uses max column
-        for prefix in ['ref', 'offshore', 'highland', 'victoria_harbour', 'all']:
+        for prefix in ['ref', 'offshore_highland', 'victoria_harbour', 'all']:
             mean_col = f'wind_{prefix}_mean'
             max_col = f'wind_{prefix}_max'
             if mean_col in g.columns:
@@ -572,10 +572,8 @@ def main():
         'wind_victoria_harbour_mean', 'wind_victoria_harbour_max',
         'wind_victoria_harbour_spread', 'wind_victoria_harbour_station_count',
         'wind_victoria_harbour_change_60m', 'wind_victoria_harbour_max_60m',
-        'wind_offshore_mean', 'wind_offshore_max', 'wind_offshore_spread', 'wind_offshore_station_count',
-        'wind_offshore_change_60m', 'wind_offshore_max_60m',
-        'wind_highland_mean', 'wind_highland_max', 'wind_highland_spread', 'wind_highland_station_count',
-        'wind_highland_change_60m', 'wind_highland_max_60m',
+        'wind_offshore_highland_mean', 'wind_offshore_highland_max', 'wind_offshore_highland_spread', 'wind_offshore_highland_station_count',
+        'wind_offshore_highland_change_60m', 'wind_offshore_highland_max_60m',
         'wind_all_mean', 'wind_all_max', 'wind_all_spread', 'wind_all_station_count',
         'wind_all_change_60m', 'wind_all_max_60m',
         'wind_kings_park_current', 'wind_kai_tak_current',

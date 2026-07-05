@@ -222,6 +222,8 @@ def predict_intraday_all(
         wind_victoria_harbour_max=wind_kw.get("wind_victoria_harbour_max", 0.0),
         wind_highland_mean=wind_kw.get("wind_highland_mean", 0.0),
         wind_highland_max=wind_kw.get("wind_highland_max", 0.0),
+        wind_offshore_highland_mean=wind_kw.get("wind_offshore_highland_mean", 0.0),
+        wind_offshore_highland_max=wind_kw.get("wind_offshore_highland_max", 0.0),
         wind_all_change_60m=wind_kw.get("wind_all_change_60m", 0.0),
         wind_kings_park_current=wind_kw.get("wind_kings_park_current", 0.0),
         forecast_age_minutes=forecast_age_minutes,

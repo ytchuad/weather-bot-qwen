@@ -642,43 +642,91 @@ def compute_pressure_kwargs() -> dict:
 # ── wind live (i-Lens DG_WIND) ─────────────────────────────────────────
 
 WIND_INSTANT_URL = "https://i-lens.hk/hkweather/instant_chart.php?chart_type=DG_WIND"
-_WIND_STATION_GROUP_MAP = {
-    "昂坪": "highland", "大老山": "highland", "流浮山": "highland", "打鼓嶺": "highland",
-    "長洲": "offshore", "長洲泳灘": "offshore", "青洲": "offshore", "南丫島": "offshore",
-    "坪洲": "offshore", "沙洲": "offshore", "塔門東": "offshore", "橫瀾島": "offshore",
-    "京士柏": "ref", "香港國際機場": "ref", "西貢": "ref", "沙田": "ref",
-    "青衣油庫": "ref", "北角": "ref", "中環碼頭": "ref", "啟德": "ref", "九龍天星碼頭": "ref",
+
+# Group mapping from chart title keywords to group names
+_WIND_TITLE_GROUP_MAP = {
+    "參考": "ref",
+    "維多利亞港": "victoria_harbour",
+    "離岸及高地": "offshore_highland",
+    "離岸": "offshore_highland",
+    "高山": "offshore_highland",
 }
-_WIND_VICTORIA_HARBOUR_STATIONS = {"京士柏", "啟德", "九龍天星碼頭"}
-_WIND_GROUP_GROUPS = ["ref", "offshore", "highland", "victoria_harbour"]
+
+_WIND_GROUP_GROUPS = ["ref", "offshore_highland", "victoria_harbour"]
 
 
 def _parse_wind_from_html(html: str) -> pd.DataFrame:
-    """Parse i-Lens wind HTML into DataFrame with timestamp, station_type, station, wind_speed."""
+    """Parse i-Lens wind HTML into DataFrame with timestamp, station_group, station, wind_speed.
+    
+    Extracts each Highcharts.chart block, determines group from chart title,
+    and parses all series within that block.
+    """
     import re
     records = []
-    for m in re.finditer(
-        r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\]\s*(?:\}\s*[,|\]])",
-        html, re.DOTALL
-    ):
-        station = m.group(1)
-        data_part = m.group(2)
-        station_type = _WIND_STATION_GROUP_MAP.get(station, "ref")
-        pts = re.findall(
-            r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)\s*,\s*([0-9.]+)",
-            data_part
-        )
-        for y_str, mon_str, d_str, h_str, min_str, val_str in pts:
-            try:
-                ts = datetime(int(y_str), int(mon_str) + 1, int(d_str), int(h_str), int(min_str))
-                records.append({
-                    "timestamp": ts,
-                    "station_type": station_type,
-                    "station": station,
-                    "wind_speed": float(val_str),
-                })
-            except ValueError:
-                continue
+    
+    # Find each Highcharts.chart('xxx', {...}); block
+    for chart_m in re.finditer(r"Highcharts\.chart\([^)]+?,\s*\{", html):
+        start = chart_m.end() - 1  # '{' position
+        brace_count = 0
+        i = start
+        while i < len(html):
+            ch = html[i]
+            if ch == '{':
+                brace_count += 1
+            elif ch == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    # Found the closing '});'
+                    # Look for ');' after this }
+                    end = html.find(');', i)
+                    if end > 0:
+                        block = html[start:end]
+                    else:
+                        block = html[start:i+100]
+                    break
+            i += 1
+        else:
+            continue
+        
+        # Extract title to determine group
+        title_m = re.search(r"text\s*:\s*'([^']+)'", block)
+        if not title_m:
+            continue
+        title = title_m.group(1)
+        
+        # Determine group from title
+        group = None
+        for keyword, grp in _WIND_TITLE_GROUP_MAP.items():
+            if keyword in title:
+                group = grp
+                break
+        
+        if group is None:
+            continue  # Skip unrecognized chart types
+        
+        # Extract series within this block (simpler approach: find all series in block)
+        for m in re.finditer(
+            r"name\s*:\s*'([^']+)'\s*,\s*data\s*:\s*\[(.*?)\]\s*(?:\}\s*[,|\]])",
+            block, re.DOTALL
+        ):
+            station = m.group(1)
+            data_part = m.group(2)
+            pts = re.findall(
+                r"Date\.UTC\((\d+),(\d+),(\d+),(\d+),(\d+)\)\s*,\s*([0-9.]+)",
+                data_part
+            )
+            for y_str, mon_str, d_str, h_str, min_str, val_str in pts:
+                try:
+                    ts = datetime(int(y_str), int(mon_str) + 1, int(d_str), int(h_str), int(min_str))
+                    records.append({
+                        "timestamp": ts,
+                        "station_type": group,  # Using group as station_type for compatibility
+                        "station": station,
+                        "wind_speed": float(val_str),
+                    })
+                except ValueError:
+                    continue
+    
     return pd.DataFrame(records)
 
 
@@ -696,7 +744,6 @@ def fetch_wind_live() -> pd.DataFrame:
         if df.empty:
             return df
         df["group"] = df["station_type"]
-        df.loc[df["station"].isin(_WIND_VICTORIA_HARBOUR_STATIONS), "group"] = "victoria_harbour"
         return df
     except Exception as e:
         logger.warning("fetch_wind_live failed: %s", e)
@@ -713,7 +760,7 @@ def compute_wind_kwargs() -> dict:
         return {
             "wind_ref_mean": 0.0, "wind_ref_max": 0.0,
             "wind_victoria_harbour_mean": 0.0, "wind_victoria_harbour_max": 0.0,
-            "wind_highland_mean": 0.0, "wind_highland_max": 0.0,
+            "wind_offshore_highland_mean": 0.0, "wind_offshore_highland_max": 0.0,
             "wind_all_change_60m": 0.0, "wind_kings_park_current": 0.0,
         }
     result = {}

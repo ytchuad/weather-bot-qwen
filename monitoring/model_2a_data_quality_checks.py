@@ -108,15 +108,12 @@ def _run_model_2a_specific_checks(
     if wind is not None and "station_group" in wind.columns:
         coverage = wind["station_group"].value_counts().to_dict()
         ref_present = "ref" in coverage or "urban" in coverage
-        offshore_present = "offshore" in coverage
-        highland_present = "highland" in coverage
+        offshore_highland_present = "offshore_highland" in coverage
         missing_groups = []
         if not ref_present:
             missing_groups.append("ref/urban")
-        if not offshore_present:
-            missing_groups.append("offshore")
-        if not highland_present:
-            missing_groups.append("highland")
+        if not offshore_highland_present:
+            missing_groups.append("offshore_highland")
         specific_checks.append({
             "check": "wind_station_coverage",
             "status": "pass" if not missing_groups else "warn",

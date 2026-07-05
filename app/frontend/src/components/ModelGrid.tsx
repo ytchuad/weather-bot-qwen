@@ -65,7 +65,7 @@ function SortableCard({ id, pred, label, active, isVisible, tempRange, onClick, 
 }
 
 export const LABEL_MAP: Record<string, string> = {
-  "9d": "9-Day XGBoost", aws: "AWS High-Freq", baseline: "Baseline", rain_nowcast: "Rain Nowcast", model_a: "Model A", model_b: "Model B", model_c: "Model C", model_g: "Model G", model_2a: "Model 2A", model_2a1: "Model 2A1",
+  "9d": "9-Day XGBoost", aws: "AWS High-Freq", baseline: "Baseline", rain_nowcast: "Rain Nowcast", model_a: "Model A", model_b: "Model B", model_c: "Model C", model_g: "Model G", model_2a: "Model 2A", model_2a1: "Model 2A1", model_2a_v2: "Model 2A v2",
 }
 
 export default function ModelGrid({ models, activeKey, visibleKeys, tempRange, onSelect, onReorder, onToggleVisible }: ModelGridProps) {

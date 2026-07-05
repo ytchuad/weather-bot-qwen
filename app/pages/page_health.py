@@ -53,6 +53,7 @@ def _check_model_files() -> list[dict]:
         "model_e":       ("intraday_minute_ml_model_e_morning_tmin", "feature_list.json"),
         "model_g":       ("intraday_minute_ml_model_g",           "feature_list.json"),
         "model_2a":      ("intraday_minute_ml_model_2a",          "feature_list.json"),
+        "model_2a_v2":   ("intraday_minute_ml_model_2a_v2",      "feature_list.json"),
     }
     results = []
     for mk in MODEL_KEYS:

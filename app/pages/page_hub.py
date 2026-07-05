@@ -22,7 +22,7 @@ from ..state import AppState
 
 _MODELS_KEY = "hub_selected_models"
 _SELECTED_KEY = "hub_selected_model"
-_DEFAULT_MODELS = ["baseline", "rain_nowcast", "model_a", "model_2a"]
+_DEFAULT_MODELS = ["baseline", "rain_nowcast", "model_a", "model_2a", "model_2a_v2"]
 
 
 def _init_models(all_results: dict):
