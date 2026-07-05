@@ -1,6 +1,6 @@
 # Simulation Summary
 
-- **Backtest date**: 2026-07-05 17:43
+- **Backtest date**: 2026-07-05 17:57
 - **Dates analysed**: 2026-07-01, 2026-07-02, 2026-07-03, 2026-07-05
 - **Strategy**: Ensemble A/B/C (equal-weight)
 

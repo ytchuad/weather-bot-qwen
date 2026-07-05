@@ -663,6 +663,7 @@ def start_scheduler():
     try:
         from app.services.market_depth_service import get_global_depth_cache
         get_global_depth_cache().start()
+        time.sleep(10)  # wait for first refresh cycle to complete
     except Exception as e:
         logger.warning("Failed to start depth cache: %s", e)
 
