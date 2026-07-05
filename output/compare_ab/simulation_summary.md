@@ -7,27 +7,27 @@
 ## Capital & Return
 
 - **Capital start**: $1000.00
-- **Capital end**: $1452.30
-- **Total return**: 45.23%
-- **Sharpe ratio** (daily, annualised): 14.3676
-- **Max drawdown**: 10.65%
+- **Capital end**: $1527.02
+- **Total return**: 52.70%
+- **Sharpe ratio** (daily, annualised): 14.4098
+- **Max drawdown**: 10.54%
 
 ## Trades
 
-- **Total trades**: 141
-- **Total fees**: $83.85
-- **Total slippage**: $18.58
-- **YES buy trades**: 32
-- **NO buy trades**: 35
+- **Total trades**: 197
+- **Total fees**: $105.15
+- **Total slippage**: $23.50
+- **YES buy trades**: 47
+- **NO buy trades**: 46
 
 ## Daily Performance
 
 | Date | PnL | Return |
 |------|-----|--------|
 | 2026-07-01 | $+0.00 | +0.00% |
-| 2026-07-02 | $-2.98 | -0.30% |
-| 2026-07-03 | $+128.98 | +12.94% |
-| 2026-07-05 | $+326.30 | +28.98% |
+| 2026-07-02 | $+5.02 | +0.50% |
+| 2026-07-03 | $+136.00 | +13.53% |
+| 2026-07-05 | $+386.00 | +33.83% |
 
 ## Risk-Reduction Mode Summary
 
@@ -41,14 +41,13 @@
 
 ## Breakout Handling Summary
 
-- Deterministic events triggered: 2
+- Deterministic events triggered: 3
 
 ## Skipped / Rejected Trades by Reason
 
 | Reason | Count |
 |--------|-------|
-| SKIP_COOLDOWN | 416 |
-| SKIP_MIN_SHARES | 80 |
+| SKIP_MIN_SHARES | 104 |
 
 ## Parameters
 

@@ -466,4 +466,12 @@ if __name__ == "__main__":
         output_dir="output/compare_d",
     ))
 
+    # 6. A+B: 5-min dedup + cooldown=0
+    results.append(run_variant(
+        "A+B", exclude=args.exclude,
+        dedup_fn=dedup_5min,
+        params=EnsembleParams(capital=1000.0, min_rebalance_interval_minutes=0.0),
+        output_dir="output/compare_ab",
+    ))
+
     print_comparison(results)
