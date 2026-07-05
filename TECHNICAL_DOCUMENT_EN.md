@@ -1005,6 +1005,158 @@ The 15-18 bucket is successfully calibrated to the target range. The 18-24 bucke
 
 Calibration factors are saved in `reports/model_2a_v2_interval_calibration_factors.json` and have not yet been wired into the inference code.
 
+### 4.7.7 Model 2B: Observed-Rainfall Extension (`models/train_model_2b.py`)
+
+Model 2B is the observed-rainfall extension of Model 2A v2. It retains all 45 Model 2A v2 features and adds 9 observed-rainfall features, merged with point-in-time availability rules.
+
+#### 4.7.7.1 Feature Store (`data/build_model_2b_feature_store.py`)
+
+Builds on the Model 2A feature store by backward-merging HKO 15-minute rainfall data via `pd.merge_asof`:
+
+**Rainfall source**: `data/hko_rainfall_15min.parquet` (King's Park station, from 2023-06-01 onward)
+
+**Rainfall availability rule**: `rain_available_time = ceil_dt_10min(rain_timestamp) + 8min` (same rule as weather data). A rainfall observation at 06:15 becomes available for decision_time >= 06:28.
+
+**Rainfall data gap tolerance**: 45 minutes. If `decision_time - rain_timestamp > 45` or no match, `rain_data_gap_flag=1`.
+
+**Pre-2023-06-01 handling**: `rainfall_*=0`, `has_recent_rainfall_obs=0`, `rain_data_gap_flag=1`, `rainfall_data_age_minutes=9999`.
+
+**Rainfall features computed from raw 15-min intervals:**
+
+| Feature | Computation |
+|---------|------------|
+| `rainfall_15m` | Interval value (accumulated rainfall diff) |
+| `rainfall_30m` | Rolling 2-period (30 min) sum |
+| `rainfall_60m` | Rolling 4-period (60 min) sum |
+| `rainfall_120m` | Rolling 8-period (120 min) sum |
+| `rainfall_all_since_midnight` | Raw accumulated value |
+| `rain_intensity_max_120m` | Max 15-min interval within 120 minutes |
+| `minutes_since_last_rain` | Minutes since last rainfall > 0 interval |
+
+**Derived rainfall features:**
+
+| Feature | Definition |
+|---------|-----------|
+| `has_recent_rainfall_obs` | 1 if `rainfall_60m > 0` or `rainfall_120m > 0` |
+| `rain_after_max_flag` | 1 if `has_recent_rainfall_obs == 1` and `drop_from_max >= 0.5` |
+| `post_peak_rain_flag` | 1 if above + `30 <= time_since_max <= 240` |
+| `morning_peak_rain_flag` | 1 if `post_peak_rain_flag == 1` and `9 <= hour <= 14` |
+| `heavy_recent_rain_flag` | 1 if `rainfall_60m >= 10` |
+| `rain_cooling_60m` | `rainfall_60m * max(-temp_change_60m, 0)` |
+| `rain_cooling_120m` | `rainfall_120m * max(-temp_change_60m, 0)` |
+| `rain_data_gap_flag` | 1 if no valid rainfall observation (within 45-min tolerance) |
+| `rainfall_data_age_minutes` | `decision_time - latest_valid_rain_timestamp` |
+
+**Output**: `data/model_2b_feature_store.parquet` (376,272 rows, 99 columns)
+
+#### 4.7.7.2 Training Configuration
+
+**Variants**:
+- **Variant 1 (full)**: All 376K rows of history (including pre-2023 with `rain_data_gap_flag=1`).
+- **Variant 2 (restricted)**: 120,744 rows where `target_date >= 2023-06-01`.
+
+**Hyperparameters**: Same as Model 2A v2 (`max_depth=6`, `num_leaves=31`, `lr=0.03`, `n_estimators=1500`, `min_data=500`, `reg_lambda=2.0`).
+
+**Feature list (54)**:
+- 45 Model 2A v2 base features (unchanged)
+- 9 rainfall features: `rainfall_60m`, `rainfall_120m`, `has_recent_rainfall_obs`, `rain_intensity_max_120m`, `rain_cooling_60m`, `rain_after_max_flag`, `post_peak_rain_flag`, `rain_data_gap_flag`, `rainfall_data_age_minutes`
+
+**Time split**:
+| Split | Period | Full variant | Restricted variant |
+|------|--------|-------------|-------------------|
+| Train | < 2024-06-11 | 296,136 rows | 40,608 rows |
+| Valid | 2024-06-11 to 2025-06-11 | 39,420 rows | 39,420 rows |
+| OOT | >= 2025-06-11 | 40,716 rows | 40,716 rows |
+
+#### 4.7.7.3 OOT Performance (40,716 rows, 377 dates)
+
+**Overall metrics (Model 2B full vs Model 2A v2):**
+
+| Metric | Model 2A v2 | Model 2B full | Δ |
+|--------|-------------|--------------|---|
+| ALL MAE | 0.3086 | **0.3087** | +0.0001 |
+| ALL bias | +0.0049 | **+0.0029** | -0.0020 |
+| ALL q50 breach rate | 0.2708 | **0.2686** | -0.0022 |
+| Classifier PR-AUC | 0.9873 | **0.9875** | +0.0002 |
+| Classifier F1 | 0.9342 | **0.9342** | — |
+
+**OOT metrics by hour bucket:**
+
+| Bucket | n | MAE_2Av2 | MAE_2B | bias_2Av2 | bias_2B | q50_br_2Av2 | q50_br_2B |
+|--------|---|----------|--------|-----------|---------|-------------|-----------|
+| 06-09 | 6,786 | 0.812 | 0.813 | +0.088 | +0.086 | 0.404 | 0.403 |
+| 09-12 | 6,786 | 0.643 | 0.644 | +0.079 | +0.077 | 0.406 | 0.405 |
+| 12-15 | 6,786 | 0.315 | 0.315 | -0.074 | -0.076 | 0.315 | 0.313 |
+| 15-18 | 6,786 | 0.045 | 0.045 | -0.037 | -0.038 | 0.069 | 0.068 |
+| 18-24 | 13,572 | 0.010 | 0.010 | -0.009 | -0.009 | 0.023 | 0.022 |
+| ALL | 40,716 | 0.309 | 0.309 | +0.005 | +0.003 | 0.271 | 0.269 |
+
+**OOT metrics by rain regime:**
+
+| Regime | n | MAE_2Av2 | MAE_2B | bias_2Av2 | bias_2B | q50_br_2Av2 | q50_br_2B |
+|--------|---|----------|--------|-----------|---------|-------------|-----------|
+| ALL | 40,716 | 0.3086 | **0.3087** | +0.0049 | +0.0029 | 0.2708 | 0.2686 |
+| no_rain | 38,482 | 0.3033 | **0.3033** | +0.0084 | +0.0064 | 0.2656 | 0.2635 |
+| recent_rain | 3,152 | 0.4078 | 0.4106 | -0.0820 | -0.0841 | 0.3614 | 0.3598 |
+| heavy_recent_rain | 354 | 0.5077 | 0.5167 | +0.0371 | +0.0358 | 0.3785 | 0.3785 |
+| post_peak_rain | 1,054 | 0.3945 | 0.3972 | -0.0571 | -0.0636 | 0.3729 | 0.3615 |
+| rain_after_max | 2,266 | 0.2346 | 0.2363 | -0.0527 | -0.0586 | 0.2824 | 0.2780 |
+
+**OOT metrics by rainy time bucket:**
+
+| Bucket_rain | n | MAE_2Av2 | MAE_2B | bias_2Av2 | bias_2B |
+|-------------|---|----------|--------|-----------|---------|
+| 06-09_rain | 616 | 0.9477 | 0.9648 | -0.0835 | -0.0884 |
+| 09-12_rain | 571 | 0.6863 | 0.6923 | -0.0061 | -0.0122 |
+| 12-15_rain | 621 | 0.2933 | **0.2886** | -0.1262 | -0.1302 |
+| 15-18_rain | 501 | 0.1564 | **0.1551** | -0.1515 | -0.1509 |
+
+#### 4.7.7.4 Residual Interval Calibration (Model 2B full)
+
+Empirical percentiles of residuals (`actual_remaining_upside - pred_q50`) computed on Model 2B full OOT predictions, broken down by rain regime:
+
+| Regime | n | p10 | p50 | p90 | mean | std |
+|--------|---|-----|-----|-----|------|-----|
+| no_rain | 38,482 | -0.593 | 0.000 | +0.568 | -0.006 | 0.577 |
+| rainfall_60m > 0 | 2,234 | -0.630 | 0.000 | +0.734 | +0.058 | 0.726 |
+| heavy_recent_rain | 354 | -0.967 | 0.000 | +0.605 | -0.036 | 0.831 |
+| post_peak_rain | 1,054 | -0.592 | 0.000 | +0.737 | +0.064 | 0.685 |
+| has_recent_rain | 3,152 | -0.573 | 0.000 | +0.809 | +0.084 | 0.746 |
+| 06-12_rain | 890 | -1.183 | -0.023 | +1.333 | +0.014 | 1.093 |
+
+Calibration residuals saved in `models/intraday_minute_ai_model_2b/calibration_residuals.json`.
+
+#### 4.7.7.5 Acceptance Check
+
+| Condition | Target | Actual | Result |
+|-----------|--------|--------|--------|
+| Rain regime MAE improvement | >= +0.05°C | -0.0028 | ❌ Not met |
+| Rain regime bias reduction | >= +0.05°C | -0.0021 | ❌ Not met |
+| Rain regime q50 breach improvement | >= +2pp | +0.16pp | ❌ Not met |
+| No-rain MAE degradation | <= +0.02°C | +0.0000 | ✅ Pass |
+
+#### 4.7.7.6 Conclusion: Diagnostic-Only Model
+
+Model 2B does **not** materially improve rainy-regime performance. The added observed-rainfall features fail to provide additional signal beyond what Model 2A v2 already captures from temperature, wind, and forecast features. Likely causes:
+
+1. **Rain events are sparse**: only 2.3% of rows have `has_recent_rainfall_obs=1`
+2. **Model 2A v2 implicitly captures rain**: rain-induced cooling is already reflected in `temp_change_60m`, `drop_from_max`, and `time_since_max`
+3. **Single-station limitation**: King's Park gauge may not represent rainfall across all wind groups (Offshore_Highland, Offshore_Lowland, Inland)
+
+**Classification**: Diagnostic-only. Not recommended for deployment to live inference. No Model 2A v2 artifacts are modified.
+
+#### 4.7.7.7 Artifacts
+
+| Path | Description |
+|------|-------------|
+| `data/model_2b_feature_store.parquet` | Feature store (376,272 rows × 99 cols) |
+| `models/intraday_minute_ai_model_2b/` | Full variant: 5 quantiles + 1 classifier + feature list + OOT predictions + calibration residuals |
+| `models/intraday_minute_ai_model_2b_restricted/` | Restricted variant: 5 quantiles + 1 classifier + feature list + OOT predictions |
+| `reports/model_2b_vs_2a_v2_oot_summary.csv` | 3-model OOT comparison (27 rows, 11 metrics) |
+| `reports/model_2b_rain_regime_breakdown.csv` | Rain regime breakdown |
+| `reports/model_2b_restricted_comparison.csv` | Restricted variant metrics |
+| `reports/model_2b_training_notes.md` | Training notes with full results |
+
 ---
 
 ## 4.8 Real-Time Inference Parity Framework

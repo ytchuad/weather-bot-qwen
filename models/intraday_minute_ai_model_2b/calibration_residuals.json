@@ -1,0 +1,68 @@
+{
+  "no_rain": {
+    "n_rows": 38482,
+    "n_dates": 377,
+    "residual_p10": -0.5926,
+    "residual_p50": 0.0,
+    "residual_p90": 0.5677,
+    "residual_mean": -0.0064,
+    "residual_std": 0.5772,
+    "suggested_cali_q10_offset": -0.5926,
+    "suggested_cali_q90_offset": 0.5677
+  },
+  "rainfall_60m_gt_0": {
+    "n_rows": 2234,
+    "n_dates": 89,
+    "residual_p10": -0.6298,
+    "residual_p50": 0.0,
+    "residual_p90": 0.7339,
+    "residual_mean": 0.0577,
+    "residual_std": 0.7258,
+    "suggested_cali_q10_offset": -0.6298,
+    "suggested_cali_q90_offset": 0.7339
+  },
+  "heavy_recent_rain": {
+    "n_rows": 354,
+    "n_dates": 34,
+    "residual_p10": -0.9673,
+    "residual_p50": 0.0,
+    "residual_p90": 0.6049,
+    "residual_mean": -0.0358,
+    "residual_std": 0.8312,
+    "suggested_cali_q10_offset": -0.9673,
+    "suggested_cali_q90_offset": 0.6049
+  },
+  "post_peak_rain": {
+    "n_rows": 1054,
+    "n_dates": 69,
+    "residual_p10": -0.5916,
+    "residual_p50": 0.0,
+    "residual_p90": 0.7365,
+    "residual_mean": 0.0636,
+    "residual_std": 0.6851,
+    "suggested_cali_q10_offset": -0.5916,
+    "suggested_cali_q90_offset": 0.7365
+  },
+  "has_recent_rain": {
+    "n_rows": 3152,
+    "n_dates": 91,
+    "residual_p10": -0.5732,
+    "residual_p50": 0.0,
+    "residual_p90": 0.8087,
+    "residual_mean": 0.0841,
+    "residual_std": 0.7464,
+    "suggested_cali_q10_offset": -0.5732,
+    "suggested_cali_q90_offset": 0.8087
+  },
+  "06-12_rain": {
+    "n_rows": 890,
+    "n_dates": 59,
+    "residual_p10": -1.1833,
+    "residual_p50": -0.023,
+    "residual_p90": 1.3334,
+    "residual_mean": 0.0139,
+    "residual_std": 1.0929,
+    "suggested_cali_q10_offset": -1.1833,
+    "suggested_cali_q90_offset": 1.3334
+  }
+}

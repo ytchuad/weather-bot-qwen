@@ -983,6 +983,158 @@ q90_adj = q50 + scale_upper * (q90 - q50)
 
 校準因子儲存於 `reports/model_2a_v2_interval_calibration_factors.json`，尚未接入 inference 程式碼。
 
+### 4.8 Model 2B：觀測降雨擴展 (`models/train_model_2b.py`)
+
+Model 2B 是 Model 2A v2 的觀測降雨擴展版本。它完整保留 Model 2A v2 的 45 個特徵，增加 9 個觀測降雨特徵，並以 point-in-time 可用性規則合併。
+
+#### 4.8.1 特徵儲存庫 (`data/build_model_2b_feature_store.py`)
+
+在 Model 2A 特徵儲存庫基礎上，以 `pd.merge_asof` 向後合併 HKO 15 分鐘降雨數據：
+
+**降雨資料來源**：`data/hko_rainfall_15min.parquet`（King's Park 站，2023-06-01 起）
+
+**降雨可用性規則**：`rain_available_time = ceil_dt_10min(rain_timestamp) + 8min`（與氣象資料相同規則）。降雨觀測在 06:15 可用於決策時間 ≥ 06:28。
+
+**降雨數據間隙容差**：45 分鐘。若 `decision_time - rain_timestamp > 45` 或無匹配資料，則 `rain_data_gap_flag=1`。
+
+**2023-06-01 前行處理**：`rainfall_*=0`、`has_recent_rainfall_obs=0`、`rain_data_gap_flag=1`、`rainfall_data_age_minutes=9999`。
+
+**從原始 15 分鐘間隔計算的降雨特徵**：
+
+| 特徵 | 計算方式 |
+|------|---------|
+| `rainfall_15m` | 間隔值（累積雨量差分） |
+| `rainfall_30m` | 滾動 2 期（30 分鐘）加總 |
+| `rainfall_60m` | 滾動 4 期（60 分鐘）加總 |
+| `rainfall_120m` | 滾動 8 期（120 分鐘）加總 |
+| `rainfall_all_since_midnight` | 原始累積值 |
+| `rain_intensity_max_120m` | 120 分鐘內最大 15 分鐘間隔值 |
+| `minutes_since_last_rain` | 距上次降雨 > 0 間隔的分鐘數 |
+
+**衍生降雨特徵**：
+
+| 特徵 | 定義 |
+|------|------|
+| `has_recent_rainfall_obs` | 1 若 `rainfall_60m > 0` 或 `rainfall_120m > 0` |
+| `rain_after_max_flag` | 1 若 `has_recent_rainfall_obs == 1` 且 `drop_from_max >= 0.5` |
+| `post_peak_rain_flag` | 1 若上述 + `30 <= time_since_max <= 240` |
+| `morning_peak_rain_flag` | 1 若 `post_peak_rain_flag == 1` 且 `9 <= hour <= 14` |
+| `heavy_recent_rain_flag` | 1 若 `rainfall_60m >= 10` |
+| `rain_cooling_60m` | `rainfall_60m * max(-temp_change_60m, 0)` |
+| `rain_cooling_120m` | `rainfall_120m * max(-temp_change_60m, 0)` |
+| `rain_data_gap_flag` | 1 若無有效降雨觀測（45 分鐘容差內） |
+| `rainfall_data_age_minutes` | `decision_time - latest_valid_rain_timestamp` |
+
+**輸出**：`data/model_2b_feature_store.parquet`（376,272 行，99 欄）
+
+#### 4.8.2 訓練設定
+
+**變體**：
+- **Variant 1（完整）**：使用全部 376K 行歷史資料（含 2023 年前 `rain_data_gap_flag=1` 資料）。
+- **Variant 2（受限）**：僅使用 `target_date >= 2023-06-01` 的 120,744 行。
+
+**超參數**：與 Model 2A v2 相同（`max_depth=6`、`num_leaves=31`、`lr=0.03`、`n_estimators=1500`、`min_data=500`、`reg_lambda=2.0`）。
+
+**特徵清單（54 個）**：
+- 45 個 Model 2A v2 基礎特徵（不變）
+- 9 個降雨特徵：`rainfall_60m`、`rainfall_120m`、`has_recent_rainfall_obs`、`rain_intensity_max_120m`、`rain_cooling_60m`、`rain_after_max_flag`、`post_peak_rain_flag`、`rain_data_gap_flag`、`rainfall_data_age_minutes`
+
+**時間分割**：
+| 分割 | 期間 | 完整變體 | 受限變體 |
+|------|------|---------|---------|
+| 訓練 | < 2024-06-11 | 296,136 行 | 40,608 行 |
+| 驗證 | 2024-06-11 至 2025-06-11 | 39,420 行 | 39,420 行 |
+| OOT | ≥ 2025-06-11 | 40,716 行 | 40,716 行 |
+
+#### 4.8.3 OOT 表現（40,716 行，377 個日期）
+
+**整體指標（Model 2B 完整 vs Model 2A v2）：**
+
+| 指標 | Model 2A v2 | Model 2B 完整 | Δ |
+|------|-------------|--------------|---|
+| ALL MAE | 0.3086 | **0.3087** | +0.0001 |
+| ALL 偏差 | +0.0049 | **+0.0029** | -0.0020 |
+| ALL q50 突破率 | 0.2708 | **0.2686** | -0.0022 |
+| 分類器 PR-AUC | 0.9873 | **0.9875** | +0.0002 |
+| 分類器 F1 | 0.9342 | **0.9342** | — |
+
+**按小時區間 OOT 指標：**
+
+| 時段 | n | MAE_2Av2 | MAE_2B | bias_2Av2 | bias_2B | q50_br_2Av2 | q50_br_2B |
+|------|---|----------|--------|-----------|---------|-------------|-----------|
+| 06-09 | 6,786 | 0.812 | 0.813 | +0.088 | +0.086 | 0.404 | 0.403 |
+| 09-12 | 6,786 | 0.643 | 0.644 | +0.079 | +0.077 | 0.406 | 0.405 |
+| 12-15 | 6,786 | 0.315 | 0.315 | -0.074 | -0.076 | 0.315 | 0.313 |
+| 15-18 | 6,786 | 0.045 | 0.045 | -0.037 | -0.038 | 0.069 | 0.068 |
+| 18-24 | 13,572 | 0.010 | 0.010 | -0.009 | -0.009 | 0.023 | 0.022 |
+| ALL | 40,716 | 0.309 | 0.309 | +0.005 | +0.003 | 0.271 | 0.269 |
+
+**按降雨情境 OOT 指標：**
+
+| 情境 | n | MAE_2Av2 | MAE_2B | bias_2Av2 | bias_2B | q50_br_2Av2 | q50_br_2B |
+|------|---|----------|--------|-----------|---------|-------------|-----------|
+| ALL | 40,716 | 0.3086 | **0.3087** | +0.0049 | +0.0029 | 0.2708 | 0.2686 |
+| no_rain | 38,482 | 0.3033 | **0.3033** | +0.0084 | +0.0064 | 0.2656 | 0.2635 |
+| recent_rain | 3,152 | 0.4078 | 0.4106 | -0.0820 | -0.0841 | 0.3614 | 0.3598 |
+| heavy_recent_rain | 354 | 0.5077 | 0.5167 | +0.0371 | +0.0358 | 0.3785 | 0.3785 |
+| post_peak_rain | 1,054 | 0.3945 | 0.3972 | -0.0571 | -0.0636 | 0.3729 | 0.3615 |
+| rain_after_max | 2,266 | 0.2346 | 0.2363 | -0.0527 | -0.0586 | 0.2824 | 0.2780 |
+
+**降雨時段細分 OOT 指標：**
+
+| 時段_雨 | n | MAE_2Av2 | MAE_2B | bias_2Av2 | bias_2B |
+|---------|---|----------|--------|-----------|---------|
+| 06-09_雨 | 616 | 0.9477 | 0.9648 | -0.0835 | -0.0884 |
+| 09-12_雨 | 571 | 0.6863 | 0.6923 | -0.0061 | -0.0122 |
+| 12-15_雨 | 621 | 0.2933 | **0.2886** | -0.1262 | -0.1302 |
+| 15-18_雨 | 501 | 0.1564 | **0.1551** | -0.1515 | -0.1509 |
+
+#### 4.8.4 殘差區間校準（Model 2B 完整）
+
+對 Model 2B 完整 OOT 預測計算殘差（`actual_remaining_upside - pred_q50`）的經驗百分位數，按降雨情境區分：
+
+| 情境 | n | p10 | p50 | p90 | mean | std |
+|------|---|-----|-----|-----|------|-----|
+| no_rain | 38,482 | -0.593 | 0.000 | +0.568 | -0.006 | 0.577 |
+| rainfall_60m > 0 | 2,234 | -0.630 | 0.000 | +0.734 | +0.058 | 0.726 |
+| heavy_recent_rain | 354 | -0.967 | 0.000 | +0.605 | -0.036 | 0.831 |
+| post_peak_rain | 1,054 | -0.592 | 0.000 | +0.737 | +0.064 | 0.685 |
+| has_recent_rain | 3,152 | -0.573 | 0.000 | +0.809 | +0.084 | 0.746 |
+| 06-12_雨 | 890 | -1.183 | -0.023 | +1.333 | +0.014 | 1.093 |
+
+校準殘差儲存於 `models/intraday_minute_ai_model_2b/calibration_residuals.json`。
+
+#### 4.8.5 驗收條件評估
+
+| 條件 | 目標 | 實際 | 結果 |
+|------|------|------|------|
+| 雨情境 MAE 改善 | ≥ +0.05°C | -0.0028 | ❌ 未達成 |
+| 雨情境偏差減少 | ≥ +0.05°C | -0.0021 | ❌ 未達成 |
+| 雨情境 q50 突破率改善 | ≥ +2pp | +0.16pp | ❌ 未達成 |
+| 無雨情境 MAE 退化 | ≤ +0.02°C | +0.0000 | ✅ 通過 |
+
+#### 4.8.6 結論：診斷專用模型
+
+Model 2B **不會**顯著改善降雨情境表現。新增的觀測降雨特徵未能在 Model 2A v2 既有的溫度、風力、預報特徵之外提供額外信號。可能原因：
+
+1. **降雨事件稀疏**：僅 2.3% 的行有 `has_recent_rainfall_obs=1`
+2. **Model 2A v2 已隱含捕捉**：降雨引起的降溫已反映在 `temp_change_60m`、`drop_from_max` 及 `time_since_max` 等特徵中
+3. **單站限制**：King's Park 單站雨量計可能無法代表所有風力群組的降水狀況
+
+**分類**：診斷專用。不建議部署至正式推論環境。不修改任何 Model 2A v2 的產出物。
+
+#### 4.8.7 產出物
+
+| 路徑 | 說明 |
+|------|------|
+| `data/model_2b_feature_store.parquet` | 特徵儲存庫（376,272 行 × 99 欄） |
+| `models/intraday_minute_ai_model_2b/` | 完整變體：5 分位數 + 1 分類器 + 特徵清單 + OOT 預測 + 校準殘差 |
+| `models/intraday_minute_ai_model_2b_restricted/` | 受限變體：5 分位數 + 1 分類器 + 特徵清單 + OOT 預測 |
+| `reports/model_2b_vs_2a_v2_oot_summary.csv` | 三模型 OOT 比較（27 筆，11 指標） |
+| `reports/model_2b_rain_regime_breakdown.csv` | 降雨情境細分 |
+| `reports/model_2b_restricted_comparison.csv` | 受限變體指標 |
+| `reports/model_2b_training_notes.md` | 訓練筆記與完整結果 |
+
 ---
 
 ## 5. 推論與預測邏輯 (`models/intraday_inference.py`)
