@@ -534,6 +534,10 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
         _m2a_f = _m2a_raw.get("_features")
         if _m2a_f:
             context_json["model_2a_features"] = _m2a_f
+    # Store raw model input features for future inference replay
+    _meta = results.pop("_feature_metadata", {})
+    if _meta:
+        context_json["feature_metadata"] = _meta
 
     return dict(
         capital=acct.capital,

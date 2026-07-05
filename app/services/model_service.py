@@ -435,6 +435,13 @@ def run_all_models(
                         ip["degraded"] = True
                     output[mk] = ip
 
+    output["_feature_metadata"] = {
+        "pressure_kwargs": pressure_kw,
+        "wind_kwargs": wind_kw,
+        "nowcast_features": nc_features,
+        "forecast_age_minutes": forecast_age_minutes,
+        "forecast_lead_days": forecast_lead_days,
+    }
     return output
 
 
