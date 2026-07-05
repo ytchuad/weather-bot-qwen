@@ -24,11 +24,14 @@ class BacktestRunner:
         self.strategy = strategy
         self.output_dir = Path(output_dir)
 
-    def load_snapshots(self, dates: list[str] | None = None):
+    def load_snapshots(self, dates: list[str] | None = None, exclude: list[str] | None = None):
         """Read CSV snapshots, parse context_json, return per-date sorted list."""
+        if exclude is None:
+            exclude = []
         csv_files = sorted(DATA_DIR.glob("*.csv"))
         if dates:
             csv_files = [f for f in csv_files if f.stem in dates]
+        csv_files = [f for f in csv_files if f.stem not in exclude]
         if not csv_files:
             logger.warning("No CSV files found in %s", DATA_DIR)
             return {}
@@ -76,12 +79,11 @@ class BacktestRunner:
             by_date[d] = uniq
         return by_date
 
-    def run(self, dates: list[str] | None = None):
-        by_date = self.load_snapshots(dates)
+    def run(self, dates: list[str] | None = None, exclude: list[str] | None = None):
+        by_date = self.load_snapshots(dates, exclude)
         if not by_date:
             logger.error("No snapshot data loaded. Aborting.")
             return
-
         report = BacktestReport()
         params = self.strategy.params
         cash = params.capital
@@ -331,3 +333,18 @@ def _safe_float(v):
         return float(v)
     except (ValueError, TypeError):
         return None
+
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    parser = argparse.ArgumentParser(description="Ensemble A/B/C backtest")
+    parser.add_argument("--exclude", nargs="*", default=[],
+                        help="Dates to exclude, e.g. --exclude 2026-07-04")
+    args = parser.parse_args()
+
+    strategy = EnsembleStrategy(EnsembleParams(capital=1000.0))
+    runner = BacktestRunner(strategy)
+    runner.run(exclude=args.exclude or None)
