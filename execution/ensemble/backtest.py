@@ -110,6 +110,7 @@ class BacktestRunner:
             day_fees = 0.0
             day_slippage = 0.0
             day_max = 0.0
+            day_actual_max = -float("inf")
 
             # Collect all bucket labels seen today for bounds
             buckets_set = set()
@@ -121,6 +122,9 @@ class BacktestRunner:
                 ts = snap["timestamp"]
                 max_so_far = snap["max_so_far"] or 0.0
                 day_max = max(day_max, max_so_far)
+                actual = snap.get("actual_temp")
+                if actual is not None:
+                    day_actual_max = max(day_actual_max, actual)
 
                 ensemble = self.strategy.compute_ensemble_probs(snap["model_probs"])
                 if not ensemble:
@@ -132,6 +136,7 @@ class BacktestRunner:
                     market_prices=snap["market_prices"],
                     max_so_far=max_so_far,
                     current_positions=positions,
+                    current_cash=day_cash,
                     last_trade_times=last_trade_times,
                     clob_depth=snap.get("market_depth"),
                 )
@@ -237,8 +242,9 @@ class BacktestRunner:
 
             # ── End of day: settlement ─────────────────────────
             last_prices = snaps[-1]["market_prices"]
+            settle_max = day_actual_max if day_actual_max > -float("inf") else day_max
             settlement = self.strategy.settle_day(
-                day_max_temp=day_max,
+                day_max_temp=settle_max,
                 final_positions=positions,
                 bucket_bounds=bucket_bounds,
                 last_prices=last_prices,

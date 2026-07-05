@@ -179,6 +179,7 @@ class EnsembleStrategy:
                   market_prices: dict,
                   max_so_far: float,
                   current_positions: dict,
+                  current_cash: float = 0.0,
                   last_trade_times: dict | None = None,
                   clob_depth: dict | None = None,
                   ) -> dict:
@@ -217,7 +218,7 @@ class EnsembleStrategy:
             if pos.get("side") == "NO":
                 price = 1.0 - price
             pos_mkt_value += pos.get("quantity", 0) * price
-        portfolio_value = max(self.params.capital + pos_mkt_value, 1.0)
+        portfolio_value = max(current_cash + pos_mkt_value, 1.0)
 
         # ── Deterministic override ────────────────────────────
         det_prices = {}
@@ -268,6 +269,7 @@ class EnsembleStrategy:
                         "execution_price": price, "edge": 0,
                         "target_shares": 0, "reason": tag,
                     })
+                target_positions[bucket] = {"side": "NONE", "quantity": 0}
                 continue
 
             # ── RISK_SEEKING ────────────────────────────────

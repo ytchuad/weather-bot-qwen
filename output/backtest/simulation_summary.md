@@ -1,33 +1,33 @@
 # Simulation Summary
 
-- **Backtest date**: 2026-07-05 17:07
+- **Backtest date**: 2026-07-05 17:19
 - **Dates analysed**: 2026-07-01, 2026-07-02, 2026-07-03, 2026-07-05
 - **Strategy**: Ensemble A/B/C (equal-weight)
 
 ## Capital & Return
 
 - **Capital start**: $1000.00
-- **Capital end**: $1481.74
-- **Total return**: 48.17%
-- **Sharpe ratio** (daily, annualised): 14.866
-- **Max drawdown**: 10.69%
+- **Capital end**: $1452.30
+- **Total return**: 45.23%
+- **Sharpe ratio** (daily, annualised): 14.3676
+- **Max drawdown**: 10.65%
 
 ## Trades
 
-- **Total trades**: 149
-- **Total fees**: $79.64
-- **Total slippage**: $17.57
+- **Total trades**: 141
+- **Total fees**: $83.85
+- **Total slippage**: $18.58
 - **YES buy trades**: 32
-- **NO buy trades**: 39
+- **NO buy trades**: 35
 
 ## Daily Performance
 
 | Date | PnL | Return |
 |------|-----|--------|
 | 2026-07-01 | $+0.00 | +0.00% |
-| 2026-07-02 | $+4.23 | +0.42% |
-| 2026-07-03 | $+136.36 | +13.58% |
-| 2026-07-05 | $+341.16 | +29.91% |
+| 2026-07-02 | $-2.98 | -0.30% |
+| 2026-07-03 | $+128.98 | +12.94% |
+| 2026-07-05 | $+326.30 | +28.98% |
 
 ## Risk-Reduction Mode Summary
 
@@ -47,8 +47,8 @@
 
 | Reason | Count |
 |--------|-------|
-| SKIP_COOLDOWN | 429 |
-| SKIP_MIN_SHARES | 97 |
+| SKIP_COOLDOWN | 416 |
+| SKIP_MIN_SHARES | 80 |
 
 ## Parameters
 
@@ -58,7 +58,7 @@
 - Kelly fraction: 0.25
 - Max per bucket side: 0.1
 - Total exposure cap: 0.5
-- Price band: [0.03, 0.88]
+- Price band: [0.03, 0.8]
 - Min shares: 5.0
 - Slippage fixed: 0.001
 - Fee constant: 0.05

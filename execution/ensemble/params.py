@@ -17,7 +17,7 @@ class EnsembleParams:
     total_exposure_cap: float = 0.50
 
     min_price: float = 0.03
-    max_price: float = 0.88
+    max_price: float = 0.80
     min_shares: float = 5.0
 
     slippage_fixed: float = 0.001
