@@ -70,6 +70,7 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
     from execution.market_templates import resolve_slug
     from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now, compute_rain_kwargs
     from app.services.market_service import fetch_today_event, fetch_event_markets
+    from app.services.market_depth_service import get_global_depth_cache
     from app.services.model_service import run_all_models
     from features.strategy_snapshot_logger import (
         write_snapshot,
@@ -144,6 +145,13 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
             
         prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
         token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
+
+        # Read CLOB depth from the background cache (refreshed every 10 s)
+        depth_cache = get_global_depth_cache()
+        depth_cache.update_token_ids(
+            {b: t for b, t in token_ids_dict.items() if t}
+        )
+        market_depth = depth_cache.get()
 
         # --- 構建 Context ---
         context = dict(
@@ -237,6 +245,25 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
                 # Polymarket prices per bucket
                 if prices_dict:
                     _ctx["market_prices"] = prices_dict
+                # CLOB order-book depth per bucket
+                if market_depth:
+                    _ctx["market_depth"] = market_depth
+                # Gamma market metadata
+                gamma_market_info = {}
+                for m in markets:
+                    bucket = m.get("bucket")
+                    if not bucket:
+                        continue
+                    info = {}
+                    for k in ("token_id", "conditionId", "bestBid", "bestAsk",
+                              "spread", "lastTradePrice", "liquidityClob", "volume24hrClob"):
+                        v = m.get(k)
+                        if v is not None:
+                            info[k] = v
+                    if info:
+                        gamma_market_info[bucket] = info
+                if gamma_market_info:
+                    _ctx["gamma_market_info"] = gamma_market_info
 
                 write_snapshot({
                     "timestamp": hkt_now().isoformat(),
@@ -311,6 +338,13 @@ def main():
         logger.warning("No strategy accounts found. Run migration first:\n"
                        "  python -m execution.strategy_account migrate")
         return
+
+    # Start CLOB depth cache
+    try:
+        from app.services.market_depth_service import get_global_depth_cache
+        get_global_depth_cache().start()
+    except Exception as e:
+        logger.warning("Failed to start depth cache: %s", e)
 
     enabled = [(sid, acct) for sid, acct in accounts.items()
                if acct.get("scheduler_on") and acct.get("status") == "running"]

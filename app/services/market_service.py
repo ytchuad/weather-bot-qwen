@@ -242,8 +242,15 @@ def fetch_event_markets(slug: str, is_min_temp: bool = False) -> list[dict]:
     return _parse_markets_from_event(event, is_min_temp)
 
 
-def _stamped_market(bucket: str, name: str, yes_price: float, no_price: float) -> dict:
-    """Produce a market dict with bounds derived from the bucket label."""
+def _stamped_market(
+    bucket: str, name: str, yes_price: float, no_price: float,
+    **extras,
+) -> dict:
+    """Produce a market dict with bounds derived from the bucket label.
+    
+    *extras* (e.g. token_id, conditionId, bestAsk, spread) are merged
+    directly into the result.
+    """
     lo, hi = _bucket_bounds(bucket)
     return {
         "bucket": bucket,
@@ -252,6 +259,7 @@ def _stamped_market(bucket: str, name: str, yes_price: float, no_price: float) -
         "upper": hi,
         "yes_price": yes_price,
         "no_price": no_price,
+        **extras,
     }
 
 
@@ -271,11 +279,35 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
             yes_price = 0.5
         if no_price is None:
             no_price = 0.5
+
+        # Extract CLOB token IDs and extra Gamma market data
+        extras = {}
+        clob_ids = m.get("clobTokenIds", [])
+        if isinstance(clob_ids, str):
+            try:
+                clob_ids = json.loads(clob_ids)
+            except Exception:
+                clob_ids = []
+        if clob_ids and len(clob_ids) >= 2:
+            extras["token_id"] = clob_ids[0]
+            extras["no_token_id"] = clob_ids[1]
+        for k in ("conditionId", "bestAsk", "spread", "lastTradePrice",
+                  "liquidityClob", "volume24hrClob"):
+            v = m.get(k)
+            if v is not None:
+                extras[k] = v
+        if "bestAsk" in extras and "spread" in extras:
+            try:
+                extras["bestBid"] = max(0.0, float(extras["bestAsk"]) - float(extras["spread"]))
+            except (ValueError, TypeError):
+                pass
+
         markets_out.append(_stamped_market(
             bucket,
             group_item_title or question or bucket,
             yes_price,
             no_price,
+            **extras,
         ))
 
     if not markets_out:

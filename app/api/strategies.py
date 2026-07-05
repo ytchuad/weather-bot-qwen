@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from app.api.cache import prediction_cache
 from app.api.schemas import Suggestion, SuggestRequest, SuggestResponse
 from app.services.model_service import calculate_kelly, run_all_models
+from app.services.market_depth_service import get_global_depth_cache, compute_execution_estimate
 from execution.strategy_account import StrategyAccount, StrategyAccountStore
 from app.services.market_service import fetch_today_event, fetch_event_markets
 from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now
@@ -447,6 +448,13 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
     prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
     token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
 
+    # Read CLOB order-book depth from the background cache (refreshed every 10 s)
+    depth_cache = get_global_depth_cache()
+    depth_cache.update_token_ids(
+        {b: t for b, t in token_ids_dict.items() if t}
+    )
+    market_depth = depth_cache.get()
+
     post_mean = results.get(model, {}).get("mean") if results else None
 
     model_stds = {}
@@ -501,6 +509,25 @@ def _build_strategy_context(acct: StrategyAccount) -> dict:
     # Polymarket prices per bucket
     if prices_dict:
         context_json["market_prices"] = prices_dict
+    # CLOB order-book depth per bucket
+    if market_depth:
+        context_json["market_depth"] = market_depth
+    # Gamma market metadata (best bid/ask, spread, last trade, volume)
+    gamma_market_info = {}
+    for m in markets:
+        bucket = m.get("bucket")
+        if not bucket:
+            continue
+        info = {}
+        for k in ("token_id", "conditionId", "bestBid", "bestAsk",
+                  "spread", "lastTradePrice", "liquidityClob", "volume24hrClob"):
+            v = m.get(k)
+            if v is not None:
+                info[k] = v
+        if info:
+            gamma_market_info[bucket] = info
+    if gamma_market_info:
+        context_json["gamma_market_info"] = gamma_market_info
     # Log all Model 2A features for stability diagnostics
     if results and "model_2a" in results:
         _m2a_raw = results["model_2a"].get("raw", {})
@@ -631,7 +658,14 @@ def start_scheduler():
         return
 
     _seed_default_accounts_if_empty()
-    
+
+    # Start the CLOB depth background cache (refreshes every 10 s)
+    try:
+        from app.services.market_depth_service import get_global_depth_cache
+        get_global_depth_cache().start()
+    except Exception as e:
+        logger.warning("Failed to start depth cache: %s", e)
+
     _scheduler_alive = True
     _scheduler_thread = threading.Thread(target=_scheduler_loop, daemon=True, name="strategy-scheduler")
     _scheduler_thread.start()

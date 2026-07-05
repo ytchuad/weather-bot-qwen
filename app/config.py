@@ -84,6 +84,7 @@ HKO_FORECAST_URL_TEMPLATE = "https://www.hko.gov.hk/wxinfo/awsgis/forecast/HKO.x
 PM_GAMMA_API = "https://gamma-api.polymarket.com"
 PM_SEARCH_URL = f"{PM_GAMMA_API}/public-search"
 PM_EVENTS_URL = f"{PM_GAMMA_API}/events"
+PM_CLOB_API = "https://clob.polymarket.com"
 
 # ---- Colour palette ----
 COLORS = {
