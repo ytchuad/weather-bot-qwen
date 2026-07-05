@@ -30,6 +30,18 @@
       "status": "running",
       "last_run": null,
       "scheduler_on": true
+    },
+    "enhanced_v2_paper": {
+      "strategy": "enhanced_v2_paper",
+      "status": "running",
+      "last_run": null,
+      "scheduler_on": true
+    },
+    "enhanced_v3_aggressive_paper": {
+      "strategy": "enhanced_v3_aggressive_paper",
+      "status": "running",
+      "last_run": null,
+      "scheduler_on": true
     }
   }
 }

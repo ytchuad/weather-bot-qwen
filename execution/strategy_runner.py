@@ -511,12 +511,12 @@ def run_single_strategy_cycle(strategy_key, strategy_config, portfolio_id=None, 
 def run_enabled_strategies_once(registry=None, interval_sec=None, portfolio_id=None, event_slug=None):
     """Iterate all enabled, due strategies and run one cycle each.
 
-    Steps:
-    1. Load and validate registry (paper_only guardrail).
-    2. Load state.
-    3. For each account with scheduler_on=True, status=running, and due:
-       call run_single_strategy_cycle, then update last_run.
-    4. Return list of result dicts.
+    Uses StrategyAccountStore (data/strategy_accounts.json) as the source of
+    running strategies (replaces the legacy paper_strategy_state.json path).
+    Builds a full context (weather data, model predictions, market prices) for
+    each account before executing.
+
+    Returns a list of result dicts.
     """
     if registry is None:
         registry = _STRATEGY_REGISTRY or load_strategy_registry()
@@ -526,47 +526,61 @@ def run_enabled_strategies_once(registry=None, interval_sec=None, portfolio_id=N
     if interval_sec is None:
         interval_sec = registry.get("rebalance_interval_minutes", 5) * 60
 
-    state = load_strategy_state()
+    from execution.strategy_account import StrategyAccountStore
+    from app.services.context_builder import build_strategy_context
+
+    store = StrategyAccountStore()
+    accounts = store.get_running()
     results = []
 
-    for account_id, acct in list(state["accounts"].items()):
-        if acct.get("scheduler_on") is not True:
-            continue
-        if acct.get("status") != "running":
-            continue
+    for acct in accounts:
+        if acct.last_run:
+            try:
+                last = datetime.fromisoformat(acct.last_run)
+                if last.tzinfo:
+                    last = last.astimezone(timezone.utc).replace(tzinfo=None)
+                now = datetime.now(timezone.utc).replace(tzinfo=None)
+                if (now - last).total_seconds() < interval_sec:
+                    results.append({
+                        "status": "skipped_not_due",
+                        "account_id": acct.id,
+                        "strategy": acct.from_strategy_key or acct.id,
+                    })
+                    continue
+            except (ValueError, TypeError):
+                pass
 
-        strategy_id = acct.get("strategy")
-        if strategy_id not in registry["strategies"]:
+        strategy_id = acct.from_strategy_key or acct.id
+        strategy_config = registry["strategies"].get(strategy_id)
+        if strategy_config is None:
             results.append({
                 "status": "error",
-                "account_id": account_id,
+                "account_id": acct.id,
                 "strategy": strategy_id,
                 "error": f"Strategy '{strategy_id}' not in registry",
             })
             continue
 
-        if not is_due_to_run(account_id, interval_sec=interval_sec):
+        context = build_strategy_context(acct)
+        if not context:
             results.append({
-                "status": "skipped_not_due",
-                "account_id": account_id,
+                "status": "error",
+                "account_id": acct.id,
                 "strategy": strategy_id,
+                "error": "Failed to build context (no markets or model predictions)",
             })
             continue
 
-        strategy_config = registry["strategies"].get(strategy_id)
         result = run_single_strategy_cycle(
-            strategy_key=account_id,
+            strategy_key=acct.id,
             strategy_config=strategy_config,
-            portfolio_id=portfolio_id,
-            event_slug=event_slug,
-            **{}
+            portfolio_id=portfolio_id or acct.id,
+            event_slug=context.get("slug"),
+            **context,
         )
         results.append(result)
 
         if result.get("status") not in ("error", "blocked", "dependency_missing", "skipped_entry_rules"):
-            state["accounts"][account_id]["last_run"] = (
-                datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-            )
-            save_strategy_state(state)
+            store.set_last_run(acct.id)
 
     return results
