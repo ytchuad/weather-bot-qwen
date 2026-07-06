@@ -137,7 +137,7 @@ def get_predictions(
 
     models_out = {}
     for mk, pred in results.items():
-        if mk == "_intraday_error":
+        if mk.startswith("_"):
             continue
         models_out[mk] = ModelPrediction(
             mean=pred.get("mean", 0.0),
