@@ -311,6 +311,13 @@ def predict_intraday_all(
             "post_std": float(ps),
             "raw": raw_pred,
         }
+    results["_feature_metadata"] = {
+        "pressure_kwargs": pressure_kw,
+        "wind_kwargs": wind_kw,
+        "nowcast_features": nc_features,
+        "forecast_age_minutes": forecast_age_minutes,
+        "forecast_lead_days": forecast_lead_days,
+    }
     return results
 
 
@@ -422,6 +429,8 @@ def run_all_models(
                 output["_intraday_error"] = intra_preds["_error"]
             else:
                 for mk, ip in intra_preds.items():
+                    if mk in ("_feature_metadata", "_error"):
+                        continue
                     ip["probs"] = compute_bucket_probs(
                         ip["post_mean"], ip["post_std"], markets,
                         is_today, is_min_temp,
@@ -435,13 +444,9 @@ def run_all_models(
                         ip["degraded"] = True
                     output[mk] = ip
 
-    output["_feature_metadata"] = {
-        "pressure_kwargs": pressure_kw,
-        "wind_kwargs": wind_kw,
-        "nowcast_features": nc_features,
-        "forecast_age_minutes": forecast_age_minutes,
-        "forecast_lead_days": forecast_lead_days,
-    }
+            _fm = intra_preds.pop("_feature_metadata", {})
+            if _fm:
+                output["_feature_metadata"] = _fm
     return output
 
 
