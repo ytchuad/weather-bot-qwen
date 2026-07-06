@@ -279,9 +279,9 @@ def read_models_comparison(
 def _insert_row(conn: sqlite3.Connection, record: dict) -> None:
     """Low-level INSERT without CSV/export side-effects."""
     all_preds = record.get("all_model_predictions")
-    all_preds_json = json.dumps(all_preds) if isinstance(all_preds, dict) else (all_preds or "{}")
+    all_preds_json = json.dumps(all_preds, default=str) if isinstance(all_preds, dict) else (all_preds or "{}")
     ctx = record.get("context_json")
-    ctx_json = json.dumps(ctx) if isinstance(ctx, dict) else (ctx or None)
+    ctx_json = json.dumps(ctx, default=str) if isinstance(ctx, dict) else (ctx or None)
     conn.execute(
         """INSERT OR IGNORE INTO snapshots
            (timestamp, snapshot_date, slug, strategy_key, model_key,

@@ -169,7 +169,7 @@ def main():
         # ---- Fallback: use models-comparison for each date ----
         # HF Spaces only keeps recent data, but try a wide window
         print("  Falling back to models-comparison endpoint per date ...\n")
-        for date in ("2026-07-02", "2026-07-01", "2026-06-30", "2026-06-29"):
+        for date in ("2026-07-06", "2026-07-05", "2026-07-04", "2026-07-03", "2026-07-02", "2026-07-01", "2026-06-30", "2026-06-29"):
             print(f"  {date}:")
             rows = _try_models_comparison(base_url, date)
             if rows:
