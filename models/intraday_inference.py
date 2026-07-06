@@ -2433,7 +2433,7 @@ def predict_intraday_tmax_model_g(current_datetime, max_so_far, temp_now,
         "value": temp_now,
         "humidity": humidity,
         "pressure": pressure if pressure is not None else 1010.0,
-        "temp_slope_30min": temp_change_30m,
+        "temp_slope_30min": temp_change_30m / 30.0,
         "temp_volatility_30min": temp_volatility_30m,
         "humid_delta_30min": rh_change_30m,
         "pressure_delta_30min": pressure_delta,
@@ -2694,12 +2694,6 @@ def predict_intraday_tmax_model_2a(
                 prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
                 prob_max_reached = 1.0 if prob_max_reached > th else 0.0
 
-    prob_not_reached = 1.0 - prob_max_reached
-    remaining_upside_p10 *= prob_not_reached
-    remaining_upside_p25 *= prob_not_reached
-    remaining_upside_p50 *= prob_not_reached
-    remaining_upside_p75 *= prob_not_reached
-    remaining_upside_p90 *= prob_not_reached
     pred_tmax_p10 = max_so_far + remaining_upside_p10
     pred_tmax_p25 = max_so_far + remaining_upside_p25
     pred_tmax_p50 = max_so_far + remaining_upside_p50
@@ -2914,12 +2908,6 @@ def predict_intraday_tmax_model_2a1(
                 prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
                 prob_max_reached = 1.0 if prob_max_reached > th else 0.0
 
-    prob_not_reached = 1.0 - prob_max_reached
-    remaining_upside_p10 *= prob_not_reached
-    remaining_upside_p25 *= prob_not_reached
-    remaining_upside_p50 *= prob_not_reached
-    remaining_upside_p75 *= prob_not_reached
-    remaining_upside_p90 *= prob_not_reached
     pred_tmax_p10 = max_so_far + remaining_upside_p10
     pred_tmax_p25 = max_so_far + remaining_upside_p25
     pred_tmax_p50 = max_so_far + remaining_upside_p50
@@ -3129,12 +3117,6 @@ def predict_intraday_tmax_model_2a_v2(
                 prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
                 prob_max_reached = 1.0 if prob_max_reached > th else 0.0
 
-    prob_not_reached = 1.0 - prob_max_reached
-    remaining_upside_p10 *= prob_not_reached
-    remaining_upside_p25 *= prob_not_reached
-    remaining_upside_p50 *= prob_not_reached
-    remaining_upside_p75 *= prob_not_reached
-    remaining_upside_p90 *= prob_not_reached
     pred_tmax_p10 = max_so_far + remaining_upside_p10
     pred_tmax_p25 = max_so_far + remaining_upside_p25
     pred_tmax_p50 = max_so_far + remaining_upside_p50
