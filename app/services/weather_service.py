@@ -855,22 +855,59 @@ def fetch_hko_ilens_forecast(target_date_str: str | None = None) -> dict | None:
 
 
 def get_nowcast_rainfall() -> float | None:
-    """Get rainfall nowcast from HKO Gridded_rainfall_nowcast.csv."""
+    """Get rainfall nowcast from HKO Gridded_rainfall_nowcast.csv.
+
+    Returns the mean nowcast rainfall (mm) within 5 km of the HKO station
+    for the first (30-min) lead time, matching the training pipeline.
+    """
     NOWCAST_URL = "https://data.weather.gov.hk/weatherAPI/hko_data/F3/Gridded_rainfall_nowcast.csv"
     try:
+        from math import asin, cos, radians, sin, sqrt
         r = requests.get(NOWCAST_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         r.raise_for_status()
-        lines = r.text.strip().split("\n")
-        if len(lines) < 2:
+        df = pd.read_csv(io.StringIO(r.text))
+        # Normalise columns (same as normalize_nowcast_df)
+        col_map = {
+            "Updated Date and Time (in Hong Kong Time)": "issue_time",
+            "Ending Date and Time (in Hong Kong Time)": "valid_time",
+            "Latitude (degree)": "lat",
+            "Longitude (degree)": "lon",
+            "Half-hourly Nowcast Accumulated Rainfall (mm)": "rain_mm",
+        }
+        df = df.rename(columns={str(c).strip(): c for c in df.columns})
+        df.columns = [col_map.get(c, c) for c in df.columns]
+        df = df.dropna(subset=["lat", "lon", "rain_mm"])
+        df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+        df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+        df["rain_mm"] = pd.to_numeric(df["rain_mm"], errors="coerce")
+        df = df.dropna(subset=["lat", "lon", "rain_mm"])
+
+        # HKO station coordinate (same as DEFAULT_HKO_LAT / LON)
+        hko_lat = 22 + 18 / 60 + 7 / 3600   # 22.3020
+        hko_lon = 114 + 10 / 60 + 27 / 3600  # 114.1742
+
+        # Haversine distance (km) for each grid point
+        R = 6371.0
+        r_lat, r_lon = radians(hko_lat), radians(hko_lon)
+        df["dist_km"] = df.apply(
+            lambda row: 2 * R * asin(sqrt(
+                sin((radians(row["lat"]) - r_lat) / 2) ** 2
+                + cos(r_lat) * cos(radians(row["lat"]))
+                * sin((radians(row["lon"]) - r_lon) / 2) ** 2
+            )),
+            axis=1,
+        )
+        near = df[df["dist_km"] <= 5.0].copy()
+        if near.empty:
             return None
-        # Parse last non-empty line for latest nowcast value
-        for line in reversed(lines):
-            parts = line.strip().split(",")
-            if len(parts) >= 2 and parts[-1]:
-                try:
-                    return float(parts[-1])
-                except ValueError:
-                    continue
-        return None
+        # Parse valid_time, take first (30-min) lead time
+        near["valid_time_dt"] = pd.to_datetime(
+            near["valid_time"].astype(str).str.strip(), format="%Y%m%d%H%M", errors="coerce"
+        )
+        near = near.dropna(subset=["valid_time_dt"])
+        lead_minutes = (near["valid_time_dt"] - near["valid_time_dt"].iloc[0]).dt.total_seconds() / 60
+        first_lead = lead_minutes.min()
+        first = near.iloc[lead_minutes.values == first_lead]
+        return round(float(first["rain_mm"].mean()), 3)
     except Exception:
         return None
