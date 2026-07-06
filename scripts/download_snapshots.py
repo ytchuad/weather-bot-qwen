@@ -29,6 +29,18 @@ CSV_FIELDS = [
 JSON_FIELDS = {"all_model_predictions", "context_json"}
 
 
+def _csv_has_real_data(csv_path: Path) -> bool:
+    """True if the CSV already has any row with non-empty context_json."""
+    if not csv_path.exists():
+        return False
+    with open(csv_path, newline="") as f:
+        for row in csv.DictReader(f):
+            ctx = row.get("context_json", "")
+            if ctx and ctx.strip() not in ("", "{}"):
+                return True
+    return False
+
+
 def _load_existing_keys(csv_path: Path) -> set[tuple[str, str]]:
     if not csv_path.exists():
         return set()
@@ -123,11 +135,19 @@ def _try_models_comparison(base_url: str, date: str) -> list[dict]:
 
 
 def _merge_into_csv(
-    new_rows: list[dict], date: str,
+    new_rows: list[dict], date: str, *, from_fallback: bool = False,
 ) -> int:
     """Append new rows for *date* to the local CSV, deduplicating by
-    (timestamp, strategy_key). Returns count of new rows added."""
+    (timestamp, strategy_key). Returns count of new rows added.
+
+    When *from_fallback* is True and the existing CSV already contains
+    rows with non-empty *context_json*, the fallback rows are skipped
+    (they lack market_prices and would dilute real data).
+    """
     csv_path = EXPORT_DIR / f"{date}.csv"
+    if from_fallback and _csv_has_real_data(csv_path):
+        print(f"    -> skipped (CSV already has real context_json)")
+        return 0
     existing_keys = _load_existing_keys(csv_path)
     fresh = [
         r for r in new_rows
@@ -173,7 +193,7 @@ def main():
             print(f"  {date}:")
             rows = _try_models_comparison(base_url, date)
             if rows:
-                n = _merge_into_csv(rows, date)
+                n = _merge_into_csv(rows, date, from_fallback=True)
                 total_new += n
 
     print(f"\nDone. {total_new} new snapshot(s) added to {EXPORT_DIR}/")
