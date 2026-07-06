@@ -2241,7 +2241,7 @@ def predict_intraday_tmax_all(
                 rainfall_60m_missing_flag=rainfall_60m_missing_flag,
                 rainfall_120m_missing_flag=rainfall_120m_missing_flag,
                 temp_change_60m=temp_change_60min or 0.0,
-                drop_from_max=0.0,
+                drop_from_max=max_so_far - temp_now,
             )
         except Exception as e:
             logger.warning("Model B prediction failed: %s", e)
@@ -2263,7 +2263,7 @@ def predict_intraday_tmax_all(
                 rainfall_60m_missing_flag=rainfall_60m_missing_flag,
                 rainfall_120m_missing_flag=rainfall_120m_missing_flag,
                 temp_change_60m=temp_change_60min or 0.0,
-                drop_from_max=0.0,
+                drop_from_max=max_so_far - temp_now,
                 **nc_kw,
             )
         except Exception as e:
@@ -3229,7 +3229,7 @@ def predict_intraday_tmin_all(current_datetime, min_so_far, temp_60min_ago, temp
                 rainfall_60m_missing_flag=rainfall_60m_missing_flag,
                 rainfall_120m_missing_flag=rainfall_120m_missing_flag,
                 temp_change_60m=temp_change_60min or 0.0,
-                drop_from_max=0.0,
+                drop_from_max=max_so_far - temp_now,
             )
         except Exception as e:
             logger.warning("Model B Tmin prediction failed: %s", e)
@@ -3250,7 +3250,7 @@ def predict_intraday_tmin_all(current_datetime, min_so_far, temp_60min_ago, temp
                 rainfall_60m_missing_flag=rainfall_60m_missing_flag,
                 rainfall_120m_missing_flag=rainfall_120m_missing_flag,
                 temp_change_60m=temp_change_60min or 0.0,
-                drop_from_max=0.0,
+                drop_from_max=max_so_far - temp_now,
                 **nc_kw,
             )
         except Exception as e:
@@ -3274,7 +3274,7 @@ def predict_intraday_tmin_all(current_datetime, min_so_far, temp_60min_ago, temp
                 rainfall_60m_missing_flag=rainfall_60m_missing_flag,
                 rainfall_120m_missing_flag=rainfall_120m_missing_flag,
                 temp_change_60m=temp_change_60min or 0.0,
-                drop_from_max=0.0,
+                drop_from_max=max_so_far - temp_now,
                 **nc_kw,
                 **prev_kw,
                 **d_kw,
@@ -3300,7 +3300,7 @@ def predict_intraday_tmin_all(current_datetime, min_so_far, temp_60min_ago, temp
                 rainfall_60m_missing_flag=rainfall_60m_missing_flag,
                 rainfall_120m_missing_flag=rainfall_120m_missing_flag,
                 temp_change_60m=temp_change_60min or 0.0,
-                drop_from_max=0.0,
+                drop_from_max=max_so_far - temp_now,
                 **nc_kw,
                 **prev_kw,
                 **d_kw,
