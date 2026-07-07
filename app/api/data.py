@@ -1,14 +1,16 @@
 """Data Export API — read-only endpoint for downloading snapshot backup.
 
 Used before redeploying HF Spaces, so historical data can be
-re-imported via CSV on the next container startup.
+re-imported via CSV on the next container restart.
 """
 
 from __future__ import annotations
 
 import logging
+import traceback
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from features.strategy_snapshot_logger import read_snapshots
 
@@ -25,11 +27,50 @@ def export_snapshots(date: str | None = None):
     ``all_model_predictions`` dicts, suitable for reconstructing the
     SQLite database via CSV import on the next startup.
     """
+    import json
     from app.services.weather_service import hkt_now as _hkt_now
-    rows = read_snapshots(date=date)
-    return {
-        "version": 1,
-        "exported_at": _hkt_now().isoformat(),
-        "snapshot_count": len(rows),
-        "snapshots": rows,
-    }
+    try:
+        rows = read_snapshots(date=date)
+        return {
+            "version": 1,
+            "exported_at": _hkt_now().isoformat(),
+            "snapshot_count": len(rows),
+            "snapshots": rows,
+        }
+    except Exception as exc:
+        tb = traceback.format_exc()
+        logger.error("export-snapshots failed: %s\n%s", exc, tb)
+        text_info = str(exc)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": text_info,
+                "traceback": tb.split("\n"),
+            },
+        )
+
+
+@router.get("/debug-response")
+def debug_response(date: str):
+    """Return count and sample rows for debugging the 500 error."""
+    try:
+        rows = read_snapshots(date=date)
+        sample = []
+        for r in rows[:3]:
+            r2 = dict(r)
+            for k in ("all_model_predictions", "context_json"):
+                if isinstance(r2.get(k), dict):
+                    r2[k] = {"_type": "dict", "_len": len(r2[k])}
+            sample.append({
+                "timestamp": r2.get("timestamp"),
+                "pm_weighted_temp": r2.get("pm_weighted_temp"),
+                "context_json_type": type(r.get("context_json")).__name__,
+                "context_json_len": len(r.get("context_json")) if isinstance(r.get("context_json"), dict) else "N/A",
+                "all_model_predictions_type": type(r.get("all_model_predictions")).__name__,
+            })
+        return {
+            "total_rows": len(rows),
+            "sample": sample,
+        }
+    except Exception as exc:
+        return JSONResponse(status_code=500, content={"error": str(exc), "traceback": traceback.format_exc().split("\n")})
