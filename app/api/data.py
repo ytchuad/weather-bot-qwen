@@ -50,8 +50,48 @@ def export_snapshots(date: str | None = None):
         "snapshot_count": len(rows),
         "snapshots": rows,
     }
-    json_bytes = json.dumps(payload, ensure_ascii=False, default=str, allow_nan=True).encode("utf-8")
-    return Response(content=json_bytes, media_type="application/json")
+    try:
+        json_bytes = json.dumps(payload, ensure_ascii=False, default=str, allow_nan=True).encode("utf-8")
+        return Response(content=json_bytes, media_type="application/json")
+    except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error("export-snapshots json.dumps failed: %s\n%s", exc, tb)
+        # Binary-chop: try serializing each field across all rows
+        bad_field = None
+        for k in next(iter(rows), {}).keys():
+            subset = {k: [r.get(k) for r in rows]}
+            try:
+                json.dumps(subset, default=str, allow_nan=True)
+            except Exception as e2:
+                bad_field = k
+                break
+        # Now inspect that field in each row
+        bad_info = []
+        if bad_field is not None:
+            for i, r in enumerate(rows):
+                try:
+                    json.dumps({bad_field: r.get(bad_field)}, default=str, allow_nan=True)
+                except Exception as e3:
+                    v = r.get(bad_field)
+                    bad_info.append({
+                        "index": i,
+                        "timestamp": r.get("timestamp"),
+                        "field": bad_field,
+                        "type": type(v).__name__,
+                        "repr": repr(v)[:200],
+                        "error": str(e3)[:100],
+                    })
+        return Response(
+            content=json.dumps({
+                "error": str(exc),
+                "traceback": tb.split("\n"),
+                "bad_field": bad_field,
+                "bad_info": bad_info,
+            }, ensure_ascii=False, default=str),
+            status_code=500,
+            media_type="application/json",
+        )
 
 
 @router.get("/debug-response")
