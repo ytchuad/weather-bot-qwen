@@ -152,6 +152,7 @@ def _merge_into_csv(
     fresh = [
         r for r in new_rows
         if (r.get("timestamp", ""), r.get("strategy_key", "")) not in existing_keys
+        and "T" in (r.get("timestamp", ""))  # skip malformed date-only rows
     ]
     if not fresh:
         print(f"    -> 0 new (all {len(existing_keys)} already exist)")
