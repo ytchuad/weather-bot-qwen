@@ -7,10 +7,9 @@ re-imported via CSV on the next container restart.
 from __future__ import annotations
 
 import logging
-import traceback
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 
 from features.strategy_snapshot_logger import read_snapshots
 
@@ -27,8 +26,8 @@ def export_snapshots(date: str | None = None):
     ``all_model_predictions`` dicts, suitable for reconstructing the
     SQLite database via CSV import on the next startup.
     """
-    import json
     import math
+    import json
     from app.services.weather_service import hkt_now as _hkt_now
 
     rows = read_snapshots(date=date)
@@ -51,18 +50,8 @@ def export_snapshots(date: str | None = None):
         "snapshot_count": len(rows),
         "snapshots": rows,
     }
-    try:
-        return JSONResponse(content=payload)
-    except Exception as exc:
-        tb = traceback.format_exc()
-        logger.error("export-snapshots serialization failed: %s\n%s", exc, tb)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(exc),
-                "traceback": tb.split("\n"),
-            },
-        )
+    json_bytes = json.dumps(payload, ensure_ascii=False, default=str, allow_nan=True).encode("utf-8")
+    return Response(content=json_bytes, media_type="application/json")
 
 
 @router.get("/debug-response")
