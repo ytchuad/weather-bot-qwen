@@ -28,23 +28,38 @@ def export_snapshots(date: str | None = None):
     SQLite database via CSV import on the next startup.
     """
     import json
+    import math
     from app.services.weather_service import hkt_now as _hkt_now
+
+    rows = read_snapshots(date=date)
+
+    # Sanitize numeric fields that may contain float('inf')/nan from SQLite
+    FLOAT_FIELDS = {
+        "pm_weighted_temp", "model_predicted_temp", "actual_temp",
+        "max_so_far", "predicted_upside", "model_std",
+        "position_size", "position_value",
+    }
+    for r in rows:
+        for fld in FLOAT_FIELDS:
+            v = r.get(fld)
+            if isinstance(v, float) and (math.isinf(v) or math.isnan(v)):
+                r[fld] = None
+
+    payload = {
+        "version": 1,
+        "exported_at": _hkt_now().isoformat(),
+        "snapshot_count": len(rows),
+        "snapshots": rows,
+    }
     try:
-        rows = read_snapshots(date=date)
-        return {
-            "version": 1,
-            "exported_at": _hkt_now().isoformat(),
-            "snapshot_count": len(rows),
-            "snapshots": rows,
-        }
+        return JSONResponse(content=payload)
     except Exception as exc:
         tb = traceback.format_exc()
-        logger.error("export-snapshots failed: %s\n%s", exc, tb)
-        text_info = str(exc)
+        logger.error("export-snapshots serialization failed: %s\n%s", exc, tb)
         return JSONResponse(
             status_code=500,
             content={
-                "error": text_info,
+                "error": str(exc),
                 "traceback": tb.split("\n"),
             },
         )
