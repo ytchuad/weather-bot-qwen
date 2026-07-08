@@ -117,13 +117,14 @@ def run_variant(label: str, exclude: list[str],
                 params: EnsembleParams | None = None,
                 dedup_fn=dedup_1sec,
                 use_synthetic_exit: bool = False,
-                output_dir: str | Path | None = None) -> Result:
+                output_dir: str | Path | None = None,
+                dates: list[str] | None = None) -> Result:
     """Run one variant and return stats.  Optionally write CSV reports."""
     if params is None:
         params = EnsembleParams(capital=1000.0)
 
     strategy = strategy_cls(params)
-    by_date = load_snaps(exclude=exclude)
+    by_date = load_snaps(exclude=exclude, dates=dates)
     cash = params.capital
     prev_cash = params.capital
     cumulative_fees = 0.0
