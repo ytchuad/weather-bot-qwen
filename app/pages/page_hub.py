@@ -8,7 +8,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ..components.top_nav import mark_refreshed
-from ..config import MODEL_KEYS, MODEL_LABELS, TMAX_BUCKETS, TMIN_BUCKETS
+from ..config import MODEL_KEYS, MODEL_LABELS
 from ..services.market_service import fetch_event_markets
 from ..services.model_service import run_all_models
 from ..services.weather_service import (

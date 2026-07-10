@@ -32,16 +32,9 @@ DEFAULT_TMAX_FORECAST_DELTA = 2.0
 DEFAULT_TMIN_FORECAST_DELTA = -2.0
 DEFAULT_TEMP = 28.0
 
-# ---- Bucket definitions ----
-TMAX_BUCKETS = [
-    "<23", "23-24", "24-25", "25-26", "26-27", "27-28",
-    "28-29", "29-30", "30-31", "31-32", "32-33", "33-34", ">=34",
-]
-
-TMIN_BUCKETS = [
-    "23 or below", "24C", "25C", "26C", "27C", "28C",
-    "29C", "30C", "31C", "32C", "33 or higher",
-]
+# Bucket labels are now derived dynamically from Polymarket event data.
+# No hardcoded TMAX_BUCKETS / TMIN_BUCKETS lists — see market_service.py
+# _market_question_to_bucket() and _bucket_sort_key() for the dynamic logic.
 
 # ---- Model keys ----
 MODEL_KEYS = ["9d", "aws", "baseline", "rain_nowcast", "rain_observed", "model_a", "model_b", "model_c", "model_d", "model_e", "model_g", "model_2a", "model_2a_v2"]

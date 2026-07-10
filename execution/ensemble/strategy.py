@@ -569,8 +569,12 @@ class EnsembleStrategy:
             if lo <= day_max_temp < hi:
                 winner = bucket
                 break
-        if winner is None:
-            winner = ">=34" if day_max_temp >= 34 else "<24"
+        if winner is None and bucket_bounds:
+            # pick the bucket with matching bounds from the actual market data
+            for bucket, (lo, hi) in bucket_bounds.items():
+                if lo <= day_max_temp < hi:
+                    winner = bucket
+                    break
 
         total_pnl = 0.0
         details = []

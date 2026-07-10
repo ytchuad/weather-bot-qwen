@@ -17,8 +17,6 @@ from cachetools import TTLCache, cached
 from ..config import (
     PM_SEARCH_URL,
     PM_EVENTS_URL,
-    TMAX_BUCKETS,
-    TMIN_BUCKETS,
     CACHE_TTL_MEDIUM,
     CACHE_TTL_SHORT,
 )
@@ -151,13 +149,34 @@ def _bucket_bounds(bucket_label: str) -> tuple[float, float]:
     return (-np.inf, np.inf)
 
 
-def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp: bool) -> str | None:
-    """Map Polymarket market question text to our bucket label.
+def _bucket_sort_key(label: str) -> tuple[float, int]:
+    """Sort key for canonical bucket ordering.
 
-    Uses TMAX_BUCKETS/TMIN_BUCKETS dynamically — no hardcoded ranges.
+    Lower tails (<N / "N or below") sort first, then individual-degree /
+    range buckets by lower bound, then upper tails (>=N / "N or higher") last.
+    """
+    lo, hi = _bucket_bounds(label)
+    if label.startswith("<"):
+        return (hi, 0)
+    if label.startswith(">="):
+        return (lo, 2)
+    lower_label = label.lower()
+    if " or below" in lower_label:
+        return (hi, 0)
+    if " or higher" in lower_label:
+        return (lo, 2)
+    if any(c in label for c in ("C", "°")):
+        return (lo, 1)
+    return (lo, 1)
+
+
+def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp: bool) -> str | None:
+    """Map Polymarket market question text to a bucket label dynamically.
+
     Exceedance markets (or below / or higher) get their own label,
-    e.g. ``>=33``, ``<24``, and are kept as separate market entries
-    alongside the canonical range buckets.
+    e.g. ``>=36``, ``<26``.  Exact-degree TMAX markets are turned into
+    a range label (e.g. ``34`` → ``34-35``).
+    TMIN markets use single-degree labels (e.g. ``24C``).
     """
     source = group_item_title or question
     m = re.search(r"(\d+)\s*°?C", source, re.IGNORECASE)
@@ -182,12 +201,8 @@ def _market_question_to_bucket(question: str, group_item_title: str, is_min_temp
     if upper:
         return f">={temp_val}"
 
-    # TMAX exact-range: find the canonical bucket that contains temp_val
-    for b in TMAX_BUCKETS:
-        lo, hi = _bucket_bounds(b)
-        if lo <= temp_val < hi:
-            return b
-    return TMAX_BUCKETS[0]  # fallback: <23
+    # TMAX exact-range: dynamic — "34" → "34-35"
+    return f"{temp_val}-{temp_val + 1}"
 
 
 # ── cached fetchers ───────────────────────────────────────────────────
@@ -234,11 +249,7 @@ def fetch_event_markets(slug: str, is_min_temp: bool = False) -> list[dict]:
     """Return parsed bucket markets [{bucket, name, lower, upper, yes_price, no_price}]."""
     event = fetch_event_by_slug(slug)
     if event is None:
-        # fallback: return default buckets
-        buckets = TMIN_BUCKETS if is_min_temp else TMAX_BUCKETS
-        return [
-            _stamped_market(b, b, 0.5, 0.5) for b in buckets
-        ]
+        return []
     return _parse_markets_from_event(event, is_min_temp)
 
 
@@ -310,54 +321,27 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
             **extras,
         ))
 
-    if not markets_out:
-        buckets = TMIN_BUCKETS if is_min_temp else TMAX_BUCKETS
-        markets_out = [
-            _stamped_market(b, b, 0.5, 0.5) for b in buckets
-        ]
-
-    # sort to our canonical order
-    bucket_order = TMIN_BUCKETS if is_min_temp else TMAX_BUCKETS
-    order_map = {b: i for i, b in enumerate(bucket_order)}
-    markets_out.sort(key=lambda x: order_map.get(x["bucket"], 999))
+    # sort buckets dynamically
+    markets_out.sort(key=lambda x: _bucket_sort_key(x["bucket"]))
     return markets_out
 
 
 def bucket_for_temp(temp: float, is_min_temp: bool) -> str:
-    """Return bucket label for a given temperature value."""
+    """Return bucket label for a given temperature value (dynamic)."""
     if is_min_temp:
-        # TMIN: single-degree buckets from 24°C to 32°C, with edge buckets
         if temp < 23:
             return "23 or below"
         for t in range(24, 33):
             if t <= temp < t + 1:
                 return f"{t}C"
         return "33 or higher"
-    if temp < 23:
-        return "<23"
-    if temp < 24:
-        return "23-24"
-    if temp < 25:
-        return "24-25"
-    if temp < 26:
-        return "25-26"
-    if temp < 27:
-        return "26-27"
-    if temp < 28:
-        return "27-28"
-    if temp < 29:
-        return "28-29"
-    if temp < 30:
-        return "29-30"
-    if temp < 31:
-        return "30-31"
-    if temp < 32:
-        return "31-32"
-    if temp < 33:
-        return "32-33"
-    if temp < 34:
-        return "33-34"
-    return ">=34"
+    # TMAX: integer degree ranges
+    t = int(temp)
+    if t < 23:
+        return f"<{t + 1}" if t + 1 < 23 else "<23"
+    if t < 36:
+        return f"{t}-{t + 1}"
+    return f">={t}"
 
 
 @cached(_short_cache)

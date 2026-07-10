@@ -6,7 +6,7 @@ from __future__ import annotations
 import streamlit as st
 import plotly.graph_objects as go
 
-from ..config import COLORS, MODEL_LABELS, TMAX_BUCKETS, TMIN_BUCKETS
+from ..config import COLORS, MODEL_LABELS
 
 
 _CSS = """

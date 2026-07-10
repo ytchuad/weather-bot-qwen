@@ -29,10 +29,6 @@ logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
 DATA_DIR = Path("data/export")
 
-BUCKETS = ["<24", "25-26", "26-27", "27-28", "28-29", "29-30",
-           "30-31", "31-32", "32-33", "33-34", ">=34"]
-BUCKET_BOUNDS = [24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34]
-
 DEFAULT_STD = 1.27
 
 
@@ -47,17 +43,15 @@ def _safe_float(v):
 
 def _normal_probs(mean: float, std: float) -> dict[str, float]:
     """Bucket probabilities from N(mean, std)."""
+    from app.services.market_service import _bucket_bounds as _bb
     dist = NormalDist(mean, std)
+    bounds = [-float("inf"), 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, float("inf")]
+    labels = ["<24", "24-25", "25-26", "26-27", "27-28", "28-29",
+              "29-30", "30-31", "31-32", "32-33", "33-34", "34-35", "35-36", ">=36"]
     probs = {}
-    prev = -float("inf")
-    for i, upper in enumerate(BUCKET_BOUNDS):
-        if i == 0:
-            p = dist.cdf(upper)
-        else:
-            p = dist.cdf(upper) - dist.cdf(prev)
-        probs[BUCKETS[i]] = max(p, 1e-10)
-        prev = upper
-    probs[">=34"] = max(1.0 - dist.cdf(34), 1e-10)
+    for i in range(len(labels)):
+        p = dist.cdf(bounds[i + 1]) - dist.cdf(bounds[i])
+        probs[labels[i]] = max(p, 1e-10)
     total = sum(probs.values())
     if total > 0:
         probs = {k: v / total for k, v in probs.items()}

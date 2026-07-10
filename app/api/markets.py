@@ -12,11 +12,17 @@ router = APIRouter(prefix="/api/markets", tags=["Markets"])
 
 @router.get("/buckets")
 def get_buckets(type: str = "tmax"):
-    from app.config import TMAX_BUCKETS, TMIN_BUCKETS
+    from app.services.market_service import fetch_event_markets
+    from app.services.today_event_resolver import resolve_today_event
 
-    if type == "tmin":
-        return {"type": "tmin", "buckets": TMIN_BUCKETS}
-    return {"type": "tmax", "buckets": TMAX_BUCKETS}
+    ev = resolve_today_event(metric=type)
+    if ev is None:
+        return {"type": type, "buckets": []}
+    markets = fetch_event_markets(ev["slug"], is_min_temp=(type == "tmin"))
+    return {
+        "type": type,
+        "buckets": [m["bucket"] for m in markets],
+    }
 
 
 @router.get("/events")

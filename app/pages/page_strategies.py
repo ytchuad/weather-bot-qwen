@@ -135,7 +135,9 @@ def _render_lab() -> None:
         "31-32": {"market_price": 0.10},
         "32-33": {"market_price": 0.07},
         "33-34": {"market_price": 0.04},
-        ">=34": {"market_price": 0.01},
+        "34-35": {"market_price": 0.02},
+        "35-36": {"market_price": 0.01},
+        ">=36": {"market_price": 0.005},
     }
 
     # --- Run backtest ---
