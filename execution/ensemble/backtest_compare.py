@@ -69,6 +69,7 @@ def load_snaps(dates=None, exclude=None) -> dict[str, list[dict]]:
                     "actual_temp": _safe_float(row.get("actual_temp")),
                     "market_prices": mp,
                     "market_depth": ctx.get("market_depth", {}),
+                    "market_depth_no": ctx.get("market_depth_no", {}),
                     "model_probs": ctx.get("model_probs", {}),
                 })
     for d in by_date:
@@ -104,6 +105,7 @@ def synthetic_snap(source: dict, ts: datetime) -> dict:
         "actual_temp": source.get("actual_temp"),
         "market_prices": dict(source.get("market_prices", {})),
         "market_depth": source.get("market_depth", {}),
+        "market_depth_no": source.get("market_depth_no", {}),
         "model_probs": dict(source.get("model_probs", {})),
     }
 
@@ -177,6 +179,7 @@ def run_variant(label: str, exclude: list[str],
                 current_cash=dcash,
                 last_trade_times=ltt,
                 clob_depth=snap.get("market_depth"),
+                clob_depth_no=snap.get("market_depth_no"),
             )
 
             ltt = result["last_trade_times"]

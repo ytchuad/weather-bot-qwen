@@ -1,24 +1,24 @@
 # Simulation Summary
 
-- **Backtest date**: 2026-07-05 19:08
-- **Dates analysed**: 2026-07-01, 2026-07-02, 2026-07-03, 2026-07-05
+- **Backtest date**: 2026-07-07 21:40
+- **Dates analysed**: 2026-07-01, 2026-07-02, 2026-07-03, 2026-07-05, 2026-07-06, 2026-07-07
 - **Strategy**: Ensemble A/B/C (equal-weight)
 
 ## Capital & Return
 
 - **Capital start**: $1000.00
-- **Capital end**: $1253.29
-- **Total return**: 25.33%
-- **Sharpe ratio** (daily, annualised): 13.7569
+- **Capital end**: $1261.24
+- **Total return**: 26.12%
+- **Sharpe ratio** (daily, annualised): 11.0553
 - **Max drawdown**: 11.92%
 
 ## Trades
 
-- **Total trades**: 131
-- **Total fees**: $60.48
-- **Total slippage**: $13.04
-- **YES buy trades**: 30
-- **NO buy trades**: 31
+- **Total trades**: 146
+- **Total fees**: $65.96
+- **Total slippage**: $13.57
+- **YES buy trades**: 33
+- **NO buy trades**: 35
 
 ## Daily Performance
 
@@ -28,6 +28,8 @@
 | 2026-07-02 | $-15.43 | -1.54% |
 | 2026-07-03 | $+92.33 | +9.38% |
 | 2026-07-05 | $+176.39 | +16.38% |
+| 2026-07-06 | $+0.00 | +0.00% |
+| 2026-07-07 | $+7.95 | +0.63% |
 
 ## Risk-Reduction Mode Summary
 
@@ -47,8 +49,8 @@
 
 | Reason | Count |
 |--------|-------|
-| SKIP_COOLDOWN | 391 |
-| SKIP_MIN_SHARES | 102 |
+| SKIP_COOLDOWN | 433 |
+| SKIP_MIN_SHARES | 109 |
 
 ## Parameters
 

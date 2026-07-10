@@ -145,13 +145,16 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
             
         prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
         token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
+        no_token_ids_dict = {m["bucket"]: m.get("no_token_id", "") for m in markets}
 
         # Read CLOB depth from the background cache (refreshed every 10 s)
         depth_cache = get_global_depth_cache()
         depth_cache.update_token_ids(
-            {b: t for b, t in token_ids_dict.items() if t}
+            {b: t for b, t in token_ids_dict.items() if t},
+            {b: t for b, t in no_token_ids_dict.items() if t},
         )
         market_depth = depth_cache.get()
+        market_depth_no = depth_cache.get_no()
 
         # --- 構建 Context ---
         context = dict(
@@ -248,6 +251,8 @@ def run_strategy(sid: str, acct: dict, force: bool = False) -> dict:
                 # CLOB order-book depth per bucket
                 if market_depth:
                     _ctx["market_depth"] = market_depth
+                if market_depth_no:
+                    _ctx["market_depth_no"] = market_depth_no
                 # Gamma market metadata
                 gamma_market_info = {}
                 for m in markets:

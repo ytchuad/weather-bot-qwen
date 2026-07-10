@@ -8,6 +8,15 @@ from scipy.optimize import minimize
 
 from .params import EnsembleParams
 
+_FORCE_MID_ONLY = False  # set True to disable CLOB execution; FIXME: make this configurable
+
+try:
+    from app.services.market_depth_service import walk_book
+    _HAVE_WALK_BOOK = True
+except ImportError:
+    walk_book = None
+    _HAVE_WALK_BOOK = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,30 +97,78 @@ class EnsembleStrategy:
     def _compute_fee(self, shares: float, price: float) -> float:
         return shares * self.params.fee_constant * price * (1.0 - price)
 
+    def _clob_exit_price(self, bucket: str, side: str, qty: float,
+                         eff_price: float, clob_depth_yes: dict | None,
+                         clob_depth_no: dict | None) -> float:
+        """CLOB price to close a YES or NO position. Falls back to eff_price."""
+        if side == "YES":
+            depth = (clob_depth_yes or {}).get(bucket, {})
+            p = self._clob_price("SELL", qty * eff_price, depth)
+            return p if p is not None else eff_price
+        else:
+            depth = (clob_depth_no or {}).get(bucket, {})
+            p = self._clob_price("SELL", qty * (1.0 - eff_price), depth)
+            return p if p is not None else eff_price
+
+    def _clob_price(self, side: str, order_value: float,
+                    depth: dict) -> float | None:
+        """Walk CLOB book, return avg fill price or None."""
+        if not _HAVE_WALK_BOOK or not depth or _FORCE_MID_ONLY:
+            return None
+        asks = sorted(depth.get("top_asks", []), key=lambda x: x["price"])
+        bids = sorted(depth.get("top_bids", []), key=lambda x: x["price"], reverse=True)
+
+        if side == "BUY":
+            if not asks:
+                return None
+            result = walk_book("BUY", order_value, asks, bids)
+        else:
+            if not bids:
+                return None
+            result = walk_book("SELL", order_value, asks, bids)
+
+        if result["shares_filled"] <= 0 or result["avg_price"] <= 0:
+            return None
+        return result["avg_price"]
+
     # ── Layer 2: Kelly target optimisation ─────────────────────
 
     def compute_targets(self, ensemble_probs: dict,
                         market_prices: dict,
-                        capital: float) -> dict:
+                        capital: float,
+                        clob_depth_yes: dict | None = None,
+                        clob_depth_no: dict | None = None) -> dict:
         """Multi-outcome Kelly with the plan's constraints.
+
+        When ``clob_depth_yes`` / ``clob_depth_no`` are provided, execution
+        prices are derived from ``walk_book`` on the per-token CLOB order book
+        (multi-level).  Falls back to ``market_price + slippage_fixed``
+        when CLOB is unavailable.
 
         Returns  {bucket: {action, fraction, amount, execution_price, edge, raw_fraction}}
         or empty dict if no candidate meets the edge / price band thresholds.
         """
         candidates = []
         buckets = sorted(ensemble_probs.keys())
+        est_amount = self.params.max_per_bucket_side * capital  # worst-case allocation
 
         for b in buckets:
             p = ensemble_probs[b]
             mkt = market_prices.get(b, 0.5)
 
-            yes_exec = mkt + self.params.slippage_fixed
+            # CLOB price for BUY YES (walk YES ask side)
+            depth_yes = (clob_depth_yes or {}).get(b, {})
+            yes_clob = self._clob_price("BUY", est_amount, depth_yes)
+            yes_exec = yes_clob if yes_clob is not None else (mkt + self.params.slippage_fixed)
             yes_edge = p - yes_exec
             if yes_edge > self.params.edge_threshold and self._price_in_band(yes_exec):
                 candidates.append(("YES", b, p, yes_exec, yes_edge))
 
-            no_exec = (1.0 - mkt) + self.params.slippage_fixed
-            no_edge = mkt - p
+            # CLOB price for BUY NO (walk NO ask side directly)
+            depth_no = (clob_depth_no or {}).get(b, {})
+            no_clob = self._clob_price("BUY", est_amount, depth_no)
+            no_exec = no_clob if no_clob is not None else ((1.0 - mkt) + self.params.slippage_fixed)
+            no_edge = (1.0 - p) - no_exec
             if no_edge > self.params.edge_threshold and self._price_in_band(no_exec):
                 candidates.append(("NO", b, 1.0 - p, no_exec, no_edge))
 
@@ -182,6 +239,7 @@ class EnsembleStrategy:
                   current_cash: float = 0.0,
                   last_trade_times: dict | None = None,
                   clob_depth: dict | None = None,
+                  clob_depth_no: dict | None = None,
                   ) -> dict:
         """Execute one strategy cycle.
 
@@ -233,7 +291,10 @@ class EnsembleStrategy:
 
         # ── Kelly targets (RISK_SEEKING only) ─────────────────
         if mode == "RISK_SEEKING":
-            kelly_targets = self.compute_targets(ensemble_probs, eff_prices, portfolio_value)
+            kelly_targets = self.compute_targets(
+                ensemble_probs, eff_prices, portfolio_value,
+                clob_depth_yes=clob_depth, clob_depth_no=clob_depth_no,
+            )
         else:
             kelly_targets = {}
 
@@ -349,9 +410,9 @@ class EnsembleStrategy:
                     delta = target_shares
                     action = "FLIP"
                     reason = "SIDE_CHANGE"
-                    close_price = eff_prices.get(bucket, 0.5)
-                    if current_side == "NO":
-                        close_price = 1.0 - close_price
+                    close_price = self._clob_exit_price(
+                        bucket, current_side, current_qty,
+                        eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     cf = self._compute_fee(current_qty, close_price)
                     total_fees += cf
                     cash_delta += current_qty * close_price - cf
@@ -417,11 +478,15 @@ class EnsembleStrategy:
                     ltt[bucket] = timestamp
 
             # ── NON-RISK_SEEKING modes ─────────────────────
-            if mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
+            if self.params.exit_behavior == "settlement_only":
+                if mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
+                    if has_pos:
+                        target_positions[bucket] = current
+            elif mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
                 if has_pos:
-                    price = eff_prices.get(bucket, 0.5)
-                    if current["side"] == "NO":
-                        price = 1.0 - price
+                    price = self._clob_exit_price(
+                        bucket, current["side"], current["quantity"],
+                        eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     if price is None or price <= 0:
                         decisions.append({"bucket": bucket, "reason": "SKIP_NO_PRICE"})
                         target_positions[bucket] = current
@@ -449,12 +514,12 @@ class EnsembleStrategy:
                     ltt[bucket] = timestamp
 
         # ── RISK_SEEKING: close positions with no Kelly target ──
-        if mode == "RISK_SEEKING":
+        if mode == "RISK_SEEKING" and self.params.hold_behavior != "never_close":
             for bucket, pos in list(current_positions.items()):
                 if bucket not in target_positions and pos.get("quantity", 0) >= self.params.min_shares:
-                    price = eff_prices.get(bucket, 0.5)
-                    if pos["side"] == "NO":
-                        price = 1.0 - price
+                    price = self._clob_exit_price(
+                        bucket, pos["side"], pos["quantity"],
+                        eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     qty = pos["quantity"]
                     fee = self._compute_fee(qty, price)
                     total_fees += fee

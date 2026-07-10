@@ -62,10 +62,15 @@ def build_strategy_context(acct: StrategyAccount) -> dict[str, Any]:
 
     prices_dict = {m["bucket"]: m.get("yes_price", 0.5) for m in markets}
     token_ids_dict = {m["bucket"]: m.get("token_id", "") for m in markets}
+    no_token_ids_dict = {m["bucket"]: m.get("no_token_id", "") for m in markets}
 
     depth_cache = get_global_depth_cache()
-    depth_cache.update_token_ids({b: t for b, t in token_ids_dict.items() if t})
+    depth_cache.update_token_ids(
+        {b: t for b, t in token_ids_dict.items() if t},
+        {b: t for b, t in no_token_ids_dict.items() if t},
+    )
     market_depth = depth_cache.get()
+    market_depth_no = depth_cache.get_no()
 
     post_mean = results.get(model, {}).get("mean") if results else None
 
@@ -123,6 +128,8 @@ def build_strategy_context(acct: StrategyAccount) -> dict[str, Any]:
         context_json["market_prices"] = prices_dict
     if market_depth:
         context_json["market_depth"] = market_depth
+    if market_depth_no:
+        context_json["market_depth_no"] = market_depth_no
 
     gamma_market_info = {}
     for m in markets:

@@ -31,6 +31,7 @@ class CandidateEnsembleStrategy(EnsembleStrategy):
                   current_cash: float = 0.0,
                   last_trade_times: dict | None = None,
                   clob_depth: dict | None = None,
+                  clob_depth_no: dict | None = None,
                   ) -> dict:
         if last_trade_times is None:
             last_trade_times = {}
@@ -67,7 +68,10 @@ class CandidateEnsembleStrategy(EnsembleStrategy):
 
         # Kelly targets (RISK_SEEKING only)
         if mode == "RISK_SEEKING":
-            kelly_targets = self.compute_targets(ensemble_probs, eff_prices, portfolio_value)
+            kelly_targets = self.compute_targets(
+                ensemble_probs, eff_prices, portfolio_value,
+                clob_depth_yes=clob_depth, clob_depth_no=clob_depth_no,
+            )
         else:
             kelly_targets = {}
 
@@ -183,9 +187,9 @@ class CandidateEnsembleStrategy(EnsembleStrategy):
                     delta = target_shares
                     action = "FLIP"
                     reason = "SIDE_CHANGE"
-                    close_price = eff_prices.get(bucket, 0.5)
-                    if current_side == "NO":
-                        close_price = 1.0 - close_price
+                    close_price = self._clob_exit_price(
+                        bucket, current_side, current_qty,
+                        eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     cf = self._compute_fee(current_qty, close_price)
                     total_fees += cf
                     cash_delta += current_qty * close_price - cf
@@ -250,11 +254,15 @@ class CandidateEnsembleStrategy(EnsembleStrategy):
                     ltt[bucket] = timestamp
 
             # NON-RISK_SEEKING modes
-            if mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
+            if self.params.exit_behavior == "settlement_only":
+                if mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
+                    if has_pos:
+                        target_positions[bucket] = current
+            elif mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
                 if has_pos:
-                    price = eff_prices.get(bucket, 0.5)
-                    if current["side"] == "NO":
-                        price = 1.0 - price
+                    price = self._clob_exit_price(
+                        bucket, current["side"], current["quantity"],
+                        eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     if price is None or price <= 0:
                         decisions.append({"bucket": bucket, "reason": "SKIP_NO_PRICE"})
                         target_positions[bucket] = current
@@ -299,9 +307,9 @@ class CandidateEnsembleStrategy(EnsembleStrategy):
                 delta = new_qty - qty  # negative
                 if delta >= 0:
                     continue
-                price = eff_prices.get(bucket, 0.5)
-                if pos["side"] == "NO":
-                    price = 1.0 - price
+                price = self._clob_exit_price(
+                    bucket, pos["side"], qty,
+                    eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                 fee = self._compute_fee(abs(delta), price)
                 total_fees += fee
                 total_slippage += abs(delta) * self.params.slippage_fixed

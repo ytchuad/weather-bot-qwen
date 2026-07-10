@@ -28,3 +28,6 @@ class EnsembleParams:
     hard_flat_start: float = 15.0
 
     min_rebalance_interval_minutes: float = 10.0
+
+    hold_behavior: str = "close_on_no_edge"
+    exit_behavior: str = "normal"

@@ -337,32 +337,45 @@ class DepthCache:
     .. code-block:: python
 
         cache = DepthCache()
-        cache.update_token_ids({"32-33": "0x...", "33-34": "0x..."})
+        cache.update_token_ids(
+            {"32-33": "0x...", "33-34": "0x..."},
+            {"32-33": "0xNO...", "33-34": "0xNO..."},
+        )
         cache.start()
 
         # … later, from any thread:
-        depths = cache.get()        # dict[str, dict | None]
+        depths = cache.get()        # dict[str, dict | None]  — YES token books
+        no_depths = cache.get_no()  # dict[str, dict | None]  — NO  token books
         depth_33 = depths.get("33-34")
     """
 
     def __init__(self) -> None:
         self._cache: dict[str, dict | None] = {}
+        self._no_cache: dict[str, dict | None] = {}
         self._token_ids: dict[str, str] = {}
+        self._no_token_ids: dict[str, str] = {}
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
 
     # ── public API ────────────────────────────────────────────────
 
-    def update_token_ids(self, token_ids: dict[str, str]) -> None:
-        """Replace the bucket→token-id map (thread-safe)."""
+    def update_token_ids(self, yes_token_ids: dict[str, str],
+                         no_token_ids: dict[str, str] | None = None) -> None:
+        """Replace bucket→token-id maps for YES and optionally NO tokens (thread-safe)."""
         with self._lock:
-            self._token_ids = dict(token_ids)
+            self._token_ids = dict(yes_token_ids)
+            self._no_token_ids = dict(no_token_ids) if no_token_ids else {}
 
     def get(self) -> dict[str, dict | None]:
-        """Return a snapshot of the current cache (thread-safe)."""
+        """Return a snapshot of the current YES-token cache (thread-safe)."""
         with self._lock:
             return dict(self._cache)
+
+    def get_no(self) -> dict[str, dict | None]:
+        """Return a snapshot of the current NO-token cache (thread-safe)."""
+        with self._lock:
+            return dict(self._no_cache)
 
     def start(self) -> None:
         """Start the background refresh thread (daemon)."""
@@ -383,14 +396,19 @@ class DepthCache:
     def _loop(self) -> None:
         while self._running:
             try:
-                # Snapshot current token-ids under the lock
                 with self._lock:
-                    tids = dict(self._token_ids)
+                    yes_tids = dict(self._token_ids)
+                    no_tids = dict(self._no_token_ids)
 
-                if tids:
-                    depths = fetch_market_depths_batch(tids)
+                if yes_tids:
+                    depths = fetch_market_depths_batch(yes_tids)
                     with self._lock:
                         self._cache = depths
+
+                if no_tids:
+                    no_depths = fetch_market_depths_batch(no_tids)
+                    with self._lock:
+                        self._no_cache = no_depths
             except Exception as exc:
                 logger.warning("DepthCache refresh failed: %s", exc)
 
