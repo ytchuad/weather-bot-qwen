@@ -100,19 +100,48 @@ class EnsembleStrategy:
     def _clob_exit_price(self, bucket: str, side: str, qty: float,
                          eff_price: float, clob_depth_yes: dict | None,
                          clob_depth_no: dict | None) -> float:
-        """CLOB price to close a YES or NO position. Falls back to eff_price."""
+        """CLOB price to close a YES or NO position. Falls back to eff_price.
+
+        Walks the bid side selling exactly *qty* shares (trading-sim
+        compatible).  If the book has insufficient depth the walk stops
+        early and the avg price reflects only the shares actually sold.
+        """
         if side == "YES":
             depth = (clob_depth_yes or {}).get(bucket, {})
-            p = self._clob_price("SELL", qty * eff_price, depth)
-            return p if p is not None else eff_price
         else:
             depth = (clob_depth_no or {}).get(bucket, {})
-            p = self._clob_price("SELL", qty * (1.0 - eff_price), depth)
-            return p if p is not None else eff_price
+        no_fallback = 1.0 - eff_price
+        fallback = eff_price if side == "YES" else no_fallback
+
+        bids = depth.get("top_bids", [])
+        if not bids:
+            return fallback
+
+        # Walk bids, selling exactly qty shares
+        remaining = qty
+        total_cost = 0.0
+        sold = 0.0
+        for b in sorted(bids, key=lambda x: x["price"], reverse=True):
+            take = min(b["size"], remaining)
+            total_cost += take * b["price"]
+            sold += take
+            remaining -= take
+            if remaining <= 0:
+                break
+
+        if sold <= 0:
+            return fallback
+        return total_cost / sold
 
     def _clob_price(self, side: str, order_value: float,
                     depth: dict) -> float | None:
         """Walk CLOB book, return avg fill price or None."""
+        walked = self._clob_walk(side, order_value, depth)
+        return walked["avg_price"] if walked else None
+
+    def _clob_walk(self, side: str, order_value: float,
+                   depth: dict) -> dict | None:
+        """Walk CLOB book, return full result dict or None."""
         if not _HAVE_WALK_BOOK or not depth or _FORCE_MID_ONLY:
             return None
         asks = sorted(depth.get("top_asks", []), key=lambda x: x["price"])
@@ -129,7 +158,7 @@ class EnsembleStrategy:
 
         if result["shares_filled"] <= 0 or result["avg_price"] <= 0:
             return None
-        return result["avg_price"]
+        return result
 
     # ── Layer 2: Kelly target optimisation ─────────────────────
 
@@ -218,7 +247,28 @@ class EnsembleStrategy:
             shares = amount / c[3]
             if shares < self.params.min_shares:
                 continue
-            targets[c[1]] = {
+
+            # Re-walk book with actual Kelly amount for precise price + depth check
+            bucket = c[1]
+            if self.params.clob_depth_check and c[3] != 0:
+                depth = ((clob_depth_yes or {}).get(bucket, {})
+                         if c[0] == "YES" else (clob_depth_no or {}).get(bucket, {}))
+                walked = self._clob_walk("BUY", amount, depth)
+                if walked:
+                    refined_price = walked["avg_price"]
+                    # Re-check edge with refined price
+                    p_ref = c[2] if c[0] == "YES" else (1.0 - c[2])
+                    refined_edge = (c[2] - refined_price) if c[0] == "YES" else ((1.0 - c[2]) - refined_price)
+                    if refined_edge >= self.params.edge_threshold:
+                        c = (c[0], c[1], p_ref, refined_price, refined_edge)
+                    # If book can't fully fill, skip
+                    if walked["fill_frac"] < 0.99:
+                        continue
+                    shares = amount / refined_price
+                    if shares < self.params.min_shares:
+                        continue
+
+            targets[bucket] = {
                 "action": "BUY_YES" if c[0] == "YES" else "BUY_NO",
                 "fraction": round(f_final, 6),
                 "amount": round(amount, 2),

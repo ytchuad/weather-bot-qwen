@@ -31,3 +31,7 @@ class EnsembleParams:
 
     hold_behavior: str = "close_on_no_edge"
     exit_behavior: str = "normal"
+
+    # When True, re-walk CLOB book with actual (not estimated) Kelly amount
+    # and reject targets that can't be fully filled at the available depth.
+    clob_depth_check: bool = False
