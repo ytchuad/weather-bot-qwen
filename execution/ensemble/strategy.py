@@ -69,14 +69,16 @@ class EnsembleStrategy:
             ensemble = {k: v / total for k, v in ensemble.items()}
         return ensemble
 
-    @staticmethod
-    def get_time_mode(dt: datetime) -> str:
+    def get_time_mode(self, dt: datetime) -> str:
         t = dt.hour + dt.minute / 60.0
-        if t < 9.0:
+        ms = self.params.morning_start
+        rr = self.params.risk_reduction_start
+        hf = self.params.hard_flat_start
+        if t < ms:
             return "NO_TRADE"
-        if t < 14.0:
+        if t < rr:
             return "RISK_SEEKING"
-        if t < 15.0:
+        if t < hf:
             return "RISK_REDUCTION"
         return "HARD_FLAT_TARGET"
 
@@ -99,8 +101,8 @@ class EnsembleStrategy:
 
     def _clob_exit_price(self, bucket: str, side: str, qty: float,
                          eff_price: float, clob_depth_yes: dict | None,
-                         clob_depth_no: dict | None) -> float:
-        """CLOB price to close a YES or NO position. Falls back to eff_price.
+                         clob_depth_no: dict | None) -> float | None:
+        """CLOB price to close a YES or NO position. Returns None if no bids.
 
         Walks the bid side selling exactly *qty* shares (trading-sim
         compatible).  If the book has insufficient depth the walk stops
@@ -110,12 +112,10 @@ class EnsembleStrategy:
             depth = (clob_depth_yes or {}).get(bucket, {})
         else:
             depth = (clob_depth_no or {}).get(bucket, {})
-        no_fallback = 1.0 - eff_price
-        fallback = eff_price if side == "YES" else no_fallback
 
         bids = depth.get("top_bids", [])
         if not bids:
-            return fallback
+            return None
 
         # Walk bids, selling exactly qty shares
         remaining = qty
@@ -130,7 +130,7 @@ class EnsembleStrategy:
                 break
 
         if sold <= 0:
-            return fallback
+            return None
         return total_cost / sold
 
     def _clob_price(self, side: str, order_value: float,
@@ -185,18 +185,26 @@ class EnsembleStrategy:
             p = ensemble_probs[b]
             mkt = market_prices.get(b, 0.5)
 
-            # CLOB price for BUY YES (walk YES ask side)
+            # CLOB price for BUY YES (walk YES ask side, capped by depth)
             depth_yes = (clob_depth_yes or {}).get(b, {})
-            yes_clob = self._clob_price("BUY", est_amount, depth_yes)
-            yes_exec = yes_clob if yes_clob is not None else (mkt + self.params.slippage_fixed)
+            total_ask_yes = sum(l["price"] * l["size"] for l in depth_yes.get("top_asks", []))
+            capped_yes = min(est_amount, total_ask_yes) if total_ask_yes > 0 else est_amount
+            yes_clob = self._clob_price("BUY", capped_yes, depth_yes)
+            if yes_clob is None:
+                continue
+            yes_exec = yes_clob
             yes_edge = p - yes_exec
             if yes_edge > self.params.edge_threshold and self._price_in_band(yes_exec):
                 candidates.append(("YES", b, p, yes_exec, yes_edge))
 
-            # CLOB price for BUY NO (walk NO ask side directly)
+            # CLOB price for BUY NO (walk NO ask side directly, capped by depth)
             depth_no = (clob_depth_no or {}).get(b, {})
-            no_clob = self._clob_price("BUY", est_amount, depth_no)
-            no_exec = no_clob if no_clob is not None else ((1.0 - mkt) + self.params.slippage_fixed)
+            total_ask_no = sum(l["price"] * l["size"] for l in depth_no.get("top_asks", []))
+            capped_no = min(est_amount, total_ask_no) if total_ask_no > 0 else est_amount
+            no_clob = self._clob_price("BUY", capped_no, depth_no)
+            if no_clob is None:
+                continue
+            no_exec = no_clob
             no_edge = (1.0 - p) - no_exec
             if no_edge > self.params.edge_threshold and self._price_in_band(no_exec):
                 candidates.append(("NO", b, 1.0 - p, no_exec, no_edge))
@@ -457,12 +465,20 @@ class EnsembleStrategy:
                     action = "INCREASE" if delta > 0 else "REDUCE"
                     reason = "REBALANCE"
                 else:
-                    delta = target_shares
-                    action = "FLIP"
-                    reason = "SIDE_CHANGE"
                     close_price = self._clob_exit_price(
                         bucket, current_side, current_qty,
                         eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
+                    if close_price is None:
+                        target_positions[bucket] = current
+                        decisions.append({
+                            "bucket": bucket,
+                            "reason": "SKIP_NO_PRICE",
+                            "detail": "flip_no_bids",
+                        })
+                        continue
+                    delta = target_shares
+                    action = "FLIP"
+                    reason = "SIDE_CHANGE"
                     cf = self._compute_fee(current_qty, close_price)
                     total_fees += cf
                     cash_delta += current_qty * close_price - cf
@@ -570,6 +586,14 @@ class EnsembleStrategy:
                     price = self._clob_exit_price(
                         bucket, pos["side"], pos["quantity"],
                         eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
+                    if price is None or price <= 0:
+                        target_positions[bucket] = pos
+                        decisions.append({
+                            "bucket": bucket,
+                            "reason": "SKIP_NO_PRICE",
+                            "detail": "edge_disappeared_no_bids",
+                        })
+                        continue
                     qty = pos["quantity"]
                     fee = self._compute_fee(qty, price)
                     total_fees += fee

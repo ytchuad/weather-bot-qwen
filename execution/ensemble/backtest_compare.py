@@ -380,6 +380,8 @@ def run_variant(label: str, exclude: list[str],
         "skip_counts": skip_counts,
         "strategy_params": params,
         "deterministic_events": sum(1 for f in all_fills if f.get("action", "").startswith("BREAKOUT_")),
+        "fills": all_fills,
+        "equity_curve": equity_curve,
     }
 
     # Write CSV output if requested
