@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "strategies": {
+    "enhanced_v1_paper": {
+      "id": "enhanced_v1_paper",
+      "label": "Conservative Core (Model A)",
+      "model": "model_a",
+      "capital": 500.0,
+      "initial_capital": 500.0,
+      "market_template": "hk-tmax",
+      "status": "running",
+      "scheduler_on": true,
+      "last_run": "2026-07-02T15:59:39.791628+00:00",
+      "params": {
+        "bias": 0,
+        "std_mult": 1.5,
+        "kelly_fraction": 0.15
+      },
+      "from_strategy_key": "enhanced_v1_paper",
+      "gate_config_override": null
+    },
+    "enhanced_v2_paper": {
+      "id": "enhanced_v2_paper",
+      "label": "Balanced Growth (Model B)",
+      "model": "model_b",
+      "capital": 500.0,
+      "initial_capital": 500.0,
+      "market_template": "hk-tmax",
+      "status": "running",
+      "scheduler_on": true,
+      "last_run": "2026-07-02T15:59:40.651158+00:00",
+      "params": {
+        "bias": 0,
+        "std_mult": 1.0,
+        "kelly_fraction": 0.25
+      },
+      "from_strategy_key": "enhanced_v2_paper",
+      "gate_config_override": null
+    },
+    "enhanced_v3_aggressive_paper": {
+      "id": "enhanced_v3_aggressive_paper",
+      "label": "Aggressive Upside (Model G)",
+      "model": "model_g",
+      "capital": 500.0,
+      "initial_capital": 500.0,
+      "market_template": "hk-tmax",
+      "status": "running",
+      "scheduler_on": true,
+      "last_run": null,
+      "params": {
+        "bias": -0.3,
+        "std_mult": 1.0,
+        "kelly_fraction": 0.30
+      },
+      "from_strategy_key": "enhanced_v3_aggressive_paper",
+      "gate_config_override": null
+    }
+  }
+}

@@ -1,24 +1,24 @@
 # Simulation Summary
 
-- **Backtest date**: 2026-07-07 21:40
-- **Dates analysed**: 2026-07-01, 2026-07-02, 2026-07-03, 2026-07-05, 2026-07-06, 2026-07-07
+- **Backtest date**: 2026-07-11 18:36
+- **Dates analysed**: 2026-07-01, 2026-07-02, 2026-07-03, 2026-07-05, 2026-07-06, 2026-07-07, 2026-07-08, 2026-07-09, 2026-07-10, 2026-07-11
 - **Strategy**: Ensemble A/B/C (equal-weight)
 
 ## Capital & Return
 
 - **Capital start**: $1000.00
-- **Capital end**: $1529.02
-- **Total return**: 52.90%
-- **Sharpe ratio** (daily, annualised): 11.1226
-- **Max drawdown**: 10.54%
+- **Capital end**: $2561.06
+- **Total return**: 156.11%
+- **Sharpe ratio** (daily, annualised): 10.6209
+- **Max drawdown**: 23.03%
 
 ## Trades
 
-- **Total trades**: 216
-- **Total fees**: $112.44
-- **Total slippage**: $24.19
-- **YES buy trades**: 51
-- **NO buy trades**: 51
+- **Total trades**: 742
+- **Total fees**: $517.76
+- **Total slippage**: $64.77
+- **YES buy trades**: 133
+- **NO buy trades**: 235
 
 ## Daily Performance
 
@@ -29,7 +29,11 @@
 | 2026-07-03 | $+136.00 | +13.53% |
 | 2026-07-05 | $+386.00 | +33.83% |
 | 2026-07-06 | $+0.00 | +0.00% |
-| 2026-07-07 | $+2.00 | +0.13% |
+| 2026-07-07 | $+14.41 | +0.94% |
+| 2026-07-08 | $+107.72 | +6.99% |
+| 2026-07-09 | $-5.09 | -0.31% |
+| 2026-07-10 | $-43.10 | -2.62% |
+| 2026-07-11 | $+960.08 | +59.97% |
 
 ## Risk-Reduction Mode Summary
 
@@ -43,13 +47,13 @@
 
 ## Breakout Handling Summary
 
-- Deterministic events triggered: 3
+- Deterministic events triggered: 5
 
 ## Skipped / Rejected Trades by Reason
 
 | Reason | Count |
 |--------|-------|
-| SKIP_MIN_SHARES | 117 |
+| SKIP_MIN_SHARES | 228 |
 
 ## Parameters
 
