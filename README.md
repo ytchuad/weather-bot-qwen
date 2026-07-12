@@ -329,9 +329,10 @@ The app runs on Streamlit Cloud's 1 GB RAM limit. The following optimisations ar
 ### Minimal Run (using pre‑built data & models)
 ```bash
 pip install -r requirements.txt
-streamlit run app/main.py                       # modular app (recommended)
-# or
-streamlit run dashboard.py                      # legacy entry point
+uvicorn app.api.server:app --host 0.0.0.0 --port 7860   # FastAPI backend + React UI
+
+# Build the React frontend (optional, served from app/frontend/dist):
+#   cd app/frontend && npm install && npm run build && cd ../..
 
 ## Full Rebuild (from raw inputs)
 1. Prepare historical observations
@@ -360,7 +361,7 @@ python features/build_intraday_minute_features.py
 python models/train_minute_model_a.py
 
 7. Launch dashboard
-streamlit run app/main.py
+uvicorn app.api.server:app --host 0.0.0.0 --port 7860
 
 ### Strategy Runner (Headless CLI)
 ```bash
@@ -534,8 +535,8 @@ Weather_Bot_Qwen/
 │   ├── daily_update.yml         # daily data sync
 │   ├── hourly_update.yml        # hourly forward-test & rebalancer
 │   └── run_strategies.yml       # headless strategy execution (every 5 min)
-├── app/main.py                  # Streamlit entry point (recommended)
-├── dashboard.py                 # legacy single-file entry point (deprecated)
+├── app/api/server.py           # FastAPI entry point (serves React UI from app/frontend/dist)
+├── app/frontend/               # React UI (build with `npm run build` -> app/frontend/dist)
 ├── config.yaml                  # execution.allow_live_orders: false
 ├── requirements.txt
 └── README.md

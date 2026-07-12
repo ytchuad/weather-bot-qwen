@@ -28,4 +28,4 @@ COPY --from=frontend-build --chown=user /src/app/frontend/dist ./app/frontend/di
 
 EXPOSE 7860
 
-CMD ["sh", "-c", "if [ \"$APP_MODE\" = \"api\" ]; then uvicorn app.api.server:app --host 0.0.0.0 --port 7860; else streamlit run streamlit_app.py --server.port=7860 --server.address=0.0.0.0; fi"]
+CMD ["uvicorn", "app.api.server:app", "--host", "0.0.0.0", "--port", "7860"]
