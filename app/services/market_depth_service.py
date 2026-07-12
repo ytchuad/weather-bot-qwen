@@ -313,10 +313,16 @@ def fetch_market_depths_batch(
     token_ids = [bucket_token_map[b] for b in buckets]
 
     books = fetch_order_books_batch(token_ids)
+    # The CLOB ``POST /books`` endpoint does NOT guarantee the response order
+    # matches the request order, so align by ``asset_id`` instead of position.
+    by_asset: dict[str, dict] = {}
+    for raw in books:
+        if isinstance(raw, dict) and raw.get("asset_id"):
+            by_asset[raw["asset_id"]] = raw
     result: dict[str, dict | None] = {}
-    for i, bucket in enumerate(buckets):
-        book = books[i] if i < len(books) else None
-        result[bucket] = compute_depth_summary(book)
+    for bucket in buckets:
+        raw = by_asset.get(bucket_token_map[bucket])
+        result[bucket] = compute_depth_summary(raw)
     return result
 
 

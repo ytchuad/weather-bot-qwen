@@ -33,15 +33,21 @@
     },
     "enhanced_v2_paper": {
       "strategy": "enhanced_v2_paper",
-      "status": "running",
+      "status": "idle",
       "last_run": null,
-      "scheduler_on": true
+      "scheduler_on": false
     },
-    "enhanced_v3_aggressive_paper": {
-      "strategy": "enhanced_v3_aggressive_paper",
-      "status": "running",
+    "enhanced_v2_aggressive_paper": {
+      "strategy": "enhanced_v2_aggressive_paper",
+      "status": "idle",
       "last_run": null,
-      "scheduler_on": true
+      "scheduler_on": false
+    },
+    "enhanced_v2_conservative_paper": {
+      "strategy": "enhanced_v2_conservative_paper",
+      "status": "idle",
+      "last_run": null,
+      "scheduler_on": false
     }
   }
 }

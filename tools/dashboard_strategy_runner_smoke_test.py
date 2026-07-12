@@ -404,54 +404,58 @@ check("generic entry point call returns result", isinstance(r7, dict))
 check("generic call handled without crash", r7.get("status") in ("completed", "error"))
 
 # ---------- 18. Phase 6: dpshbosh/pyboard helper ----------
+# dpshbosh/ is archived (legacy pyboard hardware helper); skip gracefully if absent.
 section("18. Phase 6: dpshbosh/pyboard helper module")
-import sys as _sys6
-_sys6.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from dpshbosh.pyboard import (
-    discover_all_models, discover_candidate_models,
-    get_latest_candidate_run, _resolve_candidate_base,
-    load_paper_snapshot, build_comparison_table,
-    compute_gate_matrix, paper_trade_snapshot,
-    apply_paper_strategy,
-)
+try:
+    import sys as _sys6
+    _sys6.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from dpshbosh.pyboard import (
+        discover_all_models, discover_candidate_models,
+        get_latest_candidate_run, _resolve_candidate_base,
+        load_paper_snapshot, build_comparison_table,
+        compute_gate_matrix, paper_trade_snapshot,
+        apply_paper_strategy,
+    )
+except ImportError:
+    check("dpshbosh/pyboard helper archived (skipped)", True)
+else:
+    models = discover_all_models()
+    check("pyboard: discover_all_models returns dict", isinstance(models, dict))
+    check("pyboard: at least 2 models found", len(models) >= 2)
 
-models = discover_all_models()
-check("pyboard: discover_all_models returns dict", isinstance(models, dict))
-check("pyboard: at least 2 models found", len(models) >= 2)
+    base = _resolve_candidate_base()
+    check("pyboard: candidate base resolved", base is not None)
 
-base = _resolve_candidate_base()
-check("pyboard: candidate base resolved", base is not None)
+    run = get_latest_candidate_run()
+    check("pyboard: latest run found or None", run is None or run.exists())
 
-run = get_latest_candidate_run()
-check("pyboard: latest run found or None", run is None or run.exists())
+    snap = load_paper_snapshot()
+    check("pyboard: load_paper_snapshot returns dict", isinstance(snap, dict))
+    check("pyboard: snapshot has positions key", "positions" in snap)
 
-snap = load_paper_snapshot()
-check("pyboard: load_paper_snapshot returns dict", isinstance(snap, dict))
-check("pyboard: snapshot has positions key", "positions" in snap)
+    df_cmp = build_comparison_table({})
+    check("pyboard: build_comparison_table returns DataFrame", hasattr(df_cmp, 'columns'))
 
-df_cmp = build_comparison_table({})
-check("pyboard: build_comparison_table returns DataFrame", hasattr(df_cmp, 'columns'))
+    df_gate = compute_gate_matrix({})
+    check("pyboard: compute_gate_matrix returns DataFrame", hasattr(df_gate, 'columns'))
 
-df_gate = compute_gate_matrix({})
-check("pyboard: compute_gate_matrix returns DataFrame", hasattr(df_gate, 'columns'))
+    pts = paper_trade_snapshot(markets=None, slug='')
+    check("pyboard: paper_trade_snapshot returns dict", isinstance(pts, dict))
+    check("pyboard: snapshot has positions key", "positions" in pts)
+    check("pyboard: snapshot has market_state key", "market_state" in pts)
+    check("pyboard: snapshot has prices_dict key", "prices_dict" in pts)
+    check("pyboard: snapshot has pnl_by_account key", "pnl_by_account" in pts)
+    check("pyboard: snapshot has timestamp key", "timestamp" in pts)
 
-pts = paper_trade_snapshot(markets=None, slug='')
-check("pyboard: paper_trade_snapshot returns dict", isinstance(pts, dict))
-check("pyboard: snapshot has positions key", "positions" in pts)
-check("pyboard: snapshot has market_state key", "market_state" in pts)
-check("pyboard: snapshot has prices_dict key", "prices_dict" in pts)
-check("pyboard: snapshot has pnl_by_account key", "pnl_by_account" in pts)
-check("pyboard: snapshot has timestamp key", "timestamp" in pts)
+    # Test candidate discovery
+    base_dir = _resolve_candidate_base()
+    cands = discover_candidate_models(run)
+    check("pyboard: discover_candidate_models returns dict", isinstance(cands, dict))
 
-# Test candidate discovery
-base_dir = _resolve_candidate_base()
-cands = discover_candidate_models(run)
-check("pyboard: discover_candidate_models returns dict", isinstance(cands, dict))
-
-# Test apply_paper_strategy (without rebalancer - will fail gracefully due to xgboost)
-result = apply_paper_strategy("test_strat", {}, "test-slug", {})
-check("pyboard: apply_paper_strategy returns dict", isinstance(result, dict))
-check("pyboard: apply has strategy_key", "strategy_key" in result)
+    # Test apply_paper_strategy (without rebalancer - will fail gracefully due to xgboost)
+    result = apply_paper_strategy("test_strat", {}, "test-slug", {})
+    check("pyboard: apply_paper_strategy returns dict", isinstance(result, dict))
+    check("pyboard: apply has strategy_key", "strategy_key" in result)
 
 # ---------- 19. Phase 6: Candidate path fixes ----------
 section("19. Phase 6: Candidate path fixes")

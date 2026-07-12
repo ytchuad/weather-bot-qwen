@@ -79,18 +79,18 @@ The **trading‑related modules** are separated as an optional **research, paper
 - Paper positions & PnL tracking
 - Forward‑test performance tracking
 - **Strategy-Centric Architecture**: Self-contained strategies with per‑strategy capital, model selection, market template, and gate pipeline
-- **Headless Auto-Runner**: GitHub Actions cron (every 5 min) runs enabled strategies outside Streamlit
+- **Headless Auto-Runner**: GitHub Actions cron (every 5 min) runs enabled strategies (headless)
 
 ---
 
 ## Tech Stack
 
-- **Language**: Python 3.14 (Streamlit Cloud)
+- **Language**: Python 3.14 (Hugging Face Spaces)
 - **Data**: pandas, numpy, xarray, Parquet
 - **Machine Learning**: XGBoost (long‑horizon), LightGBM (intraday quantile & classifiers)
-- **Dashboard**: Streamlit (modular `app/` package), Plotly
+- **Dashboard**: FastAPI backend (`app/api/`) + React frontend (`app/frontend/`), Plotly
 - **APIs**: requests (HKO, Polymarket Gamma, Polymarket CLOB)
-- **Deployment**: GitHub + Streamlit Cloud, GitHub Actions
+- **Deployment**: GitHub + Hugging Face Spaces, GitHub Actions
 
 ---
 
@@ -269,7 +269,7 @@ The system was rebuilt from a **portfolio-centric** to a **strategy-centric** mo
 
 ---
 
-## Dashboard (Streamlit)
+## Dashboard (FastAPI + React)
 
 The dashboard has been restructured from the old portfolio-centric layout into a **strategy-centric** interface:
 
@@ -297,30 +297,29 @@ The dashboard has been restructured from the old portfolio-centric layout into a
 
 **Model labeling**: Each model's decision detail section is labelled with its model name (基準線 Baseline / 降雨觀測 / 即時降雨預報 / 閘門集成) for easy identification.
 
-**Live demo** (if available): *[Streamlit Cloud URL]*
+**Live demo** (if available): *[Hugging Face Spaces URL]*
 
 ---
 
 ## Memory Management
 
-The app runs on Streamlit Cloud's 1 GB RAM limit. The following optimisations are applied:
+The app is deployed on Hugging Face Spaces. The following optimisations are applied:
 
-- **Background scheduler** runs as a daemon thread (not `streamlit-autorefresh`) — avoids extra page re-renders
+- **Background scheduler** runs as a daemon thread inside the FastAPI process — polls `strategy_accounts.json` every 30 seconds; only strategies with `scheduler_on: true` and 5-minute cooldown are run.
 - **Lazy library imports**: `xgboost` and `scipy.stats.norm` are imported on first call rather than at module load — saves ~70–140 MB of peak startup RAM
-- **`@st.cache_resource`** on `load_models()` and `_load_models()` ensures model objects are created once per process (via `_maybe_st_cache_resource` helper that works both in and out of Streamlit)
-- **`@st.cache_data(ttl=120)`** on `get_intraday_state()` and `_load_rain_data_cached()` — parquet reads are cached, preventing 3 MB of I/O per auto‑refresh
+- **Model caching**: `models/inference.py` caches loaded model objects per process (the `_maybe_st_cache_resource` helper gracefully degrades when Streamlit is absent), so models are built once per worker.
+- **Parquet read caching**: intraday/rainfall parquet reads are cached (TTL 120s) — prevents ~3 MB of I/O per scheduler cycle
 - **`.gitignore` exclusions** — ~150 MB of unused files (ECMWF GRIB, candidate model directories, duplicate `active/`/`archive/` models, HTML/PNG visualisations) are excluded from deployment
-- **Trade log & PnL history** are capped (1000 and 500 entries respectively) in `st.session_state`
 - **`__init__.py`** in `models/` and `features/` ensures regular package behaviour in Python 3.14 (avoids namespace‑package resolution failures)
 
 ## Deployment & Automation
 
-- **Streamlit Cloud**: Automatically deploys from `main` branch on push.
+- **Hugging Face Spaces**: Automatically deploys from `main` branch on push.
 - **GitHub Actions**:
   - `daily_update.yml` — Daily data sync (intraday, forecast, model performance) at 00:30 and 12:30 UTC.
   - `hourly_update.yml` — Forward test logger and auto-rebalancer every hour.
   - `run_strategies.yml` — Headless strategy execution every 5 minutes (reads strategy_accounts.json, runs enabled strategies, trades paper positions, commits data changes).
-- **Secrets**: API keys, wallet credentials, or trading keys must **never** be committed. Use Streamlit secrets and GitHub Actions secrets.
+- **Secrets**: API keys, wallet credentials, or trading keys must **never** be committed. Use Hugging Face Spaces secrets and GitHub Actions secrets.
 
 ---
 
@@ -386,7 +385,7 @@ python -m execution.auto_runner --list           # list enabled strategies
 
 ✅ Dynamic rebalancing & paper PnL tracking
 
-✅ Streamlit dashboard with live rainfall integration
+✅ Web dashboard (FastAPI + React) with live rainfall integration
 
 ✅ Strategy runner system (8 paper‑only strategies, config-driven gates)
 
@@ -481,7 +480,7 @@ Weather_Bot_Qwen/
 │   ├── current_positions.json    # paper positions by strategy_key
 │   ├── pnl_history/              # per-strategy PnL snapshots
 │   └── auto_runner_log.json      # headless execution audit trail
-├── app/                    # Streamlit modular app package
+├── app/                    # FastAPI + React app package
 │   ├── main.py                  # entry point, navigation, scheduler
 │   ├── pages/
 │   │   ├── page_hub.py          # overview dashboard
