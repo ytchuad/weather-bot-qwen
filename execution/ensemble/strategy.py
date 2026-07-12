@@ -99,6 +99,25 @@ class EnsembleStrategy:
     def _compute_fee(self, shares: float, price: float) -> float:
         return shares * self.params.fee_constant * price * (1.0 - price)
 
+    def _gamma_exit_price(self, side: str, mkt_price: float) -> float:
+        """Gamma-mid exit price for closing a YES/NO position.
+
+        Sells at the Gamma mid.  For YES we sell the YES token at the YES
+        mid; for NO we sell the NO token at the NO mid (1 - YES mid).
+        """
+        if side == "YES":
+            return max(0.001, min(0.999, mkt_price))
+        return max(0.001, min(0.999, 1.0 - mkt_price))
+
+    def _exit_price(self, bucket: str, side: str, qty: float,
+                    eff_price: float, clob_depth_yes: dict | None,
+                    clob_depth_no: dict | None) -> float | None:
+        """Resolve an exit/close price honoring the ``gamma_mid`` flag."""
+        if self.params.gamma_mid:
+            return self._gamma_exit_price(side, eff_price)
+        return self._clob_exit_price(bucket, side, qty, eff_price,
+                                     clob_depth_yes, clob_depth_no)
+
     def _clob_exit_price(self, bucket: str, side: str, qty: float,
                          eff_price: float, clob_depth_yes: dict | None,
                          clob_depth_no: dict | None) -> float | None:
@@ -166,13 +185,21 @@ class EnsembleStrategy:
                         market_prices: dict,
                         capital: float,
                         clob_depth_yes: dict | None = None,
-                        clob_depth_no: dict | None = None) -> dict:
+                        clob_depth_no: dict | None = None,
+                        exposure_cap: float | None = None) -> dict:
         """Multi-outcome Kelly with the plan's constraints.
+
+        *exposure_cap* overrides ``params.total_exposure_cap`` for this call
+        only (used by partial-reduction tapering; never mutates params).
 
         When ``clob_depth_yes`` / ``clob_depth_no`` are provided, execution
         prices are derived from ``walk_book`` on the per-token CLOB order book
         (multi-level).  Falls back to ``market_price + slippage_fixed``
         when CLOB is unavailable.
+
+        When ``params.gamma_mid`` is True, CLOB depth is ignored and every
+        candidate is filled at the Gamma mid (``market_prices``) directly —
+        used for pre-CLOB-fix snapshots or a pure market-price evaluation.
 
         Returns  {bucket: {action, fraction, amount, execution_price, edge, raw_fraction}}
         or empty dict if no candidate meets the edge / price band thresholds.
@@ -180,6 +207,75 @@ class EnsembleStrategy:
         candidates = []
         buckets = sorted(ensemble_probs.keys())
         est_amount = self.params.max_per_bucket_side * capital  # worst-case allocation
+        exposure_cap = (self.params.total_exposure_cap
+                        if exposure_cap is None else exposure_cap)
+
+        # Gamma-mid mode: execute at the market mid, ignore CLOB entirely.
+        if self.params.gamma_mid:
+            for b in buckets:
+                p = ensemble_probs[b]
+                mkt = market_prices.get(b, 0.5)
+                if not self._price_in_band(mkt):
+                    continue
+                yes_edge = p - mkt
+                if yes_edge > self.params.edge_threshold:
+                    candidates.append(("YES", b, p, mkt, yes_edge))
+                no_edge = (1.0 - p) - (1.0 - mkt)
+                if no_edge > self.params.edge_threshold:
+                    candidates.append(("NO", b, 1.0 - p, 1.0 - mkt, no_edge))
+            n = len(candidates)
+            if n == 0:
+                return {}
+            outcomes = buckets
+            outcome_probs = np.array([ensemble_probs.get(x, 0.0) for x in outcomes], dtype=float)
+
+            def neg_log_wealth(f):
+                total_f = np.sum(f)
+                expected = 0.0
+                for i, x in enumerate(outcomes):
+                    p_x = outcome_probs[i]
+                    if p_x <= 1e-9:
+                        continue
+                    payout = 0.0
+                    for k, c in enumerate(candidates):
+                        if (c[0] == "YES" and c[1] == x) or (c[0] == "NO" and c[1] != x):
+                            payout += f[k] / c[3]
+                    w = 1.0 - total_f + payout
+                    w = max(w, 1e-9)
+                    expected += p_x * np.log(w)
+                return -expected
+
+            bounds = [(0.0, self.params.max_per_bucket_side) for _ in range(n)]
+            cons = [{"type": "ineq", "fun": lambda f: exposure_cap - np.sum(f)}]
+            f0 = np.full(n, 0.01)
+            try:
+                res = minimize(neg_log_wealth, f0, method="SLSQP",
+                               bounds=bounds, constraints=cons,
+                               options={"maxiter": 500, "ftol": 1e-9})
+                opt_f = res.x
+            except Exception as exc:
+                logger.warning("Kelly optimisation failed: %s", exc)
+                opt_f = np.zeros(n)
+
+            targets = {}
+            for k, c in enumerate(candidates):
+                f_raw = float(opt_f[k])
+                if f_raw <= 1e-4:
+                    continue
+                f_final = f_raw * self.params.kelly_fraction
+                amount = f_final * capital
+                shares = amount / c[3]
+                if shares < self.params.min_shares:
+                    continue
+                targets[b] = {
+                    "action": "BUY_YES" if c[0] == "YES" else "BUY_NO",
+                    "fraction": round(f_final, 6),
+                    "amount": round(amount, 2),
+                    "execution_price": c[3],
+                    "edge": round(c[4], 4),
+                    "raw_fraction": round(f_raw, 6),
+                }
+            return targets
 
         for b in buckets:
             p = ensemble_probs[b]
@@ -233,7 +329,7 @@ class EnsembleStrategy:
             return -expected
 
         bounds = [(0.0, self.params.max_per_bucket_side) for _ in range(n)]
-        cons = [{"type": "ineq", "fun": lambda f: self.params.total_exposure_cap - np.sum(f)}]
+        cons = [{"type": "ineq", "fun": lambda f: exposure_cap - np.sum(f)}]
         f0 = np.full(n, 0.01)
 
         try:
@@ -285,6 +381,101 @@ class EnsembleStrategy:
                 "raw_fraction": round(f_raw, 6),
             }
         return targets
+
+    def _partial_reduce_targets(self, *,
+                                timestamp: datetime,
+                                ensemble_probs: dict,
+                                eff_prices: dict,
+                                market_prices: dict,
+                                current_positions: dict,
+                                portfolio_value: float,
+                                clob_depth: dict | None,
+                                clob_depth_no: dict | None,
+                                skip: set | None = None) -> tuple:
+        """RISK_REDUCTION as a *linear taper* of exposure (not a full flat).
+
+        Between ``risk_reduction_start`` (rr) and ``hard_flat_start`` (hf) the
+        ``total_exposure_cap`` shrinks linearly from its full value to 0.  We
+        re-run the Kelly sizing with that shrunk cap and only *reduce* toward
+        the new (smaller) target — never force-close below it, never flip.
+        Positions are left untouched once the tapered target is reached.
+
+        Returns a tuple
+        ``(targets, fills, decisions, fees, slippage, cash_delta, ltt_changes)``
+        where *targets* is a subset of the input positions (reduced per the
+        taper) and the rest are the trade effects to be merged by the caller.
+        """
+        rr = self.params.risk_reduction_start
+        hf = self.params.hard_flat_start
+        # Target exposure fraction in [0, 1] over the rr→hf window.
+        frac = 1.0 - max(0.0, min(1.0, (timestamp.hour + timestamp.minute / 60.0 - rr) / (hf - rr)))
+
+        taper_cap = self.params.total_exposure_cap * frac
+        kelly = self.compute_targets(
+            ensemble_probs, eff_prices, portfolio_value,
+            clob_depth_yes=clob_depth, clob_depth_no=clob_depth_no,
+            exposure_cap=taper_cap,
+        )
+
+        targets: dict = {}
+        fills: list[dict] = []
+        decisions: list[dict] = []
+        fees = 0.0
+        slippage = 0.0
+        cash_delta = 0.0
+        ltt_changes: dict = {}
+        skip = skip or set()
+
+        for bucket, pos in current_positions.items():
+            if bucket in skip:
+                # Deterministic breakout handles this bucket in the main loop.
+                continue
+            qty = pos.get("quantity", 0.0)
+            if qty < self.params.min_shares:
+                targets[bucket] = pos
+                continue
+            kt = kelly.get(bucket)
+            target_qty = int(kt["amount"] / kt["execution_price"]) if kt else 0
+            # Only reduce (never increase, never flip) during taper.
+            if target_qty >= qty:
+                targets[bucket] = pos
+                continue
+            price = self._exit_price(
+                bucket, pos["side"], abs(qty - target_qty),
+                eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
+            if price is None or price <= 0:
+                targets[bucket] = pos
+                continue
+            delta = target_qty - qty  # negative
+            fee = self._compute_fee(abs(delta), price)
+            fees += fee
+            slippage += abs(delta) * self.params.slippage_fixed
+            cash_delta += abs(delta) * price - fee
+            action = "CLOSE" if target_qty <= 0 else "REDUCE"
+            fills.append({
+                "bucket": bucket, "side": pos["side"],
+                "action": action, "shares_delta": delta,
+                "execution_price": price,
+                "market_yes_price": market_prices.get(bucket),
+                "market_no_price": 1.0 - market_prices.get(bucket, 0.5),
+                "fee": round(fee, 4),
+                "slippage": round(self.params.slippage_fixed, 4),
+                "position_before": qty,
+                "position_after": target_qty,
+                "reason": "RISK_REDUCTION_TAPER",
+            })
+            decisions.append({
+                "bucket": bucket, "execution_price": price,
+                "reason": "RISK_REDUCTION_TAPER",
+            })
+            ltt_changes[bucket] = timestamp
+            if target_qty > 0:
+                targets[bucket] = {**pos, "quantity": target_qty}
+            else:
+                # Fully tapered out — record as closed so the per-bucket loop
+                # doesn't double-close it (and the merge block won't either).
+                targets[bucket] = {**pos, "quantity": 0}
+        return targets, fills, decisions, fees, slippage, cash_delta, ltt_changes
 
     # ── Layer 3: full cycle ────────────────────────────────────
 
@@ -358,6 +549,28 @@ class EnsembleStrategy:
 
         all_buckets = set(ensemble_probs.keys()) | set(current_positions.keys())
         target_positions = {}
+
+        # ── Partial-reduction taper (RISK_REDUCTION only) ────
+        # Precompute the tapered targets once so the per-bucket loop can read
+        # them.  When partial_reduction is False this stays empty and the
+        # original full-flat behavior is used unchanged.
+        taper = {}
+        if mode == "RISK_REDUCTION" and self.params.partial_reduction:
+            taper_targets, taper_fills, taper_decisions, taper_fees, \
+                taper_slippage, taper_cash, taper_ltt = self._partial_reduce_targets(
+                    timestamp=timestamp, ensemble_probs=ensemble_probs,
+                    eff_prices=eff_prices, market_prices=market_prices,
+                    current_positions=current_positions,
+                    portfolio_value=portfolio_value,
+                    clob_depth=clob_depth, clob_depth_no=clob_depth_no,
+                    skip=set(det_prices),
+                )
+            taper = {
+                "targets": taper_targets, "fills": taper_fills,
+                "decisions": taper_decisions, "fees": taper_fees,
+                "slippage": taper_slippage, "cash": taper_cash,
+                "ltt": taper_ltt,
+            }
 
         for bucket in sorted(all_buckets):
             current = current_positions.get(bucket)
@@ -465,7 +678,7 @@ class EnsembleStrategy:
                     action = "INCREASE" if delta > 0 else "REDUCE"
                     reason = "REBALANCE"
                 else:
-                    close_price = self._clob_exit_price(
+                    close_price = self._exit_price(
                         bucket, current_side, current_qty,
                         eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     if close_price is None:
@@ -550,7 +763,14 @@ class EnsembleStrategy:
                         target_positions[bucket] = current
             elif mode in ("RISK_REDUCTION", "HARD_FLAT_TARGET", "NO_TRADE"):
                 if has_pos:
-                    price = self._clob_exit_price(
+                    # Partial-reduction taper: take the precomputed reduced
+                    # target for this bucket instead of force-closing it.
+                    if mode == "RISK_REDUCTION" and taper:
+                        tgt = taper["targets"].get(bucket)
+                        if tgt is not None:
+                            target_positions[bucket] = tgt
+                            continue
+                    price = self._exit_price(
                         bucket, current["side"], current["quantity"],
                         eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     if price is None or price <= 0:
@@ -579,11 +799,20 @@ class EnsembleStrategy:
                     })
                     ltt[bucket] = timestamp
 
+        # ── Merge taper trade effects (computed once above) ──
+        if taper:
+            fills.extend(taper["fills"])
+            decisions.extend(taper["decisions"])
+            total_fees += taper["fees"]
+            total_slippage += taper["slippage"]
+            cash_delta += taper["cash"]
+            ltt.update(taper["ltt"])
+
         # ── RISK_SEEKING: close positions with no Kelly target ──
         if mode == "RISK_SEEKING" and self.params.hold_behavior != "never_close":
             for bucket, pos in list(current_positions.items()):
                 if bucket not in target_positions and pos.get("quantity", 0) >= self.params.min_shares:
-                    price = self._clob_exit_price(
+                    price = self._exit_price(
                         bucket, pos["side"], pos["quantity"],
                         eff_prices.get(bucket, 0.5), clob_depth, clob_depth_no)
                     if price is None or price <= 0:

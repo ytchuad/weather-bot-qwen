@@ -27,6 +27,12 @@ class EnsembleParams:
     risk_reduction_start: float = 14.0
     hard_flat_start: float = 15.0
 
+    # When True, RISK_REDUCTION tapers exposure linearly (re-run Kelly with a
+    # shrinking total_exposure_cap) instead of flattening everything at once.
+    # HARD_FLAT_TARGET still means a true full close.  Default False keeps the
+    # original behavior (RISK_REDUCTION == full flat) unchanged.
+    partial_reduction: bool = False
+
     min_rebalance_interval_minutes: float = 10.0
 
     hold_behavior: str = "close_on_no_edge"
@@ -35,3 +41,9 @@ class EnsembleParams:
     # When True, re-walk CLOB book with actual (not estimated) Kelly amount
     # and reject targets that can't be fully filled at the available depth.
     clob_depth_check: bool = False
+
+    # When True, execute at the Gamma mid (market_prices) directly and ignore
+    # CLOB order-book depth entirely.  Used for pre-CLOB-fix snapshots where
+    # the order book is unreliable, or for a pure market-price (no-slippage)
+    # evaluation.  Only fees + slippage_fixed remain as cost.
+    gamma_mid: bool = False
