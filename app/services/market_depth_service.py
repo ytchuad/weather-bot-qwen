@@ -17,7 +17,7 @@ from ..config import PM_CLOB_API
 
 logger = logging.getLogger(__name__)
 
-_DEPTH_TOP_LEVELS = 10  # number of bid/ask levels stored in summaries
+_DEPTH_TOP_LEVELS = 20  # number of bid/ask levels stored in summaries
 
 
 # ── raw API fetchers ──────────────────────────────────────────────────
@@ -85,7 +85,7 @@ def compute_depth_summary(book: dict | None) -> dict | None:
     ts_raw = book.get("timestamp")
 
     def _extract(levels: list) -> list[dict]:
-        """Parse price/size, filter zero-size, cap at top N."""
+        """Parse all price/size levels, filtering out zero-size entries."""
         out: list[dict] = []
         for l in levels:
             try:
@@ -93,8 +93,6 @@ def compute_depth_summary(book: dict | None) -> dict | None:
                 s = float(l["size"])
                 if s > 0:
                     out.append({"price": round(p, 6), "size": round(s, 2)})
-                    if len(out) >= _DEPTH_TOP_LEVELS * 4:
-                        break
             except (ValueError, TypeError):
                 continue
         return out
