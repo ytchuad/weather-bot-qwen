@@ -10,6 +10,10 @@ venv/
 .codeartsdoer/
 .opencode/
 
+# === Training data (kept locally for retraining; NOT part of agent/runtime context) ===
+archive_training_data/
+
+
 # === OS generated files ===
 .DS_Store
 Thumbs.db
@@ -129,3 +133,12 @@ reports/
 
 # === Generated model artifacts ===
 models/fusion_weight_table.parquet
+
+# === Diagnostic dumps (one-off, must never be committed) ===
+project_text_dump.txt
+project_source_dump.txt
+project_source_dump_file_list.txt
+
+# === Frontend dependency cache ===
+app/frontend/node_modules/
+node_modules/
