@@ -240,6 +240,10 @@ def predict_intraday_all(
         "prev_evening_dew_point_mean",
         "prev_evening_rainfall_18_24", "prev_evening_rain_flag",
         "rainfall_30m_filled", "rainfall_30m_missing_flag",
+        # Model 2B rainfall features (computed in compute_rain_kwargs)
+        "rainfall_60m", "rainfall_120m", "has_recent_rainfall_obs",
+        "rain_intensity_max_120m", "rain_cooling_60m",
+        "rain_after_max_flag", "post_peak_rain_flag",
         "rainfall_data_age_minutes", "rain_data_gap_flag",
         "temp_buffer_long", "rh_buffer_long",
     }

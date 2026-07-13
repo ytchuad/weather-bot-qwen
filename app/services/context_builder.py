@@ -35,7 +35,14 @@ def build_strategy_context(acct: StrategyAccount) -> dict[str, Any]:
 
     hko = fetch_hko_data(target_date_str)
     state = get_intraday_state(_sd)
-    rain_kwargs = compute_rain_kwargs(_sd, hkt_now())
+    _msf = state.get("max_so_far")
+    _tnow = state.get("temp_now")
+    _drop_from_max = (_msf - _tnow) if (_msf is not None and _tnow is not None) else 0.0
+    rain_kwargs = compute_rain_kwargs(
+        _sd, hkt_now(),
+        drop_from_max=_drop_from_max,
+        temp_change_60m=state.get("temp_change_60m", 0.0),
+    )
     forecast_key = "forecast_min" if is_min_temp else "forecast_max"
     forecast_aws = hko.get(forecast_key) if hko else None
 
@@ -93,7 +100,11 @@ def build_strategy_context(acct: StrategyAccount) -> dict[str, Any]:
     for k in ("rain_60m", "rain_120m", "rain_data_ok",
                "rainfall_60m_missing_flag", "rainfall_120m_missing_flag",
                "rainfall_30m_missing_flag", "rainfall_data_age_minutes",
-               "rain_data_gap_flag", "rain_regime"):
+               "rain_data_gap_flag", "rain_regime",
+               # Model 2B rainfall features
+               "rainfall_60m", "rainfall_120m", "has_recent_rainfall_obs",
+               "rain_intensity_max_120m", "rain_cooling_60m",
+               "rain_after_max_flag", "post_peak_rain_flag"):
         v = rain_kwargs.get(k)
         if v is not None:
             context_json[k] = v

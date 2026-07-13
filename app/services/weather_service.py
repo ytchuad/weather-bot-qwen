@@ -411,15 +411,94 @@ def get_pressure_with_ttl_cache() -> dict:
         return {"pressure": None, "pressure_30m_ago": None}
 
 
+def _build_2b_rain_features(
+    rain_df: pd.DataFrame, now_dt: datetime,
+    drop_from_max: float = 0.0, temp_change_60m: float = 0.0,
+) -> dict:
+    """Build Model 2B's 9 rainfall features from a live 15-min rainfall
+    sequence, matching the logic in ``data/build_model_2b_feature_store.py``.
+
+    ``rain_df`` must carry columns ``datetime`` + ``rainfall`` (cumulative
+    rainfall since midnight from the HKO 15-min parquet,
+    ``data/hko_rainfall_15min.parquet`` — same source as training, NOT the
+    i-lens live King's Park scrape).  ``drop_from_max``
+    and ``temp_change_60m`` are the temperature-side features 2B also
+    consumes (already available on ``state`` during live inference).
+    Returns a dict with the 9 feature names Model 2B was trained on:
+
+        rainfall_60m, rainfall_120m, has_recent_rainfall_obs,
+        rain_intensity_max_120m, rain_cooling_60m, rain_after_max_flag,
+        post_peak_rain_flag, rain_data_gap_flag, rainfall_data_age_minutes
+
+    When ``rain_df`` is empty (no live rainfall), every feature defaults to 0
+    (matching the training store's ``fillna(0)``), so a degenerate 2B
+    just behaves like a no-rain 2A v2 — no crash, no bias.
+    """
+    # Defaults (no-rain / gap)
+    out = {
+        "rainfall_60m": 0.0,
+        "rainfall_120m": 0.0,
+        "has_recent_rainfall_obs": 0,
+        "rain_intensity_max_120m": 0.0,
+        "rain_cooling_60m": 0.0,
+        "rain_after_max_flag": 0,
+        "post_peak_rain_flag": 0,
+        "rain_data_gap_flag": 1,
+        "rainfall_data_age_minutes": 9999.0,
+    }
+    if rain_df is None or rain_df.empty:
+        return out
+
+    df = rain_df[rain_df["datetime"] <= now_dt].sort_values("datetime").copy()
+    if df.empty:
+        return out
+
+    # interval increment per 15-min step (diff of cumulative; clip negatives)
+    df["_inc"] = df["rainfall"].diff().fillna(df["rainfall"])
+    df["_inc"] = df["_inc"].clip(lower=0.0)
+    # rolling accumulations over 15-min increments
+    df["rainfall_60m"] = df["_inc"].rolling(4, min_periods=1).sum()
+    df["rainfall_120m"] = df["_inc"].rolling(8, min_periods=1).sum()
+    df["rain_intensity_max_120m"] = df["_inc"].rolling(8, min_periods=1).max()
+
+    last = df.iloc[-1]
+    out["rainfall_60m"] = float(last["rainfall_60m"] or 0.0)
+    out["rainfall_120m"] = float(last["rainfall_120m"] or 0.0)
+    out["rain_intensity_max_120m"] = float(last["rain_intensity_max_120m"] or 0.0)
+    out["has_recent_rainfall_obs"] = int(
+        (out["rainfall_60m"] > 0) or (out["rainfall_120m"] > 0)
+    )
+    # data age: time since latest rainfall observation (used for gap flag)
+    out["rainfall_data_age_minutes"] = (
+        (now_dt - df["datetime"].iloc[-1]).total_seconds() / 60.0
+    )
+    out["rain_data_gap_flag"] = int(out["rainfall_data_age_minutes"] > 45)
+
+    # Derived flags that also need temperature-side context
+    if out["has_recent_rainfall_obs"]:
+        out["rain_after_max_flag"] = int(drop_from_max >= 0.5)
+        out["post_peak_rain_flag"] = int(
+            (drop_from_max >= 0.5)
+            and (30 <= (last.get("time_since_max", 0) or 0) <= 240)
+        )
+        out["rain_cooling_60m"] = out["rainfall_60m"] * max(0.0, -temp_change_60m)
+    return out
+
+
 def compute_rain_kwargs(
     target_date_str: str,
     now_dt: datetime,
     intra_df: pd.DataFrame | None = None,
+    drop_from_max: float = 0.0,
+    temp_change_60m: float = 0.0,
 ) -> dict:
     """Compute rainfall features needed by intraday models.
 
     Returns dict with keys like rain_60m, rain_120m, rain_data_ok, plus
     prev_evening_* features when previous-day evening data is available.
+    Also emits Model 2B's 9 rainfall-derived features (see
+    ``_build_2b_rain_features``) so 2B can consume real rainfall signal
+    instead of degrading to a no-rain 2A v2.
     """
     rain_60m = 0.0
     rain_120m = 0.0
@@ -451,6 +530,21 @@ def compute_rain_kwargs(
         "rainfall_60m_missing_flag": 0 if rain_data_ok else 1,
         "rainfall_120m_missing_flag": 0 if rain_data_ok else 1,
     }
+
+    # Model 2B rainfall features: use the HKO 15-min rainfall parquet
+    # (data/hko_rainfall_15min.parquet) — the SAME source the 2B model was
+    # trained on in data/build_model_2b_feature_store.py — instead of the
+    # i-lens live King's Park scrape. This keeps inference point-in-time
+    # consistent with training (no station/parsing mismatch). The parquet is
+    # refreshed by data/download_rainfall.py.
+    try:
+        rain_df = load_rain_15min()
+        kwargs.update(_build_2b_rain_features(
+            rain_df, now_dt, drop_from_max=drop_from_max,
+            temp_change_60m=temp_change_60m,
+        ))
+    except Exception as e:
+        logger.warning("compute_rain_kwargs 2B features failed: %s", e)
 
     # Previous-day evening features (required by Model D/E)
     try:

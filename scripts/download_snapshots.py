@@ -66,18 +66,40 @@ def _append_rows(csv_path: Path, rows: list[dict]) -> int:
     return len(rows)
 
 
-def _try_export_endpoint(base_url: str) -> list[dict] | None:
-    """Try the full export endpoint. Returns None if not available."""
+def _try_export_endpoint(base_url: str, date: str | None = None) -> list[dict] | None:
+    """Try the per-date export endpoint. Returns None if not available.
+
+    IMPORTANT: the unfiltered endpoint applies ``ORDER BY timestamp ASC
+    LIMIT 10000`` server-side, so once the total snapshot count exceeds
+    10000 it silently drops the NEWEST rows (everything past row 10000).
+    Querying with an explicit ``date`` keeps each response under the limit
+    and avoids that truncation.
+    """
     url = f"{base_url}/api/data/export-snapshots"
+    if date:
+        url += f"?date={date}"
     print(f"  Trying {url} ... ", end="", flush=True)
     try:
         resp = urlopen(url, timeout=30)
         payload = json.loads(resp.read().decode())
-        print(f"{payload.get('snapshot_count', 0)} snapshots")
-        return payload.get("snapshots", [])
+        snaps = payload.get("snapshots", [])
+        print(f"{len(snaps)} snapshots")
+        return snaps
     except Exception as e:
         print(f"unavailable ({e})")
         return None
+
+
+def _recent_dates(days_back: int = 21) -> list[str]:
+    """Dates to poll, oldest→newest, covering the recent window.
+
+    A fixed window (not derived from local latest) is intentional: the
+    unfiltered endpoint truncates, so the local "latest" can be stale and
+    must not be trusted as the lower bound.
+    """
+    from datetime import date, timedelta
+    today = date.today()
+    return [(today - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(days_back, -1, -1)]
 
 
 def _try_models_comparison(base_url: str, date: str) -> list[dict]:
@@ -173,24 +195,26 @@ def main():
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     total_new = 0
 
-    # ---- Try export endpoint first ----
-    snapshots = _try_export_endpoint(base_url)
-
-    if snapshots is not None:
-        # Full export available — group by date and merge
-        by_date: dict[str, list[dict]] = {}
-        for snap in snapshots:
-            d = snap.get("snapshot_date", "unknown")
-            by_date.setdefault(d, []).append(snap)
-        for date in sorted(by_date.keys()):
-            print(f"  {date}: ", end="")
-            n = _merge_into_csv(by_date[date], date)
+    # ---- Primary path: per-date export endpoint ----
+    # The unfiltered endpoint silently truncates at 10000 rows (oldest kept),
+    # so we poll each recent date explicitly. Each day's volume is well under
+    # the limit, guaranteeing no rows are dropped.
+    dates = _recent_dates()
+    print(f"Polling per-date export endpoint for {len(dates)} dates ...\n")
+    any_available = False
+    for date in dates:
+        snaps = _try_export_endpoint(base_url, date)
+        if snaps is None:
+            continue
+        any_available = True
+        if snaps:
+            n = _merge_into_csv(snaps, date)
             total_new += n
-    else:
-        # ---- Fallback: use models-comparison for each date ----
-        # HF Spaces only keeps recent data, but try a wide window
-        print("  Falling back to models-comparison endpoint per date ...\n")
-        for date in ("2026-07-06", "2026-07-05", "2026-07-04", "2026-07-03", "2026-07-02", "2026-07-01", "2026-06-30", "2026-06-29"):
+
+    if not any_available:
+        # ---- Fallback: models-comparison per date ----
+        print("\nExport endpoint unavailable — falling back to models-comparison ...\n")
+        for date in _recent_dates(8):
             print(f"  {date}:")
             rows = _try_models_comparison(base_url, date)
             if rows:

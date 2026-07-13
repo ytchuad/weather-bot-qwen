@@ -37,7 +37,7 @@ DEFAULT_TEMP = 28.0
 # _market_question_to_bucket() and _bucket_sort_key() for the dynamic logic.
 
 # ---- Model keys ----
-MODEL_KEYS = ["9d", "aws", "baseline", "rain_nowcast", "rain_observed", "model_a", "model_b", "model_c", "model_d", "model_e", "model_g", "model_2a", "model_2a_v2"]
+MODEL_KEYS = ["9d", "aws", "baseline", "rain_nowcast", "rain_observed", "model_a", "model_b", "model_c", "model_d", "model_e", "model_g", "model_2a", "model_2a_v2", "model_2b"]
 MODEL_LABELS = {
     "9d": "9-Day XGBoost",
     "aws": "AWS High-Freq",
@@ -52,6 +52,7 @@ MODEL_LABELS = {
     "model_g": "Model G (Gap+Max)",
     "model_2a": "Model 2A (Core+Wind)",
     "model_2a_v2": "Model 2A v2 (Offshore+Highland)",
+    "model_2b": "Model 2B (2A v2 + Rain)",
 }
 
 # ---- Strategy model mapping ----
@@ -93,6 +94,7 @@ COLORS = {
     "model_g": "#FFB86C",
     "model_2a": "#FF2C97",
     "model_2a_v2": "#E6007E",
+    "model_2b": "#00B4D8",
     "9d": "#1f77b4",
     "aws": "#ff7f0e",
     # Semantic tokens
