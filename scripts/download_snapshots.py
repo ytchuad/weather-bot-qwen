@@ -80,7 +80,7 @@ def _try_export_endpoint(base_url: str, date: str | None = None) -> list[dict] |
         url += f"?date={date}"
     print(f"  Trying {url} ... ", end="", flush=True)
     try:
-        resp = urlopen(url, timeout=30)
+        resp = urlopen(url, timeout=180)
         payload = json.loads(resp.read().decode())
         snaps = payload.get("snapshots", [])
         print(f"{len(snaps)} snapshots")
@@ -110,7 +110,7 @@ def _try_models_comparison(base_url: str, date: str) -> list[dict]:
     url = f"{base_url}/api/charts/models-comparison?date={date}"
     print(f"    {url} ... ", end="", flush=True)
     try:
-        resp = urlopen(url, timeout=30)
+        resp = urlopen(url, timeout=180)
         data = json.loads(resp.read().decode())
         timestamps = data.get("timestamps", [])
         if not timestamps:

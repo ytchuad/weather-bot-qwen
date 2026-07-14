@@ -68,7 +68,7 @@ def _hf_last_ts(base_url: str) -> dict[str, datetime]:
     for d in dates:
         url = f"{base_url.rstrip('/')}/api/data/export-snapshots?date={d}"
         try:
-            with urlopen(url, timeout=30) as resp:
+            with urlopen(url, timeout=180) as resp:
                 payload = json.loads(resp.read().decode())
         except Exception:
             continue
