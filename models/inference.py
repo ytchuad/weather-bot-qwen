@@ -104,10 +104,39 @@ def predict_distribution(features_dict, model_type='tmax', hko_spread=None, std_
 
 # models/inference.py (節錄替換部分)
 
-def predict_bucket_probabilities(mean, std, market_buckets, max_since_midnight=None, min_since_midnight=None, is_today=False, is_min_temp=False):
+def predict_bucket_probabilities(mean, std, market_buckets, max_since_midnight=None, min_since_midnight=None, is_today=False, is_min_temp=False, prob_max_reached=None, prob_min_reached=None):
     """
     基於常態分佈計算每個市場桶的機率，並嚴格執行雙向物理截斷。
+
+    當 is_today 且提供 prob_max_reached / prob_min_reached 時，套用
+    **zero-inflated 混合模型**：已達極值的點以 point mass（= prob_*_reached）
+    釘在 max_so_far / min_so_far，剩餘 (1 - prob_*_reached) 機率分配給
+    「嚴格高於 / 低於極值」的連續高斯尾。這解決了「傍晚已降溫卻仍給出
+    高溫 bucket 偽機率」的問題：prob_max_reached → 1 時，straddle 桶吃掉
+    point mass、above 桶隨 (1 - prob_max_reached) 塌到 0。
     """
+    # ── zero-inflated mixture（僅 today 且 classifier 有輸出時生效）──
+    if is_today and not is_min_temp and max_since_midnight is not None and prob_max_reached is not None:
+        return _bucket_probs_zero_inflated(
+            mean, std, market_buckets,
+            float(max_since_midnight), float(np.clip(prob_max_reached, 0.0, 1.0)),
+            is_min=False,
+        )
+    if is_today and is_min_temp and min_since_midnight is not None and prob_min_reached is not None:
+        return _bucket_probs_zero_inflated(
+            mean, std, market_buckets,
+            float(min_since_midnight), float(np.clip(prob_min_reached, 0.0, 1.0)),
+            is_min=True,
+        )
+    # ── 原始高斯路徑（無 point mass；9d/aws 或舊 caller 走這條）──
+    return _bucket_probs_gaussian(
+        mean, std, market_buckets,
+        max_since_midnight, min_since_midnight, is_today, is_min_temp,
+    )
+
+
+def _bucket_probs_gaussian(mean, std, market_buckets, max_since_midnight=None, min_since_midnight=None, is_today=False, is_min_temp=False):
+    """Pure Gaussian bucket probabilities with physical truncation (no point mass)."""
     probs = {}
     from scipy.stats import norm as _norm
 
@@ -115,7 +144,7 @@ def predict_bucket_probabilities(mean, std, market_buckets, max_since_midnight=N
         name = bucket['name']
         lower = bucket['lower']
         upper = bucket['upper']
-        
+
         # === 核心風控：雙向即時物理截斷 ===
         if is_today:
             if not is_min_temp and max_since_midnight is not None:
@@ -128,12 +157,12 @@ def predict_bucket_probabilities(mean, std, market_buckets, max_since_midnight=N
                 if lower >= min_since_midnight:
                     probs[name] = 0.0
                     continue
-            
+
         cdf_upper = _norm.cdf(upper, loc=mean, scale=std) if upper != np.inf else 1.0
         cdf_lower = _norm.cdf(lower, loc=mean, scale=std) if lower != -np.inf else 0.0
-        
+
         probs[name] = max(0.0, cdf_upper - cdf_lower)
-        
+
     # 歸一化
     total = sum(probs.values())
     if total > 0:
@@ -146,5 +175,77 @@ def predict_bucket_probabilities(mean, std, market_buckets, max_since_midnight=N
             else:
                 target_bucket = max(market_buckets, key=lambda x: x['upper'] if x['upper'] != np.inf else -999)
             probs[target_bucket['name']] = 1.0
-            
+
+    return probs
+
+
+def _bucket_probs_zero_inflated(mean, std, market_buckets, m, zero, is_min):
+    """Zero-inflated mixture: point mass (= ``zero``) at the realized extremum ``m``.
+
+    For Tmax (``is_min=False``): continuous mass lives strictly ABOVE m.
+    For Tmin (``is_min=True``):  continuous mass lives strictly BELOW m.
+
+    The straddle bucket (the one whose interval contains m) receives the full
+    point mass PLUS its share of the (1 - zero) continuous tail. Fully-below
+    (Tmax) / fully-above (Tmin) buckets are 0 by physical truncation.
+    """
+    from scipy.stats import norm as _norm
+
+    def _cdf(x):
+        if x == np.inf:
+            return 1.0
+        if x == -np.inf:
+            return 0.0
+        return _norm.cdf(x, loc=mean, scale=std)
+
+    probs = {}
+    straddle_name = None
+
+    if is_min:
+        # continuous mass in (-inf, m]; point mass at m
+        cont_mass = max(_cdf(m), 1e-12)
+        for bucket in market_buckets:
+            name = bucket['name']
+            lower = bucket['lower']
+            upper = bucket['upper']
+            if lower >= m:
+                probs[name] = 0.0                       # 已創新低 → 不可能更高
+            elif upper > m:
+                # straddle: [lower, m) 是落在 m 之前的連續部分
+                straddle_name = name
+                cont = (_cdf(m) - _cdf(lower)) / cont_mass
+                probs[name] = zero + (1.0 - zero) * cont
+            else:
+                # 完全低於 m
+                cont = (_cdf(upper) - _cdf(lower)) / cont_mass
+                probs[name] = (1.0 - zero) * cont
+    else:
+        # continuous mass in (m, inf); point mass at m
+        cont_mass = max(1.0 - _cdf(m), 1e-12)
+        for bucket in market_buckets:
+            name = bucket['name']
+            lower = bucket['lower']
+            upper = bucket['upper']
+            if upper <= m:
+                probs[name] = 0.0                       # 已達最高溫 → 不可能更低
+            elif lower <= m:
+                # straddle: (m, upper) 是 m 之上的連續部分
+                straddle_name = name
+                cont = (_cdf(upper) - _cdf(m)) / cont_mass
+                probs[name] = zero + (1.0 - zero) * cont
+            else:
+                # 完全高於 m
+                cont = (_cdf(upper) - _cdf(lower)) / cont_mass
+                probs[name] = (1.0 - zero) * cont
+
+    # 退化防禦：若 m 落在所有 bucket 之外（無 straddle 容納 point mass），
+    # 退回純高斯路徑（仍含物理截斷）。
+    if straddle_name is None:
+        return _bucket_probs_gaussian(
+            mean, std, market_buckets,
+            max_since_midnight=m if not is_min else None,
+            min_since_midnight=m if is_min else None,
+            is_today=True, is_min_temp=is_min,
+        )
+
     return probs

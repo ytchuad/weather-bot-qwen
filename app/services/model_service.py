@@ -335,6 +335,8 @@ def compute_bucket_probs(
     is_min_temp: bool,
     max_sf: float | None = None,
     min_sf: float | None = None,
+    prob_max_reached: float | None = None,
+    prob_min_reached: float | None = None,
 ) -> dict[str, float]:
     """Compute bucket probabilities via predict_bucket_probabilities.
 
@@ -342,6 +344,11 @@ def compute_bucket_probs(
     downstream UI components (bucket_bars, recommendation_table) can
     look up probabilities by the same canonical keys they use for
     market_prices.
+
+    ``prob_max_reached`` / ``prob_min_reached`` are the zero-inflated point
+    masses from the upside_zero / downside_zero classifiers; when supplied
+    (intraday, today only) the mapper applies the mixture model (see
+    ``models.inference.predict_bucket_probabilities``).
     """
     try:
         from models.inference import predict_bucket_probabilities
@@ -352,6 +359,8 @@ def compute_bucket_probs(
             min_since_midnight=min_sf,
             is_today=is_today,
             is_min_temp=is_min_temp,
+            prob_max_reached=prob_max_reached,
+            prob_min_reached=prob_min_reached,
         )
 
         # predict_bucket_probabilities keys probs by market['name'] (the
@@ -435,11 +444,18 @@ def run_all_models(
                 for mk, ip in intra_preds.items():
                     if mk in ("_feature_metadata", "_error"):
                         continue
+                    # zero-inflated point mass from the upside_zero /
+                    # downside_zero classifier (carried in ip["raw"]).
+                    _raw = ip.get("raw") or {}
+                    _pmr = _raw.get("prob_max_reached")
+                    _pnr = _raw.get("prob_min_reached")
                     ip["probs"] = compute_bucket_probs(
                         ip["post_mean"], ip["post_std"], markets,
                         is_today, is_min_temp,
                         max_sf=state.get("max_so_far"),
                         min_sf=state.get("min_so_far"),
+                        prob_max_reached=_pmr,
+                        prob_min_reached=_pnr,
                     )
                     ip["mean"] = ip["post_mean"]
                     ip["std"] = ip["post_std"]

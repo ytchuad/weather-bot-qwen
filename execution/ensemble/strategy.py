@@ -267,7 +267,7 @@ class EnsembleStrategy:
                 shares = amount / c[3]
                 if shares < self.params.min_shares:
                     continue
-                targets[b] = {
+                targets[c[1]] = {
                     "action": "BUY_YES" if c[0] == "YES" else "BUY_NO",
                     "fraction": round(f_final, 6),
                     "amount": round(amount, 2),
