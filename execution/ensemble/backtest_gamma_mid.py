@@ -24,6 +24,7 @@ from execution.ensemble.params import EnsembleParams
 MODELS = [
     "9d", "aws", "baseline", "model_2a", "model_2a1", "model_2a_v2",
     "model_a", "model_b", "model_c", "model_g", "rain_nowcast",
+    "model_3a", "model_3b",
 ]
 
 # Past week (inclusive). 2026-07-12 is the in-progress day — runs with

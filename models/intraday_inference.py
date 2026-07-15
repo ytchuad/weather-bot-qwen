@@ -40,6 +40,12 @@ MINUTE_2A_V2_FL_PATH = MINUTE_MODEL_2A_V2_DIR / 'feature_list.json'
 # Model 2B - Model 2A v2 extended with observed-rainfall features
 MINUTE_MODEL_2B_DIR = Path('models/intraday_minute_ai_model_2b')
 MINUTE_2B_FL_PATH = MINUTE_MODEL_2B_DIR / 'feature_list.json'
+# Model 3A - Model 2A v2 + 5 trend-relation features
+MINUTE_MODEL_3A_DIR = Path('models/intraday_minute_ml_model_3a')
+MINUTE_3A_FL_PATH = MINUTE_MODEL_3A_DIR / 'feature_list.json'
+# Model 3B - Model 3A + 9 rainfall features
+MINUTE_MODEL_3B_DIR = Path('models/intraday_minute_ai_model_3b')
+MINUTE_3B_FL_PATH = MINUTE_MODEL_3B_DIR / 'feature_list.json'
 RAIN_CALIBRATION_PATH = MINUTE_MODEL_D_TMIN_DIR / 'rain_calibration.json'
 MORNING_E_CALIBRATION_PATH = MINUTE_MODEL_E_MORNING_TMIN_DIR / 'morning_calibration.json'
 
@@ -194,6 +200,22 @@ def _get_cached_models():
             logger.warning("Model 2B failed to load: %s", e)
     else:
         logger.warning("Model 2B not found at %s", MINUTE_MODEL_2B_DIR)
+    # Model 3A - Model 2A v2 + 5 trend-relation features
+    if MINUTE_MODEL_3A_DIR.exists() and MINUTE_3A_FL_PATH.exists():
+        try:
+            result['model_3a'] = _load_single_model(MINUTE_MODEL_3A_DIR)
+        except Exception as e:
+            logger.warning("Model 3A failed to load: %s", e)
+    else:
+        logger.warning("Model 3A not found at %s", MINUTE_MODEL_3A_DIR)
+    # Model 3B - Model 3A + 9 rainfall features
+    if MINUTE_MODEL_3B_DIR.exists() and MINUTE_3B_FL_PATH.exists():
+        try:
+            result['model_3b'] = _load_single_model(MINUTE_MODEL_3B_DIR)
+        except Exception as e:
+            logger.warning("Model 3B failed to load: %s", e)
+    else:
+        logger.warning("Model 3B not found at %s", MINUTE_MODEL_3B_DIR)
     return result
 
 
@@ -280,6 +302,18 @@ def _load_models():
                 _model_cache['model_2b'] = _load_single_model(MINUTE_MODEL_2B_DIR)
             except Exception as e:
                 logger.warning("Model 2B lazy-load failed: %s", e)
+    if 'model_3a' not in _model_cache:
+        if MINUTE_MODEL_3A_DIR.exists() and MINUTE_3A_FL_PATH.exists():
+            try:
+                _model_cache['model_3a'] = _load_single_model(MINUTE_MODEL_3A_DIR)
+            except Exception as e:
+                logger.warning("Model 3A lazy-load failed: %s", e)
+    if 'model_3b' not in _model_cache:
+        if MINUTE_MODEL_3B_DIR.exists() and MINUTE_3B_FL_PATH.exists():
+            try:
+                _model_cache['model_3b'] = _load_single_model(MINUTE_MODEL_3B_DIR)
+            except Exception as e:
+                logger.warning("Model 3B lazy-load failed: %s", e)
     return _model_cache
 
 
@@ -288,7 +322,8 @@ def set_active_model(model_key):
     global _active_model_key
     valid_keys = ('baseline', 'rain_nowcast', 'model_a', 'model_b', 'model_c',
                   'model_a_tmin', 'model_b_tmin', 'model_c_tmin', 'model_d_tmin',
-                  'model_e_morning_tmin', 'model_g', 'model_2a', 'model_2a1', 'model_2a_v2', 'model_2b')
+                  'model_e_morning_tmin', 'model_g', 'model_2a', 'model_2a1',
+                  'model_2a_v2', 'model_2b', 'model_3a', 'model_3b')
     if model_key not in valid_keys:
         raise ValueError(f"Unknown model_key: {model_key}")
     _active_model_key = model_key
@@ -2476,6 +2511,92 @@ def predict_intraday_tmax_all(
         except Exception as e:
             logger.warning("Model 2B prediction failed: %s", e)
             results['model_2b'] = None
+    if 'model_3a' in _model_cache:
+        set_active_model('model_3a')
+        try:
+            results['model_3a'] = predict_intraday_tmax_model_3a(
+                current_datetime, max_so_far, temp_now,
+                humidity=rh_current, min_so_far=min_so_far,
+                time_since_max=time_since_max_so_far or 0.0,
+                temp_change_30m_pre=temp_change_30min,
+                temp_change_60m_pre=temp_change_60min,
+                temp_volatility_60m_pre=temp_volatility_60m,
+                temp_acceleration_60m_pre=temp_acceleration_60m,
+                rh_change_60m_pre=rh_change_60m,
+                dew_point_change_60m_pre=dew_point_change_60m,
+                dew_point_spread_change_60m_pre=dew_point_spread_change_60m,
+                temp_buffer=temp_buffer, rh_buffer=rh_buffer,
+                hour=hour, minute=current_datetime.minute if current_datetime else None,
+                forecast_tmax=forecast_tmax, forecast_tmin=forecast_tmin,
+                pressure_current=pressure_current,
+                pressure_change_60m=pressure_change_60m,
+                pressure_change_180m=pressure_change_180m,
+                dew_point_current=None,
+                forecast_age_minutes=forecast_age_minutes,
+                forecast_lead_days=forecast_lead_days,
+                wind_ref_mean=wind_ref_mean,
+                wind_ref_max=wind_ref_max,
+                wind_victoria_harbour_mean=wind_victoria_harbour_mean,
+                wind_victoria_harbour_max=wind_victoria_harbour_max,
+                wind_offshore_highland_mean=wind_offshore_highland_mean,
+                wind_offshore_highland_max=wind_offshore_highland_max,
+                wind_all_change_60m=wind_all_change_60m,
+                wind_kings_park_current=wind_kings_park_current,
+                obs_data_age_minutes=obs_data_age_minutes,
+                wind_data_age_minutes=wind_data_age_minutes,
+            )
+        except Exception as e:
+            logger.warning("Model 3A prediction failed: %s", e)
+            results['model_3a'] = None
+    if 'model_3b' in _model_cache:
+        set_active_model('model_3b')
+        try:
+            _rkw = rain_2b_kwargs or {}
+            _r60 = _rkw.get('rainfall_60m', rainfall_60m_filled)
+            _r120 = _rkw.get('rainfall_120m', rainfall_120m_filled)
+            results['model_3b'] = predict_intraday_tmax_model_3b(
+                current_datetime, max_so_far, temp_now,
+                humidity=rh_current, min_so_far=min_so_far,
+                time_since_max=time_since_max_so_far or 0.0,
+                temp_change_30m_pre=temp_change_30min,
+                temp_change_60m_pre=temp_change_60min,
+                temp_volatility_60m_pre=temp_volatility_60m,
+                temp_acceleration_60m_pre=temp_acceleration_60m,
+                rh_change_60m_pre=rh_change_60m,
+                dew_point_change_60m_pre=dew_point_change_60m,
+                dew_point_spread_change_60m_pre=dew_point_spread_change_60m,
+                temp_buffer=temp_buffer, rh_buffer=rh_buffer,
+                hour=hour, minute=current_datetime.minute if current_datetime else None,
+                forecast_tmax=forecast_tmax, forecast_tmin=forecast_tmin,
+                pressure_current=pressure_current,
+                pressure_change_60m=pressure_change_60m,
+                pressure_change_180m=pressure_change_180m,
+                dew_point_current=None,
+                forecast_age_minutes=forecast_age_minutes,
+                forecast_lead_days=forecast_lead_days,
+                wind_ref_mean=wind_ref_mean,
+                wind_ref_max=wind_ref_max,
+                wind_victoria_harbour_mean=wind_victoria_harbour_mean,
+                wind_victoria_harbour_max=wind_victoria_harbour_max,
+                wind_offshore_highland_mean=wind_offshore_highland_mean,
+                wind_offshore_highland_max=wind_offshore_highland_max,
+                wind_all_change_60m=wind_all_change_60m,
+                wind_kings_park_current=wind_kings_park_current,
+                obs_data_age_minutes=obs_data_age_minutes,
+                wind_data_age_minutes=wind_data_age_minutes,
+                rainfall_60m=_r60,
+                rainfall_120m=_r120,
+                has_recent_rainfall_obs=_rkw.get('has_recent_rainfall_obs', 0),
+                rain_intensity_max_120m=_rkw.get('rain_intensity_max_120m', 0.0),
+                rain_cooling_60m=_rkw.get('rain_cooling_60m', 0.0),
+                rain_after_max_flag=_rkw.get('rain_after_max_flag', 0),
+                post_peak_rain_flag=_rkw.get('post_peak_rain_flag', 0),
+                rain_data_gap_flag=rain_data_gap_flag,
+                rainfall_data_age_minutes=rainfall_data_age_minutes,
+            )
+        except Exception as e:
+            logger.warning("Model 3B prediction failed: %s", e)
+            results['model_3b'] = None
     set_active_model('baseline')
     return results
 
@@ -3425,6 +3546,526 @@ def predict_intraday_tmax_model_2b(
             import json as _json
             import math
             thresh_path = Path('models/intraday_minute_ai_model_2b/best_threshold.json')
+            if thresh_path.exists():
+                with open(thresh_path) as _f:
+                    th = _json.load(_f).get('upside_zero_threshold', 0.5)
+                prob_class = active['upside_zero'].predict(X, pred_contrib=False)[0]
+                prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
+                prob_max_reached = 1.0 if prob_max_reached > th else 0.0
+
+    pred_tmax_p10 = max_so_far + remaining_upside_p10
+    pred_tmax_p25 = max_so_far + remaining_upside_p25
+    pred_tmax_p50 = max_so_far + remaining_upside_p50
+    pred_tmax_p75 = max_so_far + remaining_upside_p75
+    pred_tmax_p90 = max_so_far + remaining_upside_p90
+
+    return {
+        'remaining_upside_p10': remaining_upside_p10,
+        'remaining_upside_p25': remaining_upside_p25,
+        'remaining_upside_p50': remaining_upside_p50,
+        'remaining_upside_p75': remaining_upside_p75,
+        'remaining_upside_p90': remaining_upside_p90,
+        'prob_max_reached': prob_max_reached,
+        'pred_tmax_p10': pred_tmax_p10,
+        'pred_tmax_p25': pred_tmax_p25,
+        'pred_tmax_p50': pred_tmax_p50,
+        'pred_tmax_p75': pred_tmax_p75,
+        'pred_tmax_p90': pred_tmax_p90,
+        'sample_count': None,
+        '_features': _features_log,
+    }
+
+
+def _compute_trend_features_live(temp_buffer, temp_now):
+    """Compute 5 trend-relation features from minute-level temp_buffer.
+
+    Returns dict with keys: temp_direction_alignment, temp_short_long_ratio,
+    temp_volatility_ratio_60m_360m, temp_reversal_count_120m, temp_direction_persistence_60m.
+    """
+    features = {}
+
+    if not temp_buffer or len(temp_buffer) < 60:
+        return {
+            "temp_direction_alignment": 0.0,
+            "temp_short_long_ratio": 1.0,
+            "temp_volatility_ratio_60m_360m": 1.0,
+            "temp_reversal_count_120m": 0.0,
+            "temp_direction_persistence_60m": 0.5,
+        }
+
+    arr = np.array(list(temp_buffer), dtype=float)
+    idx = len(arr) - 1
+
+    # Δ10m and Δ60m
+    delta_10 = temp_now - arr[max(0, idx - 10)]
+    delta_60 = temp_now - arr[max(0, idx - 60)]
+
+    # 1. Direction alignment
+    features["temp_direction_alignment"] = float(np.sign(delta_10) * np.sign(delta_60))
+
+    # 2. Short-long ratio
+    delta_30 = temp_now - arr[max(0, idx - 30)]
+    delta_240 = temp_now - arr[max(0, idx - 240)]
+    ratio = abs(delta_30) / max(abs(delta_240), 0.01)
+    features["temp_short_long_ratio"] = float(min(ratio, 10.0))
+
+    # 3. Volatility ratio
+    idx_60 = max(0, idx - 59)
+    idx_360 = max(0, idx - 359)
+    vol_60 = float(np.std(arr[idx_60:idx + 1], ddof=1)) if (idx - idx_60) >= 1 else 0.0
+    vol_360 = float(np.std(arr[idx_360:idx + 1], ddof=1)) if (idx - idx_360) >= 1 else 0.0
+    vol_ratio = vol_60 / max(vol_360, 0.01)
+    features["temp_volatility_ratio_60m_360m"] = float(min(vol_ratio, 10.0))
+
+    # 4. Reversal count over 120 min (10-min step sign changes)
+    sample_steps = list(range(0, 121, 10))
+    sampled = [arr[max(0, idx - s)] for s in sample_steps]
+    diffs = [sampled[i] - sampled[i + 1] for i in range(len(sampled) - 1)]
+    signs = np.sign(diffs)
+    rev_count = sum(1 for i in range(1, len(signs)) if signs[i] * signs[i - 1] < 0)
+    features["temp_reversal_count_120m"] = float(rev_count)
+
+    # 5. Direction persistence (last 6 10-min diffs same sign as Δ10m)
+    last_sign = np.sign(delta_10)
+    if last_sign == 0:
+        features["temp_direction_persistence_60m"] = 0.5
+    else:
+        p_steps = list(range(0, 61, 10))
+        p_sampled = [arr[max(0, idx - s)] for s in p_steps]
+        p_diffs = [p_sampled[i] - p_sampled[i + 1] for i in range(len(p_sampled) - 1)]
+        same_count = sum(1 for d in p_diffs if np.sign(d) == last_sign)
+        features["temp_direction_persistence_60m"] = same_count / max(len(p_diffs), 1)
+
+    return features
+
+
+def predict_intraday_tmax_model_3a(
+    current_datetime, max_so_far, temp_now,
+    humidity=50.0, pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
+    dew_point_current=None,
+    min_so_far=None, time_since_max=0.0,
+    temp_change_30m_pre=None, temp_change_60m_pre=None,
+    temp_volatility_60m_pre=None, temp_acceleration_60m_pre=None,
+    rh_change_60m_pre=None,
+    dew_point_change_60m_pre=None, dew_point_spread_change_60m_pre=None,
+    temp_buffer=None, rh_buffer=None,
+    forecast_tmax=None, forecast_tmin=None,
+    forecast_age_minutes=None, forecast_lead_days=None,
+    wind_ref_mean=None, wind_ref_max=None,
+    wind_victoria_harbour_mean=None, wind_victoria_harbour_max=None,
+    wind_offshore_highland_mean=None, wind_offshore_highland_max=None,
+    wind_all_change_60m=None, wind_kings_park_current=None,
+    obs_data_age_minutes=None, wind_data_age_minutes=None,
+    hour=None, minute=None,
+):
+    """Predict remaining upside using Model 3A (2A v2 + 5 trend-relation features)."""
+    h = hour if hour is not None else (current_datetime.hour if current_datetime else 12)
+    m = minute if minute is not None else (current_datetime.minute if current_datetime else 0)
+    dt = current_datetime
+
+    temp_arr = np.array(list(temp_buffer) if temp_buffer else [temp_now])
+    idx = len(temp_arr) - 1
+    rh_arr = np.array(list(rh_buffer) if rh_buffer else [humidity])
+    rh_idx = len(rh_arr) - 1
+
+    if temp_change_30m_pre is not None:
+        temp_change_30m = temp_change_30m_pre
+        temp_change_60m = temp_change_60m_pre if temp_change_60m_pre is not None else 0.0
+        temp_slope_30m = temp_change_30m / 30.0
+        temp_slope_60m = temp_change_60m / 60.0
+        temp_volatility_60m = temp_volatility_60m_pre if temp_volatility_60m_pre is not None else 0.0
+        temp_acceleration_60m = temp_acceleration_60m_pre if temp_acceleration_60m_pre is not None else 0.0
+        rh_change_60m = rh_change_60m_pre if rh_change_60m_pre is not None else 0.0
+    else:
+        temp_change_30m = temp_now - (temp_arr[idx-30] if idx >= 30 else temp_arr[0])
+        temp_change_60m = temp_now - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+        temp_slope_30m = temp_change_30m / 30.0
+        temp_slope_60m = temp_change_60m / 60.0
+        start_vol = max(0, idx - 59)
+        temp_volatility_60m = float(np.std(temp_arr[start_vol:idx+1], ddof=1)) if (idx - start_vol) >= 1 else 0.0
+        temp_acceleration_60m = temp_slope_30m - (temp_slope_30m - (
+            temp_arr[idx-30] - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+        ) / 30.0)
+        rh_change_60m = humidity - (rh_arr[rh_idx-60] if rh_idx >= 60 else rh_arr[0])
+
+    if dew_point_current is None and humidity is not None and temp_now is not None:
+        try:
+            import math as _math
+            _a = 17.625
+            _b = 243.04
+            _gamma = _math.log(humidity / 100.0) + (_a * temp_now) / (_b + temp_now)
+            dew_point_current = (_b * _gamma) / (_a - _gamma)
+        except Exception:
+            dew_point_current = temp_now - 5
+    elif dew_point_current is None:
+        dew_point_current = temp_now - 5
+
+    dew_point_spread = temp_now - dew_point_current
+
+    if dew_point_change_60m_pre is not None:
+        dew_point_change_60m = dew_point_change_60m_pre
+        dew_point_spread_change_60m = dew_point_spread_change_60m_pre if dew_point_spread_change_60m_pre is not None else 0.0
+    elif idx >= 60 and rh_idx >= 60 and dew_point_current is not None:
+        try:
+            import math as _m
+            _a, _b = 17.625, 243.04
+            _t60 = temp_arr[idx-60]
+            _rh60 = rh_arr[rh_idx-60]
+            _gamma60 = _m.log(_rh60 / 100.0) + (_a * _t60) / (_b + _t60)
+            _dp60 = (_b * _gamma60) / (_a - _gamma60)
+            dew_point_change_60m = dew_point_current - _dp60
+            dew_point_spread_change_60m = (temp_now - dew_point_current) - (_t60 - _dp60)
+        except Exception:
+            dew_point_change_60m = 0.0
+            dew_point_spread_change_60m = 0.0
+    else:
+        dew_point_change_60m = 0.0
+        dew_point_spread_change_60m = 0.0
+
+    forecast_gap = forecast_tmax - max_so_far if forecast_tmax is not None else 0.0
+    forecast_range = forecast_tmax - forecast_tmin if forecast_tmax is not None and forecast_tmin is not None else 0.0
+
+    mins_midnight = h * 60 + m
+    doy = dt.timetuple().tm_yday if dt else 1
+    month_sin = np.sin(2 * np.pi * dt.month / 12) if dt else 0
+    month_cos = np.cos(2 * np.pi * dt.month / 12) if dt else 0
+    day_sin = np.sin(2 * np.pi * doy / 365.25)
+    day_cos = np.cos(2 * np.pi * doy / 365.25)
+    is_morning = 1 if 6 <= h < 12 else 0
+    is_afternoon = 1 if 12 <= h < 18 else 0
+    is_evening = 1 if 18 <= h < 24 else 0
+
+    # Compute 5 trend-relation features
+    trend = _compute_trend_features_live(temp_buffer, temp_now)
+
+    features = {
+        "temp_current": temp_now,
+        "rh_current": humidity,
+        "pressure_current": pressure_current if pressure_current is not None else 1010.0,
+        "dew_point_current": dew_point_current if dew_point_current is not None else temp_now - 5,
+        "dew_point_spread": dew_point_spread,
+        "max_so_far": max_so_far if max_so_far is not None else temp_now,
+        "min_so_far": min_so_far if min_so_far is not None else temp_now,
+        "range_so_far": (max_so_far - min_so_far) if max_so_far is not None and min_so_far is not None else 0,
+        "drop_from_max": (max_so_far - temp_now) if max_so_far is not None else 0,
+        "time_since_max": time_since_max,
+        "temp_change_30m": temp_change_30m,
+        "temp_change_60m": temp_change_60m,
+        "temp_slope_30m": temp_slope_30m,
+        "temp_slope_60m": temp_slope_60m,
+        "temp_acceleration_60m": temp_acceleration_60m,
+        "temp_volatility_60m": temp_volatility_60m,
+        "rh_change_60m": rh_change_60m,
+        "dew_point_change_60m": dew_point_change_60m,
+        "dew_point_spread_change_60m": dew_point_spread_change_60m,
+        "pressure_change_60m": pressure_change_60m,
+        "pressure_change_180m": pressure_change_180m,
+        "forecast_min_temp": forecast_tmin if forecast_tmin is not None else 0,
+        "forecast_max_temp": forecast_tmax if forecast_tmax is not None else 0,
+        "forecast_range": forecast_range,
+        "forecast_gap_from_max_so_far": forecast_gap,
+        "forecast_age_minutes": forecast_age_minutes if forecast_age_minutes is not None else 0,
+        "forecast_lead_days": forecast_lead_days if forecast_lead_days is not None else 0,
+        "wind_ref_mean": wind_ref_mean if wind_ref_mean is not None else 0,
+        "wind_ref_max": wind_ref_max if wind_ref_max is not None else 0,
+        "wind_victoria_harbour_mean": wind_victoria_harbour_mean if wind_victoria_harbour_mean is not None else 0,
+        "wind_victoria_harbour_max": wind_victoria_harbour_max if wind_victoria_harbour_max is not None else 0,
+        "wind_offshore_highland_mean": wind_offshore_highland_mean if wind_offshore_highland_mean is not None else 0,
+        "wind_offshore_highland_max": wind_offshore_highland_max if wind_offshore_highland_max is not None else 0,
+        "wind_all_change_60m": wind_all_change_60m if wind_all_change_60m is not None else 0,
+        "wind_kings_park_current": wind_kings_park_current if wind_kings_park_current is not None else 0,
+        "minutes_since_midnight": mins_midnight,
+        "month_sin": month_sin,
+        "month_cos": month_cos,
+        "day_sin": day_sin,
+        "day_cos": day_cos,
+        "is_morning": is_morning,
+        "is_afternoon": is_afternoon,
+        "is_evening": is_evening,
+        "obs_data_age_minutes": obs_data_age_minutes if obs_data_age_minutes is not None else 8,
+        "wind_data_age_minutes": wind_data_age_minutes if wind_data_age_minutes is not None else 8,
+        # Model 3A trend-relation features
+        "temp_direction_alignment": trend["temp_direction_alignment"],
+        "temp_short_long_ratio": trend["temp_short_long_ratio"],
+        "temp_volatility_ratio_60m_360m": trend["temp_volatility_ratio_60m_360m"],
+        "temp_reversal_count_120m": trend["temp_reversal_count_120m"],
+        "temp_direction_persistence_60m": trend["temp_direction_persistence_60m"],
+    }
+
+    _features_log = {}
+    for __k, __v in features.items():
+        if isinstance(__v, (np.floating,)):
+            _features_log[__k] = float(__v)
+        elif isinstance(__v, (np.integer,)):
+            _features_log[__k] = int(__v)
+        elif isinstance(__v, (np.bool_,)):
+            _features_log[__k] = bool(__v)
+        else:
+            _features_log[__k] = __v
+
+    active = _get_active()
+    feature_cols = active['feature_cols']
+    model_features = active['upside_q50'].feature_name()
+    cols = [c for c in feature_cols if c in features and c in model_features]
+    X = pd.DataFrame([features], columns=cols)[model_features]
+
+    q10 = active['upside_q10'].predict(X)[0]
+    q25 = active['upside_q25'].predict(X)[0]
+    q50 = active['upside_q50'].predict(X)[0]
+    q75 = active['upside_q75'].predict(X)[0]
+    q90 = active['upside_q90'].predict(X)[0]
+
+    quantiles = sorted([q10, q25, q50, q75, q90])
+    remaining_upside_p10, remaining_upside_p25, remaining_upside_p50, remaining_upside_p75, remaining_upside_p90 = quantiles
+
+    prob_max_reached = 0.0
+    if active.get('upside_zero') is not None:
+        try:
+            clf_features = active['upside_zero'].feature_name()
+            prob_max_reached = active['upside_zero'].predict(X[clf_features])[0]
+        except Exception:
+            import json as _json
+            import math
+            thresh_path = Path('models/intraday_minute_ml_model_3a/best_threshold.json')
+            if thresh_path.exists():
+                with open(thresh_path) as _f:
+                    th = _json.load(_f).get('upside_zero_threshold', 0.5)
+                prob_class = active['upside_zero'].predict(X, pred_contrib=False)[0]
+                prob_max_reached = 1.0 / (1.0 + math.exp(-prob_class)) if isinstance(prob_class, float) else 0.0
+                prob_max_reached = 1.0 if prob_max_reached > th else 0.0
+
+    pred_tmax_p10 = max_so_far + remaining_upside_p10
+    pred_tmax_p25 = max_so_far + remaining_upside_p25
+    pred_tmax_p50 = max_so_far + remaining_upside_p50
+    pred_tmax_p75 = max_so_far + remaining_upside_p75
+    pred_tmax_p90 = max_so_far + remaining_upside_p90
+
+    return {
+        'remaining_upside_p10': remaining_upside_p10,
+        'remaining_upside_p25': remaining_upside_p25,
+        'remaining_upside_p50': remaining_upside_p50,
+        'remaining_upside_p75': remaining_upside_p75,
+        'remaining_upside_p90': remaining_upside_p90,
+        'prob_max_reached': prob_max_reached,
+        'pred_tmax_p10': pred_tmax_p10,
+        'pred_tmax_p25': pred_tmax_p25,
+        'pred_tmax_p50': pred_tmax_p50,
+        'pred_tmax_p75': pred_tmax_p75,
+        'pred_tmax_p90': pred_tmax_p90,
+        'sample_count': None,
+        '_features': _features_log,
+    }
+
+
+def predict_intraday_tmax_model_3b(
+    current_datetime, max_so_far, temp_now,
+    humidity=50.0, pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
+    dew_point_current=None,
+    min_so_far=None, time_since_max=0.0,
+    temp_change_30m_pre=None, temp_change_60m_pre=None,
+    temp_volatility_60m_pre=None, temp_acceleration_60m_pre=None,
+    rh_change_60m_pre=None,
+    dew_point_change_60m_pre=None, dew_point_spread_change_60m_pre=None,
+    temp_buffer=None, rh_buffer=None,
+    forecast_tmax=None, forecast_tmin=None,
+    forecast_age_minutes=None, forecast_lead_days=None,
+    wind_ref_mean=None, wind_ref_max=None,
+    wind_victoria_harbour_mean=None, wind_victoria_harbour_max=None,
+    wind_offshore_highland_mean=None, wind_offshore_highland_max=None,
+    wind_all_change_60m=None, wind_kings_park_current=None,
+    obs_data_age_minutes=None, wind_data_age_minutes=None,
+    hour=None, minute=None,
+    # Model 3B rainfall features
+    rainfall_60m=0.0, rainfall_120m=0.0,
+    has_recent_rainfall_obs=0, rain_intensity_max_120m=0.0,
+    rain_cooling_60m=0.0, rain_after_max_flag=0,
+    post_peak_rain_flag=0, rain_data_gap_flag=0,
+    rainfall_data_age_minutes=0.0,
+):
+    """Predict remaining upside using Model 3B (2A v2 + rain + 5 trend-relation features).
+
+    Structurally identical to ``predict_intraday_tmax_model_3a`` but also
+    consumes 9 rainfall features. When rainfall data is unavailable they all
+    default to 0, so 3B degrades to 3A rather than crashing.
+    """
+    h = hour if hour is not None else (current_datetime.hour if current_datetime else 12)
+    m = minute if minute is not None else (current_datetime.minute if current_datetime else 0)
+    dt = current_datetime
+
+    temp_arr = np.array(list(temp_buffer) if temp_buffer else [temp_now])
+    idx = len(temp_arr) - 1
+    rh_arr = np.array(list(rh_buffer) if rh_buffer else [humidity])
+    rh_idx = len(rh_arr) - 1
+
+    if temp_change_30m_pre is not None:
+        temp_change_30m = temp_change_30m_pre
+        temp_change_60m = temp_change_60m_pre if temp_change_60m_pre is not None else 0.0
+        temp_slope_30m = temp_change_30m / 30.0
+        temp_slope_60m = temp_change_60m / 60.0
+        temp_volatility_60m = temp_volatility_60m_pre if temp_volatility_60m_pre is not None else 0.0
+        temp_acceleration_60m = temp_acceleration_60m_pre if temp_acceleration_60m_pre is not None else 0.0
+        rh_change_60m = rh_change_60m_pre if rh_change_60m_pre is not None else 0.0
+    else:
+        temp_change_30m = temp_now - (temp_arr[idx-30] if idx >= 30 else temp_arr[0])
+        temp_change_60m = temp_now - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+        temp_slope_30m = temp_change_30m / 30.0
+        temp_slope_60m = temp_change_60m / 60.0
+        start_vol = max(0, idx - 59)
+        temp_volatility_60m = float(np.std(temp_arr[start_vol:idx+1], ddof=1)) if (idx - start_vol) >= 1 else 0.0
+        temp_acceleration_60m = temp_slope_30m - (temp_slope_30m - (
+            temp_arr[idx-30] - (temp_arr[idx-60] if idx >= 60 else temp_arr[0])
+        ) / 30.0)
+        rh_change_60m = humidity - (rh_arr[rh_idx-60] if rh_idx >= 60 else rh_arr[0])
+
+    if dew_point_current is None and humidity is not None and temp_now is not None:
+        try:
+            import math as _math
+            _a = 17.625
+            _b = 243.04
+            _gamma = _math.log(humidity / 100.0) + (_a * temp_now) / (_b + temp_now)
+            dew_point_current = (_b * _gamma) / (_a - _gamma)
+        except Exception:
+            dew_point_current = temp_now - 5
+    elif dew_point_current is None:
+        dew_point_current = temp_now - 5
+
+    dew_point_spread = temp_now - dew_point_current
+
+    if dew_point_change_60m_pre is not None:
+        dew_point_change_60m = dew_point_change_60m_pre
+        dew_point_spread_change_60m = dew_point_spread_change_60m_pre if dew_point_spread_change_60m_pre is not None else 0.0
+    elif idx >= 60 and rh_idx >= 60 and dew_point_current is not None:
+        try:
+            import math as _m
+            _a, _b = 17.625, 243.04
+            _t60 = temp_arr[idx-60]
+            _rh60 = rh_arr[rh_idx-60]
+            _gamma60 = _m.log(_rh60 / 100.0) + (_a * _t60) / (_b + _t60)
+            _dp60 = (_b * _gamma60) / (_a - _gamma60)
+            dew_point_change_60m = dew_point_current - _dp60
+            dew_point_spread_change_60m = (temp_now - dew_point_current) - (_t60 - _dp60)
+        except Exception:
+            dew_point_change_60m = 0.0
+            dew_point_spread_change_60m = 0.0
+    else:
+        dew_point_change_60m = 0.0
+        dew_point_spread_change_60m = 0.0
+
+    forecast_gap = forecast_tmax - max_so_far if forecast_tmax is not None else 0.0
+    forecast_range = forecast_tmax - forecast_tmin if forecast_tmax is not None and forecast_tmin is not None else 0.0
+
+    mins_midnight = h * 60 + m
+    doy = dt.timetuple().tm_yday if dt else 1
+    month_sin = np.sin(2 * np.pi * dt.month / 12) if dt else 0
+    month_cos = np.cos(2 * np.pi * dt.month / 12) if dt else 0
+    day_sin = np.sin(2 * np.pi * doy / 365.25)
+    day_cos = np.cos(2 * np.pi * doy / 365.25)
+    is_morning = 1 if 6 <= h < 12 else 0
+    is_afternoon = 1 if 12 <= h < 18 else 0
+    is_evening = 1 if 18 <= h < 24 else 0
+
+    # Compute 5 trend-relation features
+    trend = _compute_trend_features_live(temp_buffer, temp_now)
+
+    features = {
+        "temp_current": temp_now,
+        "rh_current": humidity,
+        "pressure_current": pressure_current if pressure_current is not None else 1010.0,
+        "dew_point_current": dew_point_current if dew_point_current is not None else temp_now - 5,
+        "dew_point_spread": dew_point_spread,
+        "max_so_far": max_so_far if max_so_far is not None else temp_now,
+        "min_so_far": min_so_far if min_so_far is not None else temp_now,
+        "range_so_far": (max_so_far - min_so_far) if max_so_far is not None and min_so_far is not None else 0,
+        "drop_from_max": (max_so_far - temp_now) if max_so_far is not None else 0,
+        "time_since_max": time_since_max,
+        "temp_change_30m": temp_change_30m,
+        "temp_change_60m": temp_change_60m,
+        "temp_slope_30m": temp_slope_30m,
+        "temp_slope_60m": temp_slope_60m,
+        "temp_acceleration_60m": temp_acceleration_60m,
+        "temp_volatility_60m": temp_volatility_60m,
+        "rh_change_60m": rh_change_60m,
+        "dew_point_change_60m": dew_point_change_60m,
+        "dew_point_spread_change_60m": dew_point_spread_change_60m,
+        "pressure_change_60m": pressure_change_60m,
+        "pressure_change_180m": pressure_change_180m,
+        "forecast_min_temp": forecast_tmin if forecast_tmin is not None else 0,
+        "forecast_max_temp": forecast_tmax if forecast_tmax is not None else 0,
+        "forecast_range": forecast_range,
+        "forecast_gap_from_max_so_far": forecast_gap,
+        "forecast_age_minutes": forecast_age_minutes if forecast_age_minutes is not None else 0,
+        "forecast_lead_days": forecast_lead_days if forecast_lead_days is not None else 0,
+        "wind_ref_mean": wind_ref_mean if wind_ref_mean is not None else 0,
+        "wind_ref_max": wind_ref_max if wind_ref_max is not None else 0,
+        "wind_victoria_harbour_mean": wind_victoria_harbour_mean if wind_victoria_harbour_mean is not None else 0,
+        "wind_victoria_harbour_max": wind_victoria_harbour_max if wind_victoria_harbour_max is not None else 0,
+        "wind_offshore_highland_mean": wind_offshore_highland_mean if wind_offshore_highland_mean is not None else 0,
+        "wind_offshore_highland_max": wind_offshore_highland_max if wind_offshore_highland_max is not None else 0,
+        "wind_all_change_60m": wind_all_change_60m if wind_all_change_60m is not None else 0,
+        "wind_kings_park_current": wind_kings_park_current if wind_kings_park_current is not None else 0,
+        "minutes_since_midnight": mins_midnight,
+        "month_sin": month_sin,
+        "month_cos": month_cos,
+        "day_sin": day_sin,
+        "day_cos": day_cos,
+        "is_morning": is_morning,
+        "is_afternoon": is_afternoon,
+        "is_evening": is_evening,
+        "obs_data_age_minutes": obs_data_age_minutes if obs_data_age_minutes is not None else 8,
+        "wind_data_age_minutes": wind_data_age_minutes if wind_data_age_minutes is not None else 8,
+        # Model 3B rainfall features
+        "rainfall_60m": rainfall_60m,
+        "rainfall_120m": rainfall_120m,
+        "has_recent_rainfall_obs": has_recent_rainfall_obs,
+        "rain_intensity_max_120m": rain_intensity_max_120m,
+        "rain_cooling_60m": rain_cooling_60m,
+        "rain_after_max_flag": rain_after_max_flag,
+        "post_peak_rain_flag": post_peak_rain_flag,
+        "rain_data_gap_flag": rain_data_gap_flag,
+        "rainfall_data_age_minutes": rainfall_data_age_minutes,
+        # Model 3A/3B trend-relation features
+        "temp_direction_alignment": trend["temp_direction_alignment"],
+        "temp_short_long_ratio": trend["temp_short_long_ratio"],
+        "temp_volatility_ratio_60m_360m": trend["temp_volatility_ratio_60m_360m"],
+        "temp_reversal_count_120m": trend["temp_reversal_count_120m"],
+        "temp_direction_persistence_60m": trend["temp_direction_persistence_60m"],
+    }
+
+    _features_log = {}
+    for __k, __v in features.items():
+        if isinstance(__v, (np.floating,)):
+            _features_log[__k] = float(__v)
+        elif isinstance(__v, (np.integer,)):
+            _features_log[__k] = int(__v)
+        elif isinstance(__v, (np.bool_,)):
+            _features_log[__k] = bool(__v)
+        else:
+            _features_log[__k] = __v
+
+    active = _get_active()
+    feature_cols = active['feature_cols']
+    model_features = active['upside_q50'].feature_name()
+    cols = [c for c in feature_cols if c in features and c in model_features]
+    X = pd.DataFrame([features], columns=cols)[model_features]
+
+    q10 = active['upside_q10'].predict(X)[0]
+    q25 = active['upside_q25'].predict(X)[0]
+    q50 = active['upside_q50'].predict(X)[0]
+    q75 = active['upside_q75'].predict(X)[0]
+    q90 = active['upside_q90'].predict(X)[0]
+
+    quantiles = sorted([q10, q25, q50, q75, q90])
+    remaining_upside_p10, remaining_upside_p25, remaining_upside_p50, remaining_upside_p75, remaining_upside_p90 = quantiles
+
+    prob_max_reached = 0.0
+    if active.get('upside_zero') is not None:
+        try:
+            clf_features = active['upside_zero'].feature_name()
+            prob_max_reached = active['upside_zero'].predict(X[clf_features])[0]
+        except Exception:
+            import json as _json
+            import math
+            thresh_path = Path('models/intraday_minute_ai_model_3b/best_threshold.json')
             if thresh_path.exists():
                 with open(thresh_path) as _f:
                     th = _json.load(_f).get('upside_zero_threshold', 0.5)
