@@ -503,6 +503,7 @@ def compute_rain_kwargs(
     rain_60m = 0.0
     rain_120m = 0.0
     rain_data_ok = False
+    rain_df = pd.DataFrame()
 
     try:
         rain_df = fetch_rainfall_live()
@@ -531,18 +532,16 @@ def compute_rain_kwargs(
         "rainfall_120m_missing_flag": 0 if rain_data_ok else 1,
     }
 
-    # Model 2B rainfall features: use the HKO 15-min rainfall parquet
-    # (data/hko_rainfall_15min.parquet) — the SAME source the 2B model was
-    # trained on in data/build_model_2b_feature_store.py — instead of the
-    # i-lens live King's Park scrape. This keeps inference point-in-time
-    # consistent with training (no station/parsing mismatch). The parquet is
-    # refreshed by data/download_rainfall.py.
+    # Model 2B rainfall features: use the live i-lens data (already fetched
+    # above) — NOT the local parquet, which may be stale on HF Spaces.
+    # The live endpoint (STATION_ACCUM_RAIN) is the same source used during
+    # training, so station/parsing consistency is preserved.
     try:
-        rain_df = load_rain_15min()
-        kwargs.update(_build_2b_rain_features(
-            rain_df, now_dt, drop_from_max=drop_from_max,
-            temp_change_60m=temp_change_60m,
-        ))
+        if not rain_df.empty:
+            kwargs.update(_build_2b_rain_features(
+                rain_df, now_dt, drop_from_max=drop_from_max,
+                temp_change_60m=temp_change_60m,
+            ))
     except Exception as e:
         logger.warning("compute_rain_kwargs 2B features failed: %s", e)
 
