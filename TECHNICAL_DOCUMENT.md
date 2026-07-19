@@ -30,8 +30,11 @@
 *   **日內模型 (LightGBM)**：分位數迴歸模型（q10-q90），用於預測「剩餘上漲/下跌空間」。
 *   **模型 A (分鐘級 LightGBM, 僅溫度+濕度)**：更高解析度（5 分鐘）的分位數模型，僅使用溫度 + 相對濕度，無降雨特徵。
 *   **模型 B (分鐘級 LightGBM，溫度+濕度+降雨，已訓練)**：在模型 A 基礎上增加分鐘粒度的降雨累積與冷卻特徵，資料來源為 HKO 15 分鐘雨量站數據。
-*   **模型 C (規劃中 — 分鐘級 + 降雨 + 即時預報)**：在模型 B 基礎上增加 37 個 HKO 網格化降雨即時預報空間特徵。
-*   **降雨感知模型**：捕捉降雨-降溫效應的特徵。
+*   **模型 C (分鐘級 + 降雨 + 即時預報，已訓練)**：在模型 B 基礎上增加 37 個 HKO 網格化降雨即時預報空間特徵（83 特徵，OOT MAE=0.602°C, cov80=85.0%）。
+*   **模型 D / E (Tmin，已訓練)**：跨午夜、夜間冷卻、清晨最低溫預測模型，含兩階段架構與時段校準。
+*   **模型 G (Gap+Max，已訓練)**：預測差距+當日最高特徵（17 特徵，OOT cov80=84.3%）。
+*   **模型 2A (核心+風力，已訓練)**：45 特徵含風力站、氣壓、露點 — **主力模型**（OOT MAE=0.306°C, PR-AUC=0.987）。
+*   **模型 4 (已訓練)**：67 特徵含 HKO 預報降雨/濕度（weight=0.0 solo logging）
 *   **融合引擎**：貝葉斯融合，結合先驗（XGBoost）與後驗（LightGBM）分布。
 
 ### C層：研究 / 模擬交易層
@@ -39,7 +42,7 @@
 *   **策略**：互斥事件的凱利配置（YES/NO）。
 *   **模擬**：滑點建模、動態再平衡、損益追蹤。
 *   **策略中心架構**：每個策略為獨立實體，擁有自己的資金、模型、市場模板和閘門管線。
-*   **無頭自動執行器**：GitHub Actions cron（每 5 分鐘）在 Streamlit 之外執行啟用的策略。
+*   **無頭自動執行器**：GitHub Actions cron（每 5 分鐘）在儀表板之外執行啟用的策略。
 *   **策略快照記錄器**：`features/strategy_snapshot_logger.py` — SQLite 儲存每次策略週期的快照（Polymarket 加權溫度、模型預測溫度、實際觀測溫度），為前端圖表提供資料，不需重新載入模型或呼叫 API。
 
 ### D層：前端展示層
@@ -1550,7 +1553,7 @@ paper_strategies.json → defaults（全局默認）→ strategies.enhanced_v2_p
 | `StrategyAccount` | `execution/strategy_account.py` | Dataclass：id、label、model、capital、market_template、status、scheduler_on、params |
 | `StrategyAccountStore` | `execution/strategy_account.py` | 對 `data/strategy_accounts.json` 的 CRUD 操作 |
 | `resolve_slug()` | `execution/market_templates.py` | 自動將模板 + 日期解析為 Polymarket slug |
-| `strategy_card()` | `app/components/strategy_card.py` | Streamlit 卡片：開關、損益、倉位、交易、參數 |
+| `strategy_card()` | `app/components/strategy_card.py` | 策略卡片：開關、損益、倉位、交易、參數 |
 | `strategy_builder_form()` | `app/components/strategy_builder.py` | 表單：模型選擇器、閘門調整、儲存、實驗室測試 |
 | `run_single_strategy_cycle()` | `execution/strategy_runner.py` | 為單一策略執行一個週期 |
 | `auto_runner.py` | `execution/auto_runner.py` | 無頭 CLI，供 GitHub Actions cron 使用 |
@@ -1650,7 +1653,7 @@ paper_strategies.json → defaults（全局默認）→ strategies.enhanced_v2_p
 
 ## 7. 儀表板與可視化
 
-儀表板已重構為模組化的 **`app/` 套件**（進入點：`app/main.py`），取代了舊的單一檔案 `dashboard.py`。
+儀表板已重構為 **FastAPI 後端**（`app/api/server.py`）+ **React 前端**（`app/frontend/`），取代了舊的單一檔案 `dashboard.py`。
 
 ### 7.1 頁面結構
 
@@ -1692,7 +1695,11 @@ paper_strategies.json → defaults（全局默認）→ strategies.enhanced_v2_p
 *   **日內融合**：即時 LightGBM 預測與先驗融合。
 *   **模型 A（分鐘級，溫度+濕度）**：基於溫度 + 濕度的 5 分鐘解析度預測。
 *   **模型 B（分鐘級 LightGBM，溫度+濕度+降雨，已訓練）**：模型 A + 分鐘解析度降雨歷史特徵。
-*   **模型 C（規劃中）**：模型 B + 37 個空間降雨即時預報特徵。
+*   **模型 C（分鐘級 LightGBM，溫度+濕度+降雨+即時預報，已訓練）**：模型 B + 37 個空間降雨即時預報特徵。
+*   **模型 D（Tmin，已訓練）**：跨午夜+夜間冷卻+兩階段架構。
+*   **模型 E（Tmin 清晨最低，已訓練）**：00-08 清晨最低溫預測，校準後 COV80=80.0%。
+*   **模型 2A（核心+風力，已訓練）**：45 特徵，OOT MAE=0.306°C — 目前主力模型。
+*   **模型 4（已訓練）**：67 特徵含 HKO 預報降雨/濕度，weight=0.0 solo logging。
 
 ### 7.4 績效追蹤
 *   **前向測試日誌**：評估模型預測與實際結果。
@@ -1706,13 +1713,13 @@ paper_strategies.json → defaults（全局默認）→ strategies.enhanced_v2_p
 
 ### 7.6 背景排程器
 
-在 `app/main.py()` 中啟動的 daemon 執行緒與 Streamlit session 並行運行：
+在 `app/api/server.py` 的 lifespan 中啟動的背景排程執行緒，與 FastAPI 伺服器並行運行：
 
 - **輪詢間隔**：30 秒
 - **冷卻時間**：每策略 5 分鐘
 - **選取對象**：任何 `scheduler_on: true` 且 `status: "running"` 的策略
-- **運行範圍**：跨所有分頁（不限於策略頁面）
-- **生命週期**：瀏覽器分頁關閉或 Streamlit Cloud 休眠應用時終止
+- **運行範圍**：跨所有 API 端點（不限於策略頁面請求）
+- **生命週期**：FastAPI 伺服器關閉時終止
 
 ### 7.7 側邊欄
 
@@ -1728,7 +1735,7 @@ paper_strategies.json → defaults（全局默認）→ strategies.enhanced_v2_p
 ## 8. 部署與自動化
 
 ### 8.1 儀表板部署
-*   **Streamlit Cloud**：從 `main` 分支自動部署。進入點：`app/main.py`。
+*   **Hugging Face Spaces**（Docker）：從 `main` 分支自動部署。進入點：`app.api.server:app`（uvicorn）。
 
 ### 8.2 GitHub Actions 工作流程
 
@@ -1746,10 +1753,10 @@ paper_strategies.json → defaults（全局默認）→ strategies.enhanced_v2_p
     3.  執行 `python -m execution.auto_runner`
     4.  `git add data/` 並在有變更時提交
 *   **提交訊息**：`chore: auto-run strategies [skip ci]`
-*   即使 Streamlit 儀表板關閉，也能提供 24/7 無人值守執行。
+*   即使儀表板關閉，也能提供 24/7 無人值守執行。
 
 ### 8.4 密鑰管理
-*   API 密鑰和錢包憑證存儲在 Streamlit Secrets / GitHub Actions Secrets 中（絕不提交）。
+*   API 密鑰和錢包憑證存儲在 Hugging Face Spaces Secrets / GitHub Actions Secrets 中（絕不提交）。
 
 ---
 
@@ -1772,18 +1779,12 @@ Weather_Bot_Qwen/
 │   ├── current_positions.json    # 按 strategy_key 區分的模擬倉位
 │   ├── pnl_history/              # 每策略損益快照
 │   └── auto_runner_log.json      # 無頭執行審計軌跡
-├── app/                    # Streamlit 模組化套件
-│   ├── main.py                  # 進入點、導航、排程器
-│   ├── pages/
-│   │   ├── page_hub.py          # 概覽儀表板
-│   │   ├── page_intraday.py     # 日內溫度可視化
-│   │   ├── page_strategies.py   # Live / Builder / Lab 分頁
-│   │   ├── page_analytics.py    # 前向測試績效
-│   │   └── page_health.py       # 執行時檢查
-│   └── components/
-│       ├── sidebar.py           # 全域側邊欄（日期選擇器、同步）
-│       ├── strategy_card.py     # 每策略卡片（含開關與損益）
-│       └── strategy_builder.py  # 策略建立表單與閘門調整
+├── app/                    # FastAPI + React 模組化套件
+│   ├── api/                      # FastAPI 路由（server.py, weather.py, strategies.py 等）
+│   ├── services/                 # 商業邏輯服務（weather, model, market, strategy 等）
+│   ├── frontend/src/             # React 前端源碼（TypeScript + TailwindCSS v4 + ECharts）
+│   ├── frontend/dist/            # React 前端編譯產物（gitignored）
+│   └── config.py                 # 儀表板常數、模型註冊表、API 端點
 ├── config/                 # 配置檔案
 │   ├── generic_realtime_parity_framework.yaml  # 通用即時推論同軌框架
 │   ├── model_2a_feature_spec.yaml              # Model 2A 特徵規格
@@ -1852,10 +1853,10 @@ Weather_Bot_Qwen/
 │   ├── daily_update.yml           # 每日數據同步
 │   ├── hourly_update.yml          # 每小時前向測試與再平衡器
 │   └── run_strategies.yml         # 無頭策略執行（每 5 分鐘）
-├── app/main.py             # Streamlit 進入點（建議使用）
-├── dashboard.py            # 舊版單一檔案進入點（已棄用）
+├── app/api/server.py       # FastAPI 進入點（uvicorn app.api.server:app）
 ├── config.yaml             # 專案配置
 ├── requirements.txt
+├── Dockerfile              # Hugging Face Spaces Docker 部署
 └── README.md
 ```
 

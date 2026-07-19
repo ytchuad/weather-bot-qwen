@@ -42,7 +42,7 @@ The system is structured into three distinct layers:
 *   **Strategy**: Kelly allocation for mutually exclusive events (YES/NO).
 *   **Simulation**: Slippage modeling, dynamic rebalancing, and PnL tracking.
 *   **Strategy-Centric Architecture**: Self-contained strategies with per-strategy capital, model selection, market template, and gate pipeline.
-*   **Headless Auto-Runner**: GitHub Actions cron (every 5 min) runs enabled strategies outside Streamlit.
+*   **Headless Auto-Runner**: GitHub Actions cron (every 5 min) runs enabled strategies outside the dashboard.
 *   **Strategy Snapshot Logger**: `features/strategy_snapshot_logger.py` — SQLite persistence for per-cycle snapshots (Polymarket weighted temp, model predicted temp, actual observed temp). Feeds the frontend chart without re-running models or live APIs.
 
 ### Layer D: Frontend Presentation Layer
@@ -1705,7 +1705,7 @@ The trading layer was rebuilt from a **portfolio-centric** to a **strategy-centr
 | `StrategyAccount` | `execution/strategy_account.py` | Dataclass: id, label, model, capital, market_template, status, scheduler_on, params |
 | `StrategyAccountStore` | `execution/strategy_account.py` | CRUD for `data/strategy_accounts.json` |
 | `resolve_slug()` | `execution/market_templates.py` | Auto-resolve template + date → Polymarket slug |
-| `strategy_card()` | `app/components/strategy_card.py` | Streamlit card: toggle, PnL, positions, trades, params |
+| `strategy_card()` | `app/components/strategy_card.py` | Strategy card: toggle, PnL, positions, trades, params |
 | `strategy_builder_form()` | `app/components/strategy_builder.py` | Form: model selector, gate tuning, save, test in Lab |
 | `run_single_strategy_cycle()` | `execution/strategy_runner.py` | Execute one cycle for a strategy |
 | `auto_runner.py` | `execution/auto_runner.py` | Headless CLI for GitHub Actions cron |
@@ -1850,11 +1850,11 @@ python -m execution.auto_runner --list           # list enabled strategies
    - Writes audit log to `data/auto_runner_log.json`
 3. The GitHub Actions workflow (`.github/workflows/run_strategies.yml`) runs every 5 minutes and commits changed `data/` files
 
-This provides true 24/7 execution that works even when the Streamlit dashboard is not open.
+This provides true 24/7 execution that works even when the dashboard is not open.
 
 ## 7. Dashboard & Visualization
 
-The dashboard has been restructured into a modular **`app/` package** (entry point: `app/main.py`) replacing the old single-file `dashboard.py`.
+The dashboard has been restructured into a **FastAPI backend** (`app/api/server.py`) + **React frontend** (`app/frontend/`), replacing the old single-file `dashboard.py`.
 
 ### 7.1 Page Structure
 
@@ -1912,13 +1912,13 @@ The **Strategies** page (`app/pages/page_strategies.py`) replaces the old Portfo
 
 ### 7.6 Background Scheduler
 
-A daemon thread started in `app/main.py()` runs alongside the Streamlit session:
+A daemon thread started in `app/api/server.py`'s lifespan runs alongside the FastAPI server:
 
 - **Poll interval**: 30 seconds
 - **Cooldown**: 5 minutes per strategy
 - **Picks up**: any strategy with `scheduler_on: true` and `status: "running"`
-- **Runs**: across all tabs (not just the Strategies page)
-- **Dies**: when the browser tab closes or Streamlit Cloud sleeps the app
+- **Runs**: across all API endpoints (not just the Strategies route)
+- **Dies**: when the FastAPI server shuts down
 
 ### 7.7 Sidebar
 
@@ -1934,7 +1934,7 @@ All per-strategy parameters (bias, std_mult, kelly_fraction, capital) have been 
 ## 8. Deployment & Automation
 
 ### 8.1 Dashboard Deployment
-*   **Streamlit Cloud**: Auto-deploys from `main` branch. Entry point: `app/main.py`.
+*   **Hugging Face Spaces** (Docker): Auto-deploys from `main` branch. Entry point: `app.api.server:app` (uvicorn).
 
 ### 8.2 GitHub Actions Workflows
 
@@ -1952,10 +1952,10 @@ All per-strategy parameters (bias, std_mult, kelly_fraction, capital) have been 
     3. Run `python -m execution.auto_runner`
     4. `git add data/` and commit if changed
 *   **Commit message**: `chore: auto-run strategies [skip ci]`
-*   Provides 24/7 unattended execution even when the Streamlit dashboard is closed.
+*   Provides 24/7 unattended execution even when the dashboard is closed.
 
 ### 8.4 Secrets Management
-*   API keys and wallet credentials stored in Streamlit Secrets / GitHub Actions Secrets (never committed).
+*   API keys and wallet credentials stored in Hugging Face Spaces Secrets / GitHub Actions Secrets (never committed).
 *   **Steps**:
     1.  Update forecast database (`update_forecast_database`).
     2.  Run forward test logger (`discover_and_log_all_markets`).
@@ -1963,7 +1963,7 @@ All per-strategy parameters (bias, std_mult, kelly_fraction, capital) have been 
     4.  Commit and push updated Parquet data.
 
 ### 8.3 Secrets Management
-*   API keys and wallet credentials stored in Streamlit Secrets / GitHub Actions Secrets (never committed).
+*   API keys and wallet credentials stored in Hugging Face Spaces Secrets / GitHub Actions Secrets (never committed).
 
 ---
 
@@ -1986,16 +1986,12 @@ Weather_Bot_Qwen/
 │   ├── current_positions.json    # Paper positions by strategy_key
 │   ├── pnl_history/              # Per-strategy PnL snapshots
 │   └── auto_runner_log.json      # Headless execution audit trail
-├── app/                    # Streamlit modular app package
-│   ├── main.py                  # Entry point, navigation, scheduler
-│   ├── pages/
-│   │   ├── page_hub.py          # Overview dashboard
-│   │   ├── page_intraday.py     # Intraday temperature visualization
-│   │   ├── page_strategies.py   # Live / Builder / Lab tabs
-│   │   ├── page_analytics.py    # Forward-test performance
-│   │   └── page_health.py       # Runtime checks
-│   └── components/
-│       ├── sidebar.py           # Global sidebar (date picker, sync)
+├── app/                    # FastAPI + React modular app package
+│   ├── api/                      # FastAPI routes (server.py, weather.py, strategies.py, etc.)
+│   ├── services/                 # Business logic services (weather, model, market, strategy)
+│   ├── frontend/src/             # React frontend source (TypeScript + TailwindCSS v4 + ECharts)
+│   ├── frontend/dist/            # React frontend build artifacts (gitignored)
+│   └── config.py                 # Dashboard constants, model registry, API endpoints
 │       ├── strategy_card.py     # Per-strategy card with toggle & PnL
 │       └── strategy_builder.py  # Strategy creation form & gate tuning
 ├── config/                 # Configuration files
@@ -2067,10 +2063,10 @@ Weather_Bot_Qwen/
 │   ├── daily_update.yml           # Daily data sync
 │   ├── hourly_update.yml          # Hourly forward-test & rebalancer
 │   └── run_strategies.yml         # Headless strategy execution (every 5 min)
-├── app/main.py             # Streamlit entry point (recommended)
-├── dashboard.py            # Legacy single-file entry point (deprecated)
+├── app/api/server.py       # FastAPI entry point (uvicorn app.api.server:app)
 ├── config.yaml             # Project configuration
 ├── requirements.txt
+├── Dockerfile              # Hugging Face Spaces Docker deployment
 └── README.md
 ```
 

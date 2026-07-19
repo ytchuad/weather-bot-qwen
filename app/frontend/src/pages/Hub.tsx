@@ -1,46 +1,59 @@
-import { useState, useMemo, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { CalendarDays, Download, GitCompare, SlidersHorizontal } from "lucide-react"
 import ModelGrid from "../components/ModelGrid"
 import WeatherCards from "../components/WeatherCards"
 import BucketChart from "../components/BucketChart"
+import BucketProbsChart from "../components/BucketProbsChart"
 import ComparisonChart from "../components/ComparisonChart"
 import ModelsComparisonChart from "../components/ModelsComparisonChart"
-import BucketProbsChart from "../components/BucketProbsChart"
-import { fetchEvent, fetchTodayEvent, fetchPredictions } from "../api/client"
-import { GitCompare, Settings } from "lucide-react"
+import { fetchEvent, fetchPredictions, fetchTodayEvent } from "../api/client"
 
-// 解析溫度桶的中間值，用於計算市場加權平均溫度
+const MODEL_LABELS: Record<string, string> = {
+  "9d": "9-Day XGBoost",
+  aws: "AWS High-Freq",
+  baseline: "Baseline Intraday",
+  model_a: "Model A",
+  model_b: "Model B (Rain)",
+  model_c: "Model C (Nowcast)",
+  model_g: "Model G (Gap+Max)",
+  model_2a: "Model 2A (Core+Wind)",
+  model_2a1: "Model 2A1 (i-lens)",
+  model_2a_v2: "Model 2A v2 (Offshore+Highland)",
+}
+
 function parseBucketMidpoint(bucket: string): number | null {
   if (bucket.startsWith("<") || bucket.includes("or below")) {
     const match = bucket.match(/(\d+)/)
-    return match ? parseFloat(match[1]) - 0.5 : null
+    return match ? Number(match[1]) - 0.5 : null
   }
   if (bucket.startsWith(">=") || bucket.includes("or higher")) {
     const match = bucket.match(/(\d+)/)
-    return match ? parseFloat(match[1]) + 0.5 : null
+    return match ? Number(match[1]) + 0.5 : null
   }
-  const match = bucket.match(/(\d+)-(\d+)/)
-  if (match) return (parseFloat(match[1]) + parseFloat(match[2])) / 2
-  const singleMatch = bucket.match(/(\d+)°?C/)
-  if (singleMatch) return parseFloat(singleMatch[1])
-  return null
+  const range = bucket.match(/(\d+)-(\d+)/)
+  if (range) return (Number(range[1]) + Number(range[2])) / 2
+  const single = bucket.match(/(\d+)°?C/)
+  return single ? Number(single[1]) : null
 }
 
-const MODEL_LABELS: Record<string, string> = {
-  "9d": "9-Day XGBoost", "aws": "AWS High-Freq", "baseline": "Baseline Intraday", "model_a": "Model A", "model_b": "Model B (Rain)", "model_c": "Model C (Nowcast)", "model_g": "Model G (Gap+Max)", "model_2a": "Model 2A (Core+Wind)", "model_2a1": "Model 2A1 (i-lens)", "model_2a_v2": "Model 2A v2 (Offshore+Highland)",
+function sortBucketValue(bucket: string): number {
+  if (bucket.startsWith("<") || bucket.includes("or below")) return -999
+  if (bucket.startsWith(">") || bucket.includes("or higher")) return 999
+  const match = bucket.match(/(\d+)/)
+  return match ? Number(match[1]) : 0
 }
 
 function getHKTDateString(): string {
-  const formatter = new Intl.DateTimeFormat("zh-HK", {
+  const parts = new Intl.DateTimeFormat("en-HK", {
     timeZone: "Asia/Hong_Kong",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  })
-  const parts = formatter.formatToParts(new Date())
-  const year = parts.find((p) => p.type === "year")?.value || ""
-  const month = parts.find((p) => p.type === "month")?.value || ""
-  const day = parts.find((p) => p.type === "day")?.value || ""
+  }).formatToParts(new Date())
+  const year = parts.find((part) => part.type === "year")?.value || ""
+  const month = parts.find((part) => part.type === "month")?.value || ""
+  const day = parts.find((part) => part.type === "day")?.value || ""
   return `${year}-${month}-${day}`
 }
 
@@ -50,22 +63,26 @@ export default function Hub() {
   const [compareMode, setCompareMode] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [viewMode, setViewMode] = useState<"trajectory" | "bucket">("trajectory")
+  const [marketViewMode, setMarketViewMode] = useState<"edge" | "prob">("prob")
   const [selectedBucket, setSelectedBucket] = useState("")
-
   const [activeKey, setActiveKey] = useState<string | null>(null)
 
   const [visibleKeys, setVisibleKeys] = useState<Set<string> | null>(() => {
     try {
       const saved = localStorage.getItem("visibleKeys")
       return saved ? new Set(JSON.parse(saved)) : null
-    } catch { return null }
+    } catch {
+      return null
+    }
   })
 
   const [order, setOrder] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem("modelOrder")
       return saved ? JSON.parse(saved) : []
-    } catch { return [] }
+    } catch {
+      return []
+    }
   })
 
   const { data, isLoading, isError, error } = useQuery({
@@ -78,7 +95,7 @@ export default function Hub() {
   const { data: todayEventData } = useQuery({
     queryKey: ["today-event", date, isMinTemp],
     queryFn: () => fetchTodayEvent(date, isMinTemp),
-    enabled: !!date,
+    enabled: Boolean(date),
     refetchInterval: 120_000,
   })
 
@@ -86,46 +103,51 @@ export default function Hub() {
   const { data: eventData, isError: isMarketError } = useQuery({
     queryKey: ["event", eventSlug],
     queryFn: () => fetchEvent(eventSlug!, isMinTemp),
-    enabled: !!eventSlug,
+    enabled: Boolean(eventSlug),
     refetchInterval: 120_000,
   })
 
   const marketPrices = useMemo(() => {
-    const p = eventData?.prices ?? {}
-    const decoded: Record<string, number> = {}
-    for (const [k, v] of Object.entries(p)) {
-      const decodedKey = k.replace(/^&lt;/, "<").replace(/^&gt;/, ">").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-      decoded[decodedKey] = v
-    }
-    return decoded
+    const prices = eventData?.prices ?? {}
+    return Object.fromEntries(
+      Object.entries(prices).map(([bucket, price]) => [
+        bucket.replace(/^&lt;/, "<").replace(/^&gt;/, ">").replace(/&lt;/g, "<").replace(/&gt;/g, ">"),
+        price,
+      ]),
+    )
   }, [eventData?.prices])
 
   useEffect(() => {
-    if (data?.models) {
-      const keys = Object.keys(data.models)
-      if (keys.length > 0) {
-        setOrder(prev => {
-          const existingOrder = prev.filter(k => keys.includes(k))
-          const newKeys = keys.filter(k => !prev.includes(k))
-          const merged = [...existingOrder, ...newKeys]
-          localStorage.setItem("modelOrder", JSON.stringify(merged))
-          return merged
-        })
-        setActiveKey(prev => (prev && keys.includes(prev)) ? prev : keys[0])
-        setVisibleKeys(prev => {
-          if (prev) return prev
-          const init = new Set(keys)
-          localStorage.setItem("visibleKeys", JSON.stringify([...init]))
-          return init
-        })
-      }
-    }
+    if (!data?.models) return
+    const keys = Object.keys(data.models)
+    if (keys.length === 0) return
+
+    setOrder((previous) => {
+      const existing = previous.filter((key) => keys.includes(key))
+      const additions = keys.filter((key) => !previous.includes(key))
+      const merged = [...existing, ...additions]
+      localStorage.setItem("modelOrder", JSON.stringify(merged))
+      return merged
+    })
+    const firstVisible = keys.find((key) => !visibleKeys || visibleKeys.has(key)) || keys[0]
+    setActiveKey((previous) => previous && keys.includes(previous) && (!visibleKeys || visibleKeys.has(previous)) ? previous : firstVisible)
+    setVisibleKeys((previous) => {
+      if (previous) return previous
+      const initial = new Set(keys)
+      localStorage.setItem("visibleKeys", JSON.stringify([...initial]))
+      return initial
+    })
   }, [data])
 
   const displayModels = useMemo(() => {
     if (!data?.models || order.length === 0) return []
-    return order.filter(k => data.models[k]).map(k => [k, data.models[k]] as [string, typeof data.models[string]])
+    return order.filter((key) => data.models[key]).map((key) => [key, data.models[key]] as [string, typeof data.models[string]])
   }, [data, order])
+
+  const visibleModels = useMemo(() => {
+    if (!visibleKeys) return displayModels
+    return displayModels.filter(([key]) => visibleKeys.has(key))
+  }, [displayModels, visibleKeys])
 
   const activeModelProbs = useMemo(() => {
     if (!activeKey || !data?.models?.[activeKey]) return {}
@@ -133,89 +155,75 @@ export default function Hub() {
   }, [activeKey, data])
 
   const allBuckets = useMemo(() => {
-    const set = new Set<string>()
-    Object.values(data?.models || {}).forEach(m => Object.keys(m.probs || {}).forEach(b => set.add(b)))
-    Object.keys(marketPrices || {}).forEach(b => set.add(b))
-    return Array.from(set).sort((a, b) => {
-      const parse = (s: string) => {
-        if (s.startsWith("<") || s.includes(" or below")) return -999
-        if (s.startsWith(">=") || s.includes(" or higher")) return 999
-        if (s.startsWith(">")) return 999
-        const num = parseFloat(s.split("-")[0])
-        return isNaN(num) ? 0 : num
-      }
-      return parse(a) - parse(b)
-    })
+    const buckets = new Set<string>()
+    Object.values(data?.models || {}).forEach((model) => Object.keys(model.probs || {}).forEach((bucket) => buckets.add(bucket)))
+    Object.keys(marketPrices).forEach((bucket) => buckets.add(bucket))
+    return [...buckets].sort((a, b) => sortBucketValue(a) - sortBucketValue(b))
   }, [data, marketPrices])
 
-  // 計算模型預期溫度 (可見模型的 1/std 加權平均)
   const modelExpectedTemp = useMemo(() => {
     if (!data?.models || !visibleKeys) return null
     let weightedSum = 0
     let totalWeight = 0
-    for (const [key, pred] of Object.entries(data.models)) {
-      if (visibleKeys.has(key) && pred.mean != null) {
-        const w = pred.std > 0 ? 1 / pred.std : 10
-        weightedSum += pred.mean * w
-        totalWeight += w
-      }
+    for (const [key, prediction] of Object.entries(data.models)) {
+      if (!visibleKeys.has(key) || prediction.mean == null) continue
+      const weight = prediction.std > 0 ? 1 / prediction.std : 10
+      weightedSum += prediction.mean * weight
+      totalWeight += weight
     }
     return totalWeight > 0 ? (weightedSum / totalWeight).toFixed(1) : null
   }, [data, visibleKeys])
 
-  // 計算市場加權預期溫度
   const marketExpectedTemp = useMemo(() => {
-    if (!marketPrices || Object.keys(marketPrices).length === 0) return null
-    let totalProb = 0
+    let totalProbability = 0
     let weightedSum = 0
     for (const [bucket, price] of Object.entries(marketPrices)) {
-      const mid = parseBucketMidpoint(bucket)
-      if (mid !== null) {
-        weightedSum += mid * price
-        totalProb += price
-      }
+      const midpoint = parseBucketMidpoint(bucket)
+      if (midpoint == null) continue
+      weightedSum += midpoint * price
+      totalProbability += price
     }
-    return totalProb > 0 ? (weightedSum / totalProb).toFixed(1) : null
+    return totalProbability > 0 ? (weightedSum / totalProbability).toFixed(1) : null
   }, [marketPrices])
 
-  // 計算最高機率桶 (Polymarket)
   const expectedBucket = useMemo(() => {
-    if (!marketPrices || Object.keys(marketPrices).length === 0) return null
-    let maxProb = 0
     let bucketName = ""
-    for (const [bucket, prob] of Object.entries(marketPrices)) {
-      if (prob > maxProb) {
-        maxProb = prob
+    let maxProbability = 0
+    for (const [bucket, probability] of Object.entries(marketPrices)) {
+      if (probability > maxProbability) {
         bucketName = bucket
+        maxProbability = probability
       }
     }
-    return maxProb > 0 ? { name: bucketName, prob: (maxProb * 100).toFixed(0) } : null
+    return maxProbability > 0 ? { name: bucketName, prob: Math.round(maxProbability * 100) } : null
   }, [marketPrices])
 
-  // 計算所有可見模型的溫度範圍，用於 ModelGrid 的置信區間軌
   const tempRange = useMemo(() => {
     if (!data?.models || !visibleKeys) return { min: 20, max: 35 }
-    let min = 100, max = -100
-    for (const [key, pred] of Object.entries(data.models)) {
-      if (visibleKeys.has(key)) {
-        min = Math.min(min, pred.mean - (pred.std || 1))
-        max = Math.max(max, pred.mean + (pred.std || 1))
-      }
+    let min = 100
+    let max = -100
+    for (const [key, prediction] of Object.entries(data.models)) {
+      if (!visibleKeys.has(key)) continue
+      min = Math.min(min, prediction.mean - (prediction.std || 1))
+      max = Math.max(max, prediction.mean + (prediction.std || 1))
     }
     return { min: min - 1, max: max + 1 }
   }, [data, visibleKeys])
 
   const handleReorder = (newOrder: string[]) => {
-    setOrder(newOrder)
-    localStorage.setItem("modelOrder", JSON.stringify(newOrder))
+    const visibleSet = new Set(newOrder)
+    let visibleIndex = 0
+    const mergedOrder = order.map((key) => visibleSet.has(key) ? newOrder[visibleIndex++] : key)
+    setOrder(mergedOrder)
+    localStorage.setItem("modelOrder", JSON.stringify(mergedOrder))
   }
 
   const handleToggleVisible = (key: string) => {
-    setVisibleKeys(prev => {
-      const current = new Set(prev || [])
+    setVisibleKeys((previous) => {
+      const current = new Set(previous || [])
       if (current.has(key)) {
         current.delete(key)
-        if (key === activeKey) setActiveKey(order.find(k => current.has(k)) || null)
+        if (key === activeKey) setActiveKey(order.find((candidate) => current.has(candidate)) || null)
       } else {
         current.add(key)
       }
@@ -224,118 +232,147 @@ export default function Hub() {
     })
   }
 
+  const edge = modelExpectedTemp && marketExpectedTemp
+    ? (Number(modelExpectedTemp) - Number(marketExpectedTemp)).toFixed(1)
+    : null
+
   return (
-    <div className="flex flex-col w-full max-w-[1600px] mx-auto">
-      <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4 p-4 md:p-8 pb-0">
+    <div className="hub-page mx-auto w-full max-w-[1480px] space-y-5 px-4 pb-10 pt-4 sm:px-6 lg:px-10">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-[10px] text-cyan-400/80 mono tracking-[0.2em] uppercase mb-2">Institutional Terminal</p>
-          <h1 className="text-3xl font-light text-white tracking-tight">Hong Kong Market Forecast</h1>
+          <div className="eyebrow eyebrow-accent">Hub — Hong Kong · {isMinTemp ? "TMIN" : "TMAX"}</div>
+          <h1 className="mt-2 text-[28px] font-bold leading-tight tracking-[-0.02em] text-white/95">Hong Kong Market Forecast</h1>
+          <p className="mono mt-1 text-[11px] tracking-[0.08em] text-white/35">{date} · LIVE MODEL SNAPSHOT · SRC HKO / POLYMARKET</p>
         </div>
-        <div className="flex items-center gap-4 w-full sm:w-auto">
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full bg-white/[0.03] border border-white/[0.06] text-slate-200 rounded-md px-3 py-2 text-sm outline-none focus:border-cyan-400/50 transition-colors mono" />
-          <div className="flex gap-1 bg-[#0f1013] border border-white/[0.06] p-1 rounded-md shrink-0">
-            <button onClick={() => setIsMinTemp(false)} className={`px-4 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${!isMinTemp ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>TMAX</button>
-            <button onClick={() => setIsMinTemp(true)} className={`px-4 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${isMinTemp ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>TMIN</button>
-            <button onClick={() => setShowSettings(true)} className="px-2 py-1.5 text-slate-400 hover:text-slate-200 transition-colors" title="Model Visibility Settings">
-              <Settings size={14} />
-            </button>
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <label className="relative flex flex-1 items-center gap-2 sm:flex-none" title="Forecast date">
+            <CalendarDays className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-white/35" />
+            <input className="hub-input pl-9 pr-3 py-2" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          </label>
+          <a
+            className="mono inline-flex items-center gap-1.5 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[10px] font-semibold tracking-[0.1em] text-white/55 transition-colors hover:border-cyan-400/30 hover:bg-cyan-400/10 hover:text-cyan-300"
+            href={`/api/data/export-csv?date=${encodeURIComponent(date)}`}
+            download={`snapshots-${date}.csv`}
+            aria-label="Download selected day CSV"
+            title="Download selected day snapshot CSV"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>CSV</span>
+          </a>
+          <div className="seg shrink-0">
+            <button className={`seg-item ${!isMinTemp ? "seg-item-active" : ""}`} onClick={() => setIsMinTemp(false)}>TMAX</button>
+            <button className={`seg-item ${isMinTemp ? "seg-item-active" : ""}`} onClick={() => setIsMinTemp(true)}>TMIN</button>
           </div>
+          <button className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-2.5 text-white/40 transition-colors hover:text-cyan-300" onClick={() => setShowSettings(true)} title="Model visibility settings">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+          </button>
         </div>
       </header>
 
-      <div className="px-4 md:px-8"><WeatherCards date={date} /></div>
-
-      {/* KPI 摘要卡片 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 px-4 md:px-8 mb-6 mt-6">
-        <div className="obsidian-card rounded-md p-4 flex justify-between items-center">
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] mb-1">Model Expected</p>
-            <p className="text-xl font-light text-cyan-400 mono">{modelExpectedTemp ? `${modelExpectedTemp}°C` : "--"}</p>
-          </div>
-          <div className="text-cyan-400/20"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
-        </div>
-        <div className="obsidian-card rounded-md p-4 flex justify-between items-center">
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] mb-1">Market Expected</p>
-            <p className="text-xl font-light text-violet-400 mono">{marketExpectedTemp ? `${marketExpectedTemp}°C` : "--"}</p>
-          </div>
-          <div className="text-violet-400/20"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3v18h18"/><path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg></div>
-        </div>
-        <div className="obsidian-card rounded-md p-4 flex justify-between items-center">
-          <div>
-            <p className="text-[10px] text-slate-400 uppercase tracking-[0.2em] mb-1">Expected Bucket</p>
-            <p className="text-xl font-light text-emerald-400 mono">{expectedBucket ? `${expectedBucket.name} (${expectedBucket.prob}%)` : "--"}</p>
-          </div>
-          <div className="text-emerald-400/20"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg></div>
-        </div>
-      </div>
-
-      {/* 歷史溫度追蹤圖 / 桶機率時間序列 (全寬) */}
-      <div className="px-4 md:px-8 mb-6">
-        <div className="obsidian-card rounded-md p-6">
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h2 className="text-[10px] text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><span className="w-4 h-px bg-slate-500"></span> Models vs Market — Temperature Tracking</h2>
-              <p className="text-lg font-light text-white tracking-tight">{viewMode === "trajectory" ? "Historical Prediction Trajectory" : "Per-Bucket Probability"}</p>
+      <section className="panel overflow-hidden">
+        <div className="grid grid-cols-2 divide-x divide-y divide-white/[0.05] lg:grid-cols-4 lg:divide-y-0">
+          <HubStat label="MODEL EXPECTED" value={modelExpectedTemp ? `${modelExpectedTemp}°C` : "--"} valueClass="text-cyan-300" foot={`${displayModels.filter(([key]) => !visibleKeys || visibleKeys.has(key)).length || 0} visible models · precision weighted`} />
+          <HubStat label="MARKET EXPECTED" value={marketExpectedTemp ? `${marketExpectedTemp}°C` : "--"} valueClass="text-violet-300" foot="Polymarket bucket price midpoint" />
+          <HubStat label="EDGE" value={edge ? `${Number(edge) >= 0 ? "+" : ""}${edge}°C` : "--"} valueClass={edge && Number(edge) >= 0 ? "text-emerald-300" : "text-rose-300"} foot="Model minus market expectation" />
+          <div className="px-5 py-5 sm:px-6">
+            <div className="eyebrow">EXPECTED BUCKET</div>
+            <div className="mt-1.5 flex items-baseline gap-2">
+              <span className="tnum text-[27px] font-bold leading-none tracking-[-0.02em] text-white/95">{expectedBucket?.name || "--"}</span>
+              <span className="mono tnum text-[13px] font-semibold text-emerald-300">{expectedBucket ? `${expectedBucket.prob}%` : ""}</span>
             </div>
-            <div className="flex gap-1 bg-[#0f1013] border border-white/[0.06] p-1 rounded-md shrink-0">
-              <button onClick={() => setViewMode("trajectory")} className={`px-3 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${viewMode === "trajectory" ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>Trajectory</button>
-              <button onClick={() => setViewMode("bucket")} className={`px-3 py-1.5 rounded-sm text-[10px] font-mono uppercase tracking-widest transition-all ${viewMode === "bucket" ? "bg-cyan-500/20 text-cyan-400 shadow-[0_0_10px_-2px_rgba(56,189,248,0.4)]" : "text-slate-400 hover:text-slate-200"}`}>Bucket</button>
-            </div>
+            <div className="mt-2.5 h-1 overflow-hidden rounded-full bg-white/[0.06]"><div className="h-full rounded-full bg-gradient-to-r from-cyan-400/70 to-emerald-400/90" style={{ width: `${expectedBucket?.prob || 0}%` }} /></div>
+            <div className="mono mt-2 text-[10px] tracking-wide text-white/30">Market-implied bucket probability</div>
           </div>
+        </div>
+      </section>
+
+      <WeatherCards date={date} />
+
+      <section className="panel p-4 sm:p-6">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="eyebrow">MODELS VS MARKET · TEMPERATURE TRACKING</div>
+            <h2 className="mt-1.5 text-lg font-semibold tracking-tight text-white/90">{viewMode === "trajectory" ? "Historical Prediction Trajectory" : "Per-Bucket Probability"}</h2>
+          </div>
+          <div className="seg">
+            <button className={`seg-item ${viewMode === "trajectory" ? "seg-item-active" : ""}`} onClick={() => setViewMode("trajectory")}>Trajectory</button>
+            <button className={`seg-item ${viewMode === "bucket" ? "seg-item-active" : ""}`} onClick={() => setViewMode("bucket")}>Bucket</button>
+          </div>
+        </div>
+        <div className="mt-4 min-h-[320px]">
           {viewMode === "trajectory" ? <ModelsComparisonChart date={date} visibleKeys={visibleKeys ?? undefined} /> : <BucketProbsChart date={date} bucket={selectedBucket} onBucketChange={setSelectedBucket} visibleKeys={visibleKeys ?? undefined} />}
         </div>
-      </div>
+        <p className="mono mt-1 text-[10.5px] tracking-wide text-white/25">Click model controls below to change the visible series · all values shown in °C</p>
+      </section>
 
-      {/* 底部雙欄：左模型列表，右 Edge/Prob 分佈 */}
-      <div className="flex flex-col lg:flex-row gap-6 px-4 md:px-8 pb-8">
-        <aside className="w-full lg:w-1/3 lg:min-w-[300px] lg:max-w-[400px] flex flex-col border border-white/[0.06] bg-[#09090b] rounded-md max-h-[600px] overflow-hidden">
-          <div className="p-4 border-b border-white/[0.06] flex items-center justify-between shrink-0">
-            <h2 className="text-[10px] font-medium text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2"><span className="w-4 h-px bg-slate-500"></span> Model Matrix</h2>
-            <button onClick={() => setCompareMode(!compareMode)} className={["flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest px-3 py-1.5 rounded-md transition-colors", compareMode ? "bg-cyan-500/20 text-cyan-400" : "bg-white/[0.03] border border-white/[0.06] text-slate-400 hover:bg-white/[0.06]"].join(" ")} title="Compare multiple models">
-              <GitCompare size={12} /> Compare
+      <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-12">
+        <section className="panel overflow-hidden p-4 sm:p-6 xl:col-span-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="eyebrow">MODEL MATRIX</div>
+              <h2 className="mt-1.5 text-lg font-semibold tracking-tight text-white/90">Forecast Ensemble</h2>
+            </div>
+            <button onClick={() => setCompareMode(!compareMode)} className={`mono flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[10px] font-semibold tracking-[0.1em] transition-colors ${compareMode ? "border-cyan-400/30 bg-cyan-400/10 text-cyan-300" : "border-white/[0.08] bg-white/[0.03] text-white/55 hover:text-white/85"}`} title="Compare multiple models">
+              <GitCompare className="h-3 w-3" /> Compare
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
-            {isLoading ? <div className="text-center text-slate-400 text-xs py-4">Loading models...</div> : isError ? <div className="text-center text-rose-400 text-xs py-4 px-2">Failed to load models.<br/><span className="text-slate-500 text-[10px] mt-1 block">{(error as Error)?.message || "API Error"}</span></div> : displayModels.length > 0 ? <ModelGrid models={displayModels} activeKey={activeKey} visibleKeys={visibleKeys} tempRange={tempRange} onSelect={(key) => setActiveKey(key)} onReorder={handleReorder} onToggleVisible={handleToggleVisible} /> : <div className="text-center text-slate-400 text-xs py-4">No models available for this date.</div>}
+          <div className="mt-2 max-h-[380px] overflow-y-auto pr-1 custom-scrollbar">
+            {isLoading ? <div className="py-8 text-center text-xs text-white/40">Loading models...</div> : isError ? <div className="py-8 text-center text-xs text-rose-300">Failed to load models.<span className="mt-1 block text-[10px] text-white/35">{(error as Error)?.message || "API error"}</span></div> : visibleModels.length > 0 ? <ModelGrid models={visibleModels} activeKey={activeKey} tempRange={tempRange} onSelect={(key) => setActiveKey(key)} onReorder={handleReorder} /> : <div className="py-8 text-center text-xs text-white/40">No visible models. Use the settings control to show models.</div>}
           </div>
-        </aside>
+          <p className="mono mt-4 text-[10.5px] tracking-wide text-white/25">Drag the handle to reorder · click a row to inspect its distribution</p>
+        </section>
 
-        <section className="flex-1 w-full bg-[#0f1013] border border-white/[0.06] rounded-md p-6 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)]">
-          <div className="flex justify-between items-center mb-6">
+        <section className="panel p-4 sm:p-6 xl:col-span-8">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h2 className="text-[10px] text-slate-300 uppercase tracking-[0.2em] flex items-center gap-2 mb-2"><span className="w-4 h-px bg-slate-500"></span> Market Analysis</h2>
-              <p className="text-xl font-light text-white tracking-tight">Model vs Market Dynamics</p>
+              <div className="eyebrow">MARKET ANALYSIS</div>
+              <h2 className="mt-1.5 text-lg font-semibold tracking-tight text-white/90">Model vs Market Dynamics</h2>
+            </div>
+            <div className="seg shrink-0">
+              <button className={`seg-item ${marketViewMode === "edge" ? "seg-item-active" : ""}`} onClick={() => setMarketViewMode("edge")}>Edge</button>
+              <button className={`seg-item ${marketViewMode === "prob" ? "seg-item-active" : ""}`} onClick={() => setMarketViewMode("prob")}>Prob</button>
             </div>
           </div>
-          <div className="h-[400px] w-full">
-            {isLoading ? <div className="w-full h-full flex items-center justify-center text-slate-400 text-sm">Loading chart data...</div> : isError ? <div className="w-full h-full flex flex-col items-center justify-center text-rose-400 text-sm text-center px-4">Failed to load chart data.<span className="text-slate-500 text-xs mt-2">{(error as Error)?.message || "API Error"}</span></div> : isMarketError ? <div className="w-full h-full flex flex-col items-center justify-center text-amber-400 text-sm text-center px-4">Polymarket data unavailable.<span className="text-slate-500 text-xs mt-2">Displaying model probabilities only.</span></div> : compareMode ? <ComparisonChart models={displayModels} marketPrices={marketPrices} allBuckets={allBuckets} /> : <BucketChart modelProbs={activeModelProbs} marketPrices={marketPrices} allBuckets={allBuckets} />}
+          <div className="mt-4 h-[360px] w-full sm:h-[400px]">
+            {isLoading ? <div className="flex h-full items-center justify-center text-sm text-white/40">Loading chart data...</div> : isError ? <div className="flex h-full flex-col items-center justify-center text-center text-sm text-rose-300">Failed to load chart data.<span className="mt-2 text-xs text-white/35">{(error as Error)?.message || "API error"}</span></div> : isMarketError ? <div className="flex h-full flex-col items-center justify-center text-center text-sm text-amber-300">Polymarket data unavailable.<span className="mt-2 text-xs text-white/35">Displaying model probabilities only.</span></div> : compareMode ? <ComparisonChart models={visibleModels} marketPrices={marketPrices} allBuckets={allBuckets} /> : <BucketChart viewMode={marketViewMode} modelProbs={activeModelProbs} marketPrices={marketPrices} allBuckets={allBuckets} />}
           </div>
+          <p className="mono mt-1 text-[10.5px] tracking-wide text-white/25">Positive edge indicates the model assigns more probability than the market price.</p>
         </section>
       </div>
 
       {showSettings && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
-          <div className="bg-slate-900 border border-white/[0.06] rounded-lg p-6 w-[320px] max-h-[80vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xs text-slate-300 uppercase tracking-[0.2em]">Model Visibility</h3>
-              <button onClick={() => setShowSettings(false)} className="text-slate-500 hover:text-slate-300 text-sm">&times;</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
+          <div className="panel w-full max-w-md p-5 sm:p-6" onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <div><div className="eyebrow">MODEL CONTROLS</div><h3 className="mt-1 text-lg font-semibold text-white/90">Visibility & ordering</h3></div>
+              <button onClick={() => setShowSettings(false)} className="text-xl text-white/35 hover:text-white/80" aria-label="Close model controls">×</button>
             </div>
-            <div className="space-y-1">
-              {order.map(key => (
-                <label key={key} className="flex items-center gap-3 px-2 py-1.5 rounded hover:bg-white/[0.03] cursor-pointer">
-                  <input type="checkbox" checked={visibleKeys?.has(key) ?? true} onChange={() => handleToggleVisible(key)} className="accent-cyan-500" />
-                  <span className="text-sm text-slate-200">{MODEL_LABELS[key] || key}</span>
+            <div className="mt-4 space-y-1">
+              {order.map((key, index) => (
+                <label key={key} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-white/[0.04]">
+                  <span className="mono w-5 text-[10px] text-white/25">{String(index + 1).padStart(2, "0")}</span>
+                  <input type="checkbox" checked={visibleKeys?.has(key) ?? true} onChange={() => handleToggleVisible(key)} className="accent-cyan-400" />
+                  <span className="text-sm text-white/75">{MODEL_LABELS[key] || key}</span>
                 </label>
               ))}
             </div>
-            <div className="flex gap-2 mt-4 pt-3 border-t border-white/[0.06]">
-              <button onClick={() => { const all = new Set(order); setVisibleKeys(all); localStorage.setItem("visibleKeys", JSON.stringify([...all])) }} className="flex-1 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest bg-cyan-500/20 text-cyan-400 rounded hover:bg-cyan-500/30 transition-colors">Show All</button>
-              <button onClick={() => { setVisibleKeys(new Set()); localStorage.setItem("visibleKeys", JSON.stringify([])) }} className="flex-1 px-3 py-1.5 text-[10px] font-mono uppercase tracking-widest bg-white/[0.03] text-slate-400 rounded hover:bg-white/[0.06] transition-colors">Hide All</button>
+            <div className="mt-4 flex gap-2 border-t border-white/[0.06] pt-4">
+              <button onClick={() => { const all = new Set(order); setVisibleKeys(all); localStorage.setItem("visibleKeys", JSON.stringify([...all])) }} className="flex-1 rounded-lg bg-cyan-400/12 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-300 transition-colors hover:bg-cyan-400/20">Show all</button>
+              <button onClick={() => { setVisibleKeys(new Set()); localStorage.setItem("visibleKeys", JSON.stringify([])) }} className="flex-1 rounded-lg bg-white/[0.04] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/55 transition-colors hover:bg-white/[0.08]">Hide all</button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+function HubStat({ label, value, valueClass, foot }: { label: string; value: string; valueClass: string; foot: string }) {
+  return (
+    <div className="px-5 py-5 sm:px-6">
+      <div className="eyebrow">{label}</div>
+      <div className={`tnum mt-1.5 text-[27px] font-bold leading-none tracking-[-0.02em] ${valueClass}`}>{value}</div>
+      <div className="mono mt-2 text-[10.5px] tracking-wide text-white/30">{foot}</div>
     </div>
   )
 }

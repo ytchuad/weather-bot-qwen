@@ -86,7 +86,7 @@ The **trading‑related modules** are separated as an optional **research, paper
 
 ## Tech Stack
 
-- **Language**: Python 3.14 (Hugging Face Spaces)
+- **Language**: Python 3.11 (Hugging Face Spaces Docker)
 - **Data**: pandas, numpy, xarray, Parquet
 - **Machine Learning**: XGBoost (long‑horizon), LightGBM (intraday quantile & classifiers)
 - **Dashboard**: FastAPI backend (`app/api/`) + React frontend (`app/frontend/`), Plotly
@@ -191,10 +191,10 @@ A separate model family trained on scraped HKO minute-level temperature and rela
 - **OOT results**: MAE=0.614°C, 80% PI coverage=84.5%, avg PIW=1.93°C, PR-AUC=0.877.
 - **Known limitation**: Coverage drops from 84.8% (no-rain) to 79.1% (rain) — to be addressed by Model B.
 
-### Model B & C (Planned)
+### Model B & C (Trained)
 
-- **Model B**: Adds 8 rainfall history features (accumulation + cooling interactions) to Model A to close the rain/no-rain gap.
-- **Model C**: Adds 37 spatial rainfall nowcast features on top of Model B for the most comprehensive minute-level predictor.
+- **Model B**: Adds 8 rainfall history features (accumulation + cooling interactions) to Model A. Marginal overall improvement (MAE 0.613 vs 0.614), rain MAE reduced from 0.709 to 0.677.
+- **Model C**: Adds 37 spatial rainfall nowcast features on top of Model B (83 features total). Accepted: OOT MAE=0.602°C, rain COV80 improved from 79.2% to 84.2%.
 
 ### Fusion & Calibration
 
@@ -308,10 +308,10 @@ The app is deployed on Hugging Face Spaces. The following optimisations are appl
 
 - **Background scheduler** runs as a daemon thread inside the FastAPI process — polls `strategy_accounts.json` every 30 seconds; only strategies with `scheduler_on: true` and 5-minute cooldown are run.
 - **Lazy library imports**: `xgboost` and `scipy.stats.norm` are imported on first call rather than at module load — saves ~70–140 MB of peak startup RAM
-- **Model caching**: `models/inference.py` caches loaded model objects per process (the `_maybe_st_cache_resource` helper gracefully degrades when Streamlit is absent), so models are built once per worker.
+- **Model caching**: `models/inference.py` caches loaded model objects per process using `functools.lru_cache`, so models are built once per worker.
 - **Parquet read caching**: intraday/rainfall parquet reads are cached (TTL 120s) — prevents ~3 MB of I/O per scheduler cycle
 - **`.gitignore` exclusions** — ~150 MB of unused files (ECMWF GRIB, candidate model directories, duplicate `active/`/`archive/` models, HTML/PNG visualisations) are excluded from deployment
-- **`__init__.py`** in `models/` and `features/` ensures regular package behaviour in Python 3.14 (avoids namespace‑package resolution failures)
+- **`__init__.py`** in `models/` and `features/` ensures regular package behaviour in Python 3.11 (avoids namespace‑package resolution failures)
 
 ## Deployment & Automation
 
@@ -484,17 +484,11 @@ Weather_Bot_Qwen/
 │   ├── pnl_history/              # per-strategy PnL snapshots
 │   └── auto_runner_log.json      # headless execution audit trail
 ├── app/                    # FastAPI + React app package
-│   ├── main.py                  # entry point, navigation, scheduler
-│   ├── pages/
-│   │   ├── page_hub.py          # overview dashboard
-│   │   ├── page_intraday.py     # intraday temperature visualization
-│   │   ├── page_strategies.py   # Live / Builder / Lab tabs
-│   │   ├── page_analytics.py    # forward-test performance
-│   │   └── page_health.py       # runtime checks
-│   └── components/
-│       ├── sidebar.py           # global sidebar (date picker, sync)
-│       ├── strategy_card.py     # per-strategy card with toggle & PnL
-│       └── strategy_builder.py  # strategy creation form & gate tuning
+│   ├── api/                      # FastAPI routes (server.py, strategies.py, weather.py, etc.)
+│   ├── services/                 # Business logic services (weather, model, market, strategy)
+│   ├── frontend/src/             # React frontend source (TypeScript + TailwindCSS v4 + ECharts)
+│   ├── frontend/dist/            # React frontend build artifacts (gitignored)
+│   └── config.py                 # dashboard constants, model registry, API endpoints
 ├── features/               # feature builders & dataset constructors
 │   ├── source_adapters_base.py   # generic canonical source adapter
 │   ├── shared_feature_builder_base.py  # shared feature builder contract

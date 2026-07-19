@@ -36,3 +36,85 @@ html, body {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
+/* Hub visual language adapted from the Kimi demo. */
+.hub-page { color: rgba(226, 232, 240, 0.92); }
+.hub-page .panel {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.014));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 16px 36px -24px rgba(0, 0, 0, 0.85);
+}
+.hub-page .panel-hover { transition: border-color 180ms ease, background 180ms ease, transform 180ms ease; }
+.hub-page .panel-hover:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02));
+}
+.hub-page .eyebrow {
+  color: rgba(255, 255, 255, 0.42);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+.hub-page .eyebrow-accent::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 1px;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: rgba(34, 211, 238, 0.72);
+}
+.hub-page .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.hub-page .tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+.hub-page .hairline-t { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.hub-page .seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.hub-page .seg-item {
+  padding: 5px 12px;
+  border-radius: 7px;
+  color: rgba(255, 255, 255, 0.42);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: all 150ms ease;
+}
+.hub-page .seg-item:hover { color: rgba(255, 255, 255, 0.82); }
+.hub-page .seg-item:focus { outline: none; }
+.hub-page .seg-item:focus-visible { outline: 1px solid rgba(34, 211, 238, 0.55); outline-offset: 1px; }
+.hub-page button:focus { outline: none; }
+.hub-page button:focus-visible { outline: 1px solid rgba(34, 211, 238, 0.55); outline-offset: 1px; }
+.hub-page .seg-item-active {
+  color: rgb(103, 232, 249);
+  background: rgba(34, 211, 238, 0.13);
+  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.25);
+}
+.hub-page .hub-input {
+  min-width: 142px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(255, 255, 255, 0.72);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  outline: none;
+}
+.hub-page .hub-input:focus { border-color: rgba(34, 211, 238, 0.45); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.08); }
+.hub-page .model-row + .model-row { border-top: 1px solid rgba(255, 255, 255, 0.045); }
+.hub-page .model-row { transition: background 150ms ease, opacity 150ms ease; }
+.hub-page .model-row:hover { background: rgba(255, 255, 255, 0.025); }
+.hub-page .model-row-dragging { background: rgba(34, 211, 238, 0.06); box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.22); }
+@media (max-width: 640px) { .hub-page .hub-input { min-width: 0; flex: 1; } }

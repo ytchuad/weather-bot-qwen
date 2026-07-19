@@ -2,6 +2,7 @@
 """Dashboard constants, paths, colours, and bucket definitions."""
 from pathlib import Path
 from datetime import timedelta
+import os
 
 # ---- App identity ----
 APP_TITLE = "Weather Quant Dashboard"
@@ -26,6 +27,9 @@ TRADE_AUDIT_PATH = DATA_DIR / "paper_trade_audit.parquet"
 STRATEGY_CONFIG_PATH = CONFIG_DIR / "paper_strategies.json"
 PORTFOLIO_CONFIG_PATH = CONFIG_DIR / "portfolios.json"
 PORTFOLIO_STATE_PATH = DATA_DIR / "portfolio_state.json"
+
+# ---- Snapshot export source ----
+HF_SPACE_URL = os.getenv("HF_SPACE_URL", "https://shea-hilton-weather-prediction.hf.space")
 
 # ---- Model fallbacks ----
 DEFAULT_TMAX_FORECAST_DELTA = 2.0

@@ -1,78 +1,56 @@
 import { useMemo } from "react"
 import ReactECharts from "echarts-for-react"
+import type { EChartsOption } from "echarts"
 import type { ModelPrediction } from "../types"
 
-const sortBuckets = (a: string, b: string) => {
-  const parseBucket = (s: string) => {
-    if (s.startsWith("<")) return -999
-    if (s.startsWith(">=")) return 999
-    if (s.startsWith(">")) return 999
-    const num = parseFloat(s.split("-")[0])
-    return isNaN(num) ? 0 : num
+const MODEL_COLORS = ["#22d3ee", "#a78bfa", "#34d399", "#f472b6", "#fbbf24", "#fb923c", "#818cf8", "#2dd4bf"]
+
+function sortBuckets(a: string, b: string) {
+  const parse = (value: string) => {
+    if (value.startsWith("<") || value.includes("or below")) return -999
+    if (value.startsWith(">") || value.includes("or higher")) return 999
+    const match = value.match(/(\d+)/)
+    return match ? Number(match[1]) : 0
   }
-  return parseBucket(a) - parseBucket(b)
+  return parse(a) - parse(b)
 }
 
-export default function ComparisonChart({
-  models,
-  marketPrices,
-  allBuckets,
-}: {
+export default function ComparisonChart({ models, marketPrices, allBuckets }: {
   models: [string, ModelPrediction][]
   marketPrices: Record<string, number>
   allBuckets: string[]
 }) {
-  const colors = ["#06b6d4", "#8b5cf6", "#10b981", "#f43f5e", "#f59e0b"]
-
-  const option = useMemo(() => {
-    const sortedBuckets = [...allBuckets].sort(sortBuckets)
-
-    const series = models.map(([key, pred], idx) => ({
+  const option = useMemo<EChartsOption>(() => {
+    const buckets = [...allBuckets].sort(sortBuckets)
+    const series = models.map(([key, prediction], index) => ({
       name: key,
       type: "line",
-      smooth: true,
-      data: sortedBuckets.map(b => pred.probs?.[b] != null ? +(pred.probs[b] * 100).toFixed(1) : 0),
-      itemStyle: { color: colors[idx % colors.length] },
-      lineStyle: { width: 2, color: colors[idx % colors.length] },
-      areaStyle: { opacity: 0.1 },
+      smooth: false,
+      step: "end",
+      symbol: "none",
+      data: buckets.map((bucket) => prediction.probs?.[bucket] != null ? +(prediction.probs[bucket] * 100).toFixed(1) : 0),
+      lineStyle: { width: 1.3, color: MODEL_COLORS[index % MODEL_COLORS.length], opacity: 0.72 },
+      itemStyle: { color: MODEL_COLORS[index % MODEL_COLORS.length] },
     })) as any[]
 
-    ;(series as any).push({
+    series.push({
       name: "Market",
       type: "bar",
-      barWidth: 40,
-      data: sortedBuckets.map(b => marketPrices[b] != null ? +(marketPrices[b] * 100).toFixed(1) : 0),
-      itemStyle: { color: 'rgba(100, 116, 139, 0.3)' },
+      data: buckets.map((bucket) => marketPrices[bucket] != null ? +(marketPrices[bucket] * 100).toFixed(1) : 0),
+      barWidth: "34%",
+      itemStyle: { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: "rgba(167,139,250,0.75)" }, { offset: 1, color: "rgba(167,139,250,0.12)" }] }, borderRadius: [4, 4, 0, 0] },
     })
 
     return {
-      animation: true,
-      tooltip: { trigger: "axis" },
-      legend: { data: [...models.map(m => m[0]), "Market"], textStyle: { color: "#94a3b8" }, top: 0 },
-      grid: { left: "3%", right: "4%", bottom: "3%", containLabel: true },
-      xAxis: {
-        type: "category",
-        data: sortedBuckets,
-        axisLine: { lineStyle: { color: "#1e293b" } },
-        axisLabel: { color: "#64748b", fontSize: 12 },
-      },
-      yAxis: {
-        type: "value",
-        max: 100, // 關鍵修正：強制 Y 軸最大值為 100
-        axisLabel: { color: "#64748b", fontSize: 12, formatter: "{value}%" },
-        splitLine: { lineStyle: { color: "#1e293b", type: "dashed" } },
-      },
+      animationDuration: 500,
+      grid: { left: 48, right: 18, top: 34, bottom: 32 },
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow", shadowStyle: { color: "rgba(255,255,255,0.03)" } }, backgroundColor: "rgba(9,12,20,0.96)", borderColor: "rgba(255,255,255,0.1)", borderWidth: 1, padding: [10, 14], textStyle: { color: "rgba(255,255,255,0.85)", fontSize: 11, fontFamily: "ui-monospace, monospace" } },
+      legend: { data: [...models.map(([key]) => key), "Market"], top: 0, type: "scroll", textStyle: { color: "rgba(255,255,255,0.55)", fontSize: 10, fontFamily: "ui-monospace, monospace" } },
+      xAxis: { type: "category", data: buckets, axisLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } }, axisTick: { show: false }, axisLabel: { color: "rgba(255,255,255,0.35)", fontSize: 10, fontFamily: "ui-monospace, monospace" } },
+      yAxis: { type: "value", max: 100, axisLabel: { color: "rgba(255,255,255,0.35)", fontSize: 10, fontFamily: "ui-monospace, monospace", formatter: (value: number) => `${value}%` }, splitLine: { lineStyle: { color: "rgba(255,255,255,0.045)" } } },
       series,
     }
-  }, [models, marketPrices, allBuckets])
+  }, [allBuckets, marketPrices, models])
 
-  return (
-    <div style={{ height: 350 }}>
-      <ReactECharts 
-        option={option} 
-        notMerge={true} 
-        style={{ height: "100%", width: "100%" }} 
-      />
-    </div>
-  )
+  return <div className="h-full min-h-[350px] w-full"><ReactECharts option={option} notMerge={true} style={{ height: "100%", width: "100%" }} /></div>
 }

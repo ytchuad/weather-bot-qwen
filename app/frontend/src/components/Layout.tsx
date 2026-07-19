@@ -113,7 +113,7 @@ export default function Layout({ children }: { children: ReactNode }) {
             {/* 手机端隐藏 Live 时间，腾出空间 */}
             <div className="hidden md:flex items-center gap-2">
               <span className={`w-1 h-1 rounded-full ${isLive ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-amber-500"}`}></span>
-              <span>LIVE • {lastUpdate.toLocaleTimeString("zh-HK", { hour: "2-digit", minute: "2-digit" })}</span>
+              <span>LIVE · {lastUpdate.toLocaleTimeString("en-HK", { hour: "2-digit", minute: "2-digit" })}</span>
             </div>
             <button 
               onClick={() => { setLastUpdate(new Date()); setIsLive(true) }}
