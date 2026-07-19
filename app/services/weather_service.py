@@ -940,6 +940,11 @@ def fetch_hko_ilens_forecast(target_date_str: str | None = None) -> dict | None:
                     "forecast_issue_time": clean[1],
                     "forecast_tmin": float(clean[2]) if len(clean) > 2 and clean[2] else None,
                     "forecast_tmax": float(clean[3]) if len(clean) > 3 and clean[3] else None,
+                    # Model 4 forecast rain/humidity features
+                    "forecast_min_rh": float(clean[4]) if len(clean) > 4 and clean[4] else None,
+                    "forecast_max_rh": float(clean[5]) if len(clean) > 5 and clean[5] else None,
+                    "forecast_rain_prob": clean[7] if len(clean) > 7 else None,
+                    "forecast_weather_desc": clean[8] if len(clean) > 8 else None,
                 }
         return best
     except Exception as e:

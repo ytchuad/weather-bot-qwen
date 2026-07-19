@@ -9,6 +9,8 @@ class EnsembleParams:
         "model_a": 1/3,
         "model_b": 1/3,
         "model_c": 1/3,
+        "model_4": 0.0,
+        "model_4_restricted": 0.0,
     })
 
     edge_threshold: float = 0.05

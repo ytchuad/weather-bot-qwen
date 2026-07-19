@@ -1137,6 +1137,150 @@ Model 2B **不會**顯著改善降雨情境表現。新增的觀測降雨特徵�
 
 ---
 
+### 4.9 Model 4：加入 HKO 預報降雨與濕度特徵 (`models/train_model_4.py`)
+
+Model 4 是 Model 3B 的預報天氣擴展版本。它完整保留 Model 3B 的 59 個特徵（45 基礎 + 9 降雨 + 5 趨勢關係），增加 8 個 HKO 前瞻性預報降雨機率與濕度特徵，總特徵數達 67 個。
+
+#### 4.9.1 動機
+
+現有 Model 3B 的所有特徵均為**回顧性**（觀測到的溫度、濕度、降雨歷史、趨勢關係），缺乏對未來天氣的明確前瞻性資訊。HKO 每日天氣描述（例如「大致多雲，有幾陣驟雨及雷暴」）包含了人為解譯的預報降雨強度與型態，可提供：
+
+- **降雨強度前瞻信號**：天氣描述中的關鍵詞（雷暴→高強度、驟雨→中等、多雲→低強度）可轉換為數值降雨機率特徵。
+- **時段分解**：描述常按時段分段（「初時有雨，下午短暫陽光」），可分別提取上午/下午的預報降雨強度。
+- **濕度資訊**：HKO 同時發布預測相對濕度範圍（min_rh / max_rh），直接影響溫度上升潛力。
+
+#### 4.9.2 新增特徵
+
+在 Model 3B 的 59 個特徵基礎上增加 8 個前瞻預報特徵：
+
+| 特徵 | 說明 |
+|------|------|
+| `forecast_rain_prob_morning` | 上午時段預報降雨強度（段解析器，無時間限定詞→權重 0.4×） |
+| `forecast_rain_prob_afternoon` | 下午時段預報降雨強度（含「下午」→權重 1.0×） |
+| `forecast_rain_prob_overall` | 最差情境降雨強度（所有段的最大值） |
+| `forecast_rain_prob_missing` | 1 若無天氣描述可用 |
+| `forecast_rain_prob_label` | HKO 機率標籤序數（低→1, 中低→2, 中→3, 中高→4, 高→5；無標籤→0） |
+| `forecast_min_rh` | 預測最低相對濕度 |
+| `forecast_max_rh` | 預測最高相對濕度 |
+| `forecast_rh_range` | 預測濕度範圍（`max_rh - min_rh`） |
+
+#### 4.9.3 特徵建構
+
+**來源資料**：i-lens.hk 每日天氣描述擷取（`https://i-lens.hk/hkweather/daily_extract.php?date=YYYY-MM-DD`），包含：
+- col 7：降雨機率標籤（「中高」等）
+- col 8：天氣描述文字（「大致多雲，有幾陣驟雨及雷暴，部分地區驟雨較多。」）
+- col 4：最低相對濕度
+- col 5：最高相對濕度
+
+**段解析器**（`features/forecast_rain_prob_parser.py`）：
+1. 以句號（。）分割天氣描述為多個語段。
+2. 偵測每個段的時間限定詞：
+   - 「初時」→ 標記為 morning，權重 0.4×
+   - 「下午」→ 標記為 afternoon，權重 1.0×
+   - 無時間限定詞 → 標記為 overall，權重 0.7×
+3. 關鍵詞映射為數值強度：雷暴→5, 驟雨→4, 大雨→4, 雨→3, 多雲→3, 微雨→2, 乾燥→1, 天晴→1。
+4. 各時段取該類別段的最大強度。
+
+**自動欄位辨識**（`resolve_and_parse`）：自動判斷 `forecast_rain_prob` 欄位是機率標籤還是天氣描述——若欄位值為純文字（包含中文），視為天氣描述進行段解析；若為簡短標籤（「中高」），則使用 `map_weather_desc_to_ordinal()` 轉換為序數。
+
+#### 4.9.4 資料準備
+
+1. 從 i-lens 每日天氣描述頁面以 BeautifulSoup 解析表格，提取 RH 和天氣描述。
+2. 使用 `build_forecast_features_m4()`（`features/model_4_feature_builder.py`）將原始文字轉換為 8 個數值特徵。
+3. 以 `pd.merge_asof` 按 `target_date` 合併至 Model 3B 特徵儲存庫，產生 `data/model_4_feature_store.parquet`。
+4. 2023-06-01 前無 i-lens 天氣描述的行 → `forecast_rain_prob_missing=1`，其餘特徵設為預設值。
+
+#### 4.9.5 訓練設定
+
+**變體**：
+- **Variant 1（完整）**：使用全部歷史資料（與 Model 3B 相同分割）。
+- **Variant 2（受限）**：僅使用 `target_date >= 2023-06-01` 的資料。
+
+**超參數**：與 Model 3B 相同（`max_depth=6`、`num_leaves=31`、`lr=0.03`、`n_estimators=1500`、`min_data=500`、`reg_lambda=2.0`）。
+
+**特徵清單（67 個）**：
+- 45 個 Model 2A v2 基礎特徵（不變）
+- 9 個觀測降雨特徵（與 Model 2B/3B 相同）
+- 5 個趨勢關係特徵（與 Model 3A/3B 相同）
+- 8 個預報天氣特徵（新增）
+
+**時間分割**：
+| 分割 | 期間 | 完整變體 | 受限變體 |
+|------|------|---------|---------|
+| 訓練 | < 2024-06-11 | 296,136 行 | 40,608 行 |
+| 驗證 | 2024-06-11 至 2025-06-11 | 39,420 行 | 39,420 行 |
+| OOT | ≥ 2025-06-11 | 40,716 行 | 40,716 行 |
+
+#### 4.9.6 OOT 表現（40,716 行，377 個日期）
+
+Model 4 的校準殘差分析（`calibration_residuals.json`）顯示殘差（`actual_remaining_upside - q50`）的經驗百分位數：
+
+| 情境 | n | residual_p10 | residual_p50 | residual_p90 | mean | std |
+|------|---|-------------|-------------|-------------|------|-----|
+| ALL | 40,716 | -0.606 | 0.000 | +0.567 | -0.010 | 0.588 |
+| no_rain | 38,482 | -0.609 | 0.000 | +0.557 | -0.016 | 0.579 |
+| recent_rain | 2,234 | -0.580 | 0.000 | +0.800 | +0.077 | 0.724 |
+| heavy_recent_rain | 354 | -0.997 | 0.000 | +0.655 | -0.013 | 0.808 |
+| post_peak_rain | 1,054 | -0.523 | 0.000 | +0.728 | +0.070 | 0.665 |
+| 06-12_rain | 890 | -1.161 | -0.039 | +1.332 | +0.053 | 1.089 |
+
+**主要觀察：**
+
+1. **ALL 殘差中位數為 0**：模型無系統偏差，q50 預測的中位數剩餘上漲空間與實際值一致。
+2. **ALL PIW ≈ 1.17°C**：在 80% 區間（p10-p90）的跨度約 1.17°C，與 Model 2B 的 ALL 殘差跨度（1.16°C）相當。
+3. **無雨情境穩定**：殘差分佈幾乎對稱（p10=-0.61, p90=+0.56），表示乾燥條件下模型校準良好。
+4. **有雨情境上尾較寬**：p90=+0.80（vs 無雨 +0.56），表示降雨時模型有時低估剩餘上漲空間（降雨後氣溫可能反彈）。
+5. **06-12 降雨最差**：殘差 p10=-1.16, p90=+1.33，跨度最大（2.49°C），因上午降雨的溫度效應最不確定。
+6. **heavy_recent_rain 下尾最寬**：p10=-1.00，表示大雨時模型有時大幅高估剩餘上漲空間（降雨導致實際降溫比預期大）。
+
+**按時段殘差：**
+
+| 時段 | n | residual_p10 | residual_p50 | residual_p90 |
+|------|---|-------------|-------------|-------------|
+| 06-09 | 6,786 | -1.518 | -0.092 | +1.207 |
+| 09-12 | 6,786 | -1.117 | -0.095 | +0.965 |
+| 12-15 | 6,786 | -0.399 | 0.000 | +0.651 |
+| 15-18 | 6,786 | -0.002 | 0.000 | +0.100 |
+| 18-24 | 13,572 | 0.000 | 0.000 | 0.000 |
+
+**分類器**：PR-AUC 與 F1 表現與 Model 3B 相近，預報天氣特徵對「是否已達最高溫」的分類無明顯退化。
+
+#### 4.9.7 部署策略：Solo Logging 模式
+
+Model 4 以 **weight=0.0** 的方式加入 ensemble 權重表，確保：
+- 不影響現有策略決策（weighted sum 貢獻 = 0）。
+- 所有推論結果仍寫入 snapshot 的 `context_json.model_probs` 和 `all_model_predictions`。
+- 可與既有模型對比 daily performance（Brier score、PnL 貢獻）。
+
+**資料流：**
+
+```
+run_all_models()
+└── predict_intraday_all()
+    ├── fetch_hko_ilens_forecast() → 回傳 tmin/tmax + RH + rain_prob + weather_desc
+    └── build_forecast_features_m4() → 8 keys → common_tmax dict
+        └── predict_intraday_tmax_all(**common_tmax)
+            ├── set_active_model('model_4')
+            │   └── predict_intraday_tmax_model_3b(**_fc)  ← 使用 model_4 的 calib
+            ├── set_active_model('model_4_restricted')
+            │   └── predict_intraday_tmax_model_3b(**_fc)  ← 使用 model_4_restricted calib
+            └── 結果 → results dict → run_all_models() 計算 bucket probs
+                → output dict → strategy → snapshot logger
+```
+
+#### 4.9.8 產出物
+
+| 路徑 | 說明 |
+|------|------|
+| `data/model_4_feature_store.parquet` | 特徵儲存庫 |
+| `models/intraday_minute_ai_model_4/` | 完整變體：5 分位數 + 1 分類器 + 特徵清單 + OOT 預測 + 校準殘差 |
+| `models/intraday_minute_ai_model_4_restricted/` | 受限變體：5 分位數 + 1 分類器 + 特徵清單 + OOT 預測 + 校準殘差 |
+| `features/forecast_rain_prob_parser.py` | 段解析器：天氣描述→數值降雨機率 |
+| `features/model_4_feature_builder.py` | 即時推論特徵建構器：`build_forecast_features_m4()` |
+| `models/train_model_4.py` | 訓練腳本 |
+
+---
+
 ## 5. 推論與預測邏輯 (`models/intraday_inference.py`)
 
 ### 5.1 特徵組裝

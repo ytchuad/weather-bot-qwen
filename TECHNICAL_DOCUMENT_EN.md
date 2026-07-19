@@ -1159,6 +1159,150 @@ Model 2B does **not** materially improve rainy-regime performance. The added obs
 
 ---
 
+### 4.7.8 Model 4: HKO Forecast Rain + Humidity Features (`models/train_model_4.py`)
+
+Model 4 extends Model 3B by adding 8 forward-looking forecast rain probability and humidity features, bringing the total to 67 features (45 base + 9 rainfall + 5 trend-relation + 8 forecast-weather).
+
+#### 4.7.8.1 Motivation
+
+All existing Model 3B features are **backward-looking** (observed temperature, humidity, rainfall history, trend relations). The HKO daily weather description (e.g., "mainly cloudy with a few showers and thunderstorms") contains human-interpreted forecast rainfall intensity and regime information that provides:
+
+- **Forward-looking rainfall signal**: Keywords (thunderstorm→high intensity, showers→medium, cloudy→low) are mapped to numerical rain probability features.
+- **Time-segment decomposition**: Descriptions are split by 句號 (period); time qualifiers (early morning, afternoon) allow separate morning/afternoon intensity features.
+- **Humidity information**: HKO publishes forecast min/max relative humidity, directly affecting temperature rise potential.
+
+#### 4.7.8.2 New Features
+
+8 forward-looking forecast features augmenting Model 3B's 59 features:
+
+| Feature | Description |
+|---------|-------------|
+| `forecast_rain_prob_morning` | Morning rain intensity from segment parser (0.4× weight for unqualified segments) |
+| `forecast_rain_prob_afternoon` | Afternoon rain intensity (segments with "下午"→1.0× weight) |
+| `forecast_rain_prob_overall` | Worst-case rain intensity (max across all segments) |
+| `forecast_rain_prob_missing` | 1 if no weather description available |
+| `forecast_rain_prob_label` | HKO probability label ordinal (低→1, 中低→2, 中→3, 中高→4, 高→5; 0=missing) |
+| `forecast_min_rh` | Forecast minimum relative humidity |
+| `forecast_max_rh` | Forecast maximum relative humidity |
+| `forecast_rh_range` | Forecast humidity range (`max_rh - min_rh`) |
+
+#### 4.7.8.3 Feature Construction
+
+**Source data**: i-lens.hk daily weather description extract (`https://i-lens.hk/hkweather/daily_extract.php?date=YYYY-MM-DD`), parsed via BeautifulSoup:
+- col 7: rain probability label (e.g. "中高")
+- col 8: weather description text (e.g. "大致多雲，有幾陣驟雨及雷暴，部分地區驟雨較多。")
+- col 4: forecast minimum relative humidity
+- col 5: forecast maximum relative humidity
+
+**Segment parser** (`features/forecast_rain_prob_parser.py`):
+1. Split description by 句號 (period) into segments.
+2. Detect time qualifiers per segment:
+   - "初時" (early) → tagged morning, weight 0.4×
+   - "下午" (afternoon) → tagged afternoon, weight 1.0×
+   - No qualifier → tagged overall, weight 0.7×
+3. Keyword → numerical intensity mapping: 雷暴(thunderstorm)→5, 驟雨(shower)→4, 大雨(heavy rain)→4, 雨(rain)→3, 多雲(cloudy)→3, 微雨(drizzle)→2, 乾燥(dry)→1, 天晴(sunny)→1.
+4. Per time-bucket: take the max intensity among segments in that bucket.
+
+**Auto-column resolution** (`resolve_and_parse`): auto-detects whether `forecast_rain_prob` column contains a probability label or a weather description — if pure text (contains Chinese characters beyond a label), run segment parser; if short label ("中高"), map via `map_weather_desc_to_ordinal()`.
+
+#### 4.7.8.4 Data Preparation
+
+1. Parse i-lens daily weather description page with BeautifulSoup, extract RH + weather description table.
+2. Use `build_forecast_features_m4()` (`features/model_4_feature_builder.py`) to convert raw text into 8 numerical features.
+3. Merge onto Model 3B feature store via `pd.merge_asof` on `target_date` to produce `data/model_4_feature_store.parquet`.
+4. Pre-2023-06-01 rows without i-lens descriptions → `forecast_rain_prob_missing=1`, remaining features set to defaults.
+
+#### 4.7.8.5 Training Configuration
+
+**Variants**:
+- **Variant 1 (full)**: Full history (same split as Model 3B).
+- **Variant 2 (restricted)**: `target_date >= 2023-06-01` only.
+
+**Hyperparameters**: Same as Model 3B (`max_depth=6`, `num_leaves=31`, `lr=0.03`, `n_estimators=1500`, `min_data=500`, `reg_lambda=2.0`).
+
+**Feature list (67)**:
+- 45 Model 2A v2 base features (unchanged)
+- 9 observed rainfall features (same as Model 2B/3B)
+- 5 trend-relation features (same as Model 3A/3B)
+- 8 forecast-weather features (new)
+
+**Time split**:
+| Split | Period | Full variant | Restricted variant |
+|------|--------|-------------|-------------------|
+| Train | < 2024-06-11 | 296,136 rows | 40,608 rows |
+| Valid | 2024-06-11 to 2025-06-11 | 39,420 rows | 39,420 rows |
+| OOT | >= 2025-06-11 | 40,716 rows | 40,716 rows |
+
+#### 4.7.8.6 OOT Performance (40,716 rows, 377 dates)
+
+Residual calibration analysis (`calibration_residuals.json`) shows empirical percentiles of residuals (`actual_remaining_upside - q50`):
+
+| Regime | n | residual_p10 | residual_p50 | residual_p90 | mean | std |
+|--------|---|-------------|-------------|-------------|------|-----|
+| ALL | 40,716 | -0.606 | 0.000 | +0.567 | -0.010 | 0.588 |
+| no_rain | 38,482 | -0.609 | 0.000 | +0.557 | -0.016 | 0.579 |
+| recent_rain | 2,234 | -0.580 | 0.000 | +0.800 | +0.077 | 0.724 |
+| heavy_recent_rain | 354 | -0.997 | 0.000 | +0.655 | -0.013 | 0.808 |
+| post_peak_rain | 1,054 | -0.523 | 0.000 | +0.728 | +0.070 | 0.665 |
+| 06-12_rain | 890 | -1.161 | -0.039 | +1.332 | +0.053 | 1.089 |
+
+**Key observations:**
+
+1. **ALL median residual = 0**: No systematic bias; median q50 prediction equals actual remaining upside.
+2. **ALL PIW ≈ 1.17°C**: 80% prediction interval (p10-p90) span is ~1.17°C, comparable to Model 2B's ALL residual span (1.16°C).
+3. **Dry conditions well-calibrated**: Residual distribution is nearly symmetric (p10=-0.61, p90=+0.56), indicating good calibration in dry conditions.
+4. **Rain rows have wider upper tail**: p90=+0.80 (vs dry +0.56), indicating occasional underestimation of remaining upside after rain (temperature may rebound post-rain).
+5. **06-12 rain worst segment**: residual p10=-1.16, p90=+1.33, widest span (2.49°C) — morning rainfall temperature effects are most uncertain.
+6. **Heavy rain widest lower tail**: p10=-1.00, indicating the model sometimes overestimates remaining upside during heavy rain (actual cooling exceeds prediction).
+
+**Per-hour residual diagnostics:**
+
+| Bucket | n | residual_p10 | residual_p50 | residual_p90 |
+|--------|---|-------------|-------------|-------------|
+| 06-09 | 6,786 | -1.518 | -0.092 | +1.207 |
+| 09-12 | 6,786 | -1.117 | -0.095 | +0.965 |
+| 12-15 | 6,786 | -0.399 | 0.000 | +0.651 |
+| 15-18 | 6,786 | -0.002 | 0.000 | +0.100 |
+| 18-24 | 13,572 | 0.000 | 0.000 | 0.000 |
+
+**Classifier**: PR-AUC and F1 are similar to Model 3B; forecast-weather features do not degrade the "has tmax been reached" decision.
+
+#### 4.7.8.7 Deployment Strategy: Solo Logging Mode
+
+Model 4 is deployed with **weight=0.0** in the ensemble weight table:
+- Does not affect existing strategy decisions (zero contribution to weighted-sum probs).
+- All inference results are still recorded in snapshots via `context_json.model_probs` and `all_model_predictions`.
+- Enables daily comparison with existing models (Brier score, PnL attribution) without strategy impact.
+
+**Data flow:**
+
+```
+run_all_models()
+└── predict_intraday_all()
+    ├── fetch_hko_ilens_forecast() → returns tmin/tmax + RH + rain_prob + weather_desc
+    └── build_forecast_features_m4() → 8 keys → common_tmax dict
+        └── predict_intraday_tmax_all(**common_tmax)
+            ├── set_active_model('model_4')
+            │   └── predict_intraday_tmax_model_3b(**_fc)  ← uses model_4 calib
+            ├── set_active_model('model_4_restricted')
+            │   └── predict_intraday_tmax_model_3b(**_fc)  ← uses model_4_restricted calib
+            └── results → results dict → run_all_models() computes bucket probs
+                → output dict → strategy → snapshot logger
+```
+
+#### 4.7.8.8 Artifacts
+
+| Path | Description |
+|------|-------------|
+| `data/model_4_feature_store.parquet` | Feature store |
+| `models/intraday_minute_ai_model_4/` | Full variant: 5 quantiles + 1 classifier + feature list + OOT preds + calibration residuals |
+| `models/intraday_minute_ai_model_4_restricted/` | Restricted variant: 5 quantiles + 1 classifier + feature list + OOT preds + calibration residuals |
+| `features/forecast_rain_prob_parser.py` | Segment parser: weather description → numerical rain probability |
+| `features/model_4_feature_builder.py` | Live inference feature builder: `build_forecast_features_m4()` |
+| `models/train_model_4.py` | Training script |
+
+---
+
 ## 4.8 Real-Time Inference Parity Framework
 
 A generic production ML parity framework ensuring historical training features and live inference features are built consistently, even when data comes from different sources.

@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from execution.ensemble.backtest_compare import run_variant, print_comparison
 from execution.ensemble.params import EnsembleParams
 
-REAL_CLOB_DATES = ["2026-07-13"]
+REAL_CLOB_DATES = ["2026-07-13", "2026-07-14"]
 EXCLUDE = ["2026-07-04"]
 
 

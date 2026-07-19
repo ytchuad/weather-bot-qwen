@@ -68,6 +68,7 @@ The **trading‑related modules** are separated as an optional **research, paper
 - **Model G (Gap+Max)** → forecast-gap + max_so_far based intraday model
 - **Model 2A (Core+Wind)** → Baseline + forecast + wind station data + pressure + dew point (45 features, OOT MAE=0.306°C, PR-AUC=0.987)
 - **Model 2A v2** → Same as 2A but with `wind_offshore_highland` replacing `wind_highland` (merged offshore+highland group); performance-neutral update (OOT MAE=0.309°C, PR-AUC=0.987)
+- **Model 4** → Model 3B + 8 HKO forecast rain/humidity features (67 features, 40,716 OOT rows, residual p10=-0.61, p90=+0.57, weight=0.0 solo logging)
 - **Empirical baseline fallback** (lookup tables) for quick reference
 - Calibration & probability mapping → bucket probabilities
 - **Bayesian fusion** between prior (long‑horizon) and posterior (intraday)
@@ -421,6 +422,8 @@ python -m execution.auto_runner --list           # list enabled strategies
 
 ✅ Real-Time Inference Parity Framework — generic production ML parity framework separating (A) generic framework from (B) model-specific specs
 
+✅ Model 4 — Model 3B + 8 HKO forecast rain/humidity features (67 features, OOT residual p10=-0.61, p90=+0.57); logged solo (weight=0.0) alongside existing models
+
 ## Roadmap
 
 ### Near‑Term: Model & Framework
@@ -496,7 +499,9 @@ Weather_Bot_Qwen/
 │   ├── source_adapters_base.py   # generic canonical source adapter
 │   ├── shared_feature_builder_base.py  # shared feature builder contract
 │   ├── model_2a_source_adapters.py  # Model 2A canonical source adapters
-│   └── model_2a_feature_builder.py  # Model 2A shared feature builder
+│   ├── model_2a_feature_builder.py  # Model 2A shared feature builder
+│   ├── forecast_rain_prob_parser.py # Model 4: segment parser for HKO weather desc
+│   └── model_4_feature_builder.py   # Model 4: forecast rain/humidity features
 ├── inference/              # real-time inference framework
 │   ├── realtime_inference_base.py  # generic inference flow
 │   └── model_2a_realtime_inference.py # Model 2A inference
@@ -514,6 +519,9 @@ Weather_Bot_Qwen/
 │   ├── train_model_2a.py         # Model 2A (+wind + forecast)
 │   ├── train_model_2a_v2.py      # Model 2A v2 (offshore_highland wind)
 │   ├── fix_model_2a_v2.py        # Model 2A v2 interval calibration & assessment
+│   ├── train_model_4.py          # Model 4 (+HKO forecast rain/humidity)
+│   ├── intraday_minute_ai_model_4/          # Model 4 full variant
+│   ├── intraday_minute_ai_model_4_restricted/ # Model 4 restricted variant
 ├── execution/              # strategy runner, Kelly, slippage, rebalancer
 │   ├── strategy_account.py       # StrategyAccount dataclass + persistence
 │   ├── strategy_runner.py        # cycle execution dispatch

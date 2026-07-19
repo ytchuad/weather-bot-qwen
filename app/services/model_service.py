@@ -287,6 +287,20 @@ def predict_intraday_all(
             common_tmax["ilens_forecast_tmin"] = ilens_forecast_tmin
             common_tmax["ilens_forecast_age_minutes"] = ilens_forecast_age_minutes
             common_tmax["ilens_forecast_lead_days"] = ilens_forecast_lead_days
+            # Model 4 forecast rain/humidity features (from i-lens weather description)
+            try:
+                if ilens_forecast and ilens_forecast.get("forecast_rain_prob"):
+                    _fc_df = pd.DataFrame([{
+                        "forecast_rain_prob": ilens_forecast["forecast_rain_prob"],
+                        "forecast_weather_desc": ilens_forecast.get("forecast_weather_desc", ""),
+                        "forecast_min_rh": ilens_forecast.get("forecast_min_rh"),
+                        "forecast_max_rh": ilens_forecast.get("forecast_max_rh"),
+                    }])
+                    from features.model_4_feature_builder import build_forecast_features_m4
+                    _m4_fc = build_forecast_features_m4(_fc_df)
+                    common_tmax.update(_m4_fc)
+            except Exception as _m4e:
+                logger.debug("Model 4 forecast features failed: %s", _m4e)
             raw_preds = predict_intraday_tmax_all(**common_tmax)
     except Exception as e:
         logger.warning("predict_intraday_all failed: %s", e)

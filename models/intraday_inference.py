@@ -46,6 +46,15 @@ MINUTE_3A_FL_PATH = MINUTE_MODEL_3A_DIR / 'feature_list.json'
 # Model 3B - Model 3A + 9 rainfall features
 MINUTE_MODEL_3B_DIR = Path('models/intraday_minute_ai_model_3b')
 MINUTE_3B_FL_PATH = MINUTE_MODEL_3B_DIR / 'feature_list.json'
+MINUTE_3A_CALIB_PATH = MINUTE_MODEL_3A_DIR / 'calibration_residuals.json'
+MINUTE_3B_CALIB_PATH = MINUTE_MODEL_3B_DIR / 'calibration_residuals.json'
+# Model 4 - Model 3B + HKO forecast rain probability + humidity
+MINUTE_MODEL_4_DIR = Path('models/intraday_minute_ai_model_4')
+MINUTE_4_FL_PATH = MINUTE_MODEL_4_DIR / 'feature_list.json'
+MINUTE_MODEL_4_RESTRICTED_DIR = Path('models/intraday_minute_ai_model_4_restricted')
+MINUTE_4_RESTRICTED_FL_PATH = MINUTE_MODEL_4_RESTRICTED_DIR / 'feature_list.json'
+MINUTE_4_CALIB_PATH = MINUTE_MODEL_4_DIR / 'calibration_residuals.json'
+MINUTE_4_RESTRICTED_CALIB_PATH = MINUTE_MODEL_4_RESTRICTED_DIR / 'calibration_residuals.json'
 RAIN_CALIBRATION_PATH = MINUTE_MODEL_D_TMIN_DIR / 'rain_calibration.json'
 MORNING_E_CALIBRATION_PATH = MINUTE_MODEL_E_MORNING_TMIN_DIR / 'morning_calibration.json'
 
@@ -314,6 +323,18 @@ def _load_models():
                 _model_cache['model_3b'] = _load_single_model(MINUTE_MODEL_3B_DIR)
             except Exception as e:
                 logger.warning("Model 3B lazy-load failed: %s", e)
+    if 'model_4' not in _model_cache:
+        if MINUTE_MODEL_4_DIR.exists() and MINUTE_4_FL_PATH.exists():
+            try:
+                _model_cache['model_4'] = _load_single_model(MINUTE_MODEL_4_DIR)
+            except Exception as e:
+                logger.warning("Model 4 lazy-load failed: %s", e)
+    if 'model_4_restricted' not in _model_cache:
+        if MINUTE_MODEL_4_RESTRICTED_DIR.exists() and MINUTE_4_RESTRICTED_FL_PATH.exists():
+            try:
+                _model_cache['model_4_restricted'] = _load_single_model(MINUTE_MODEL_4_RESTRICTED_DIR)
+            except Exception as e:
+                logger.warning("Model 4 restricted lazy-load failed: %s", e)
     return _model_cache
 
 
@@ -323,7 +344,8 @@ def set_active_model(model_key):
     valid_keys = ('baseline', 'rain_nowcast', 'model_a', 'model_b', 'model_c',
                   'model_a_tmin', 'model_b_tmin', 'model_c_tmin', 'model_d_tmin',
                   'model_e_morning_tmin', 'model_g', 'model_2a', 'model_2a1',
-                  'model_2a_v2', 'model_2b', 'model_3a', 'model_3b')
+                  'model_2a_v2', 'model_2b', 'model_3a', 'model_3b',
+                  'model_4', 'model_4_restricted')
     if model_key not in valid_keys:
         raise ValueError(f"Unknown model_key: {model_key}")
     _active_model_key = model_key
@@ -2256,6 +2278,14 @@ def predict_intraday_tmax_all(
         'rain_data_gap_flag', 'rainfall_data_age_minutes',
     )
     rain_2b_kwargs = {k: rain_kwargs.pop(k) for k in _MODEL_2B_RAIN_KEYS if k in rain_kwargs}
+    # Strip Model 4 forecast rain features: consumed only by model_4 / model_4_restricted.
+    _MODEL_4_FORECAST_KEYS = (
+        'forecast_rain_prob_morning', 'forecast_rain_prob_afternoon',
+        'forecast_rain_prob_overall', 'forecast_rain_prob_missing',
+        'forecast_rain_prob_label', 'forecast_min_rh',
+        'forecast_max_rh', 'forecast_rh_range',
+    )
+    model_4_fc_kwargs = {k: rain_kwargs.pop(k) for k in _MODEL_4_FORECAST_KEYS if k in rain_kwargs}
     results = {}
     for model_key in ['baseline', 'rain_nowcast']:
         if model_key not in _model_cache:
@@ -2597,6 +2627,68 @@ def predict_intraday_tmax_all(
         except Exception as e:
             logger.warning("Model 3B prediction failed: %s", e)
             results['model_3b'] = None
+    # ── Model 4 / Model 4 restricted ────────────────────────────────────
+    _fc_kw = model_4_fc_kwargs or {}
+    _m4_fc_defaults = dict(forecast_rain_prob_morning=0.0, forecast_rain_prob_afternoon=0.0,
+                           forecast_rain_prob_overall=0.0, forecast_rain_prob_missing=1.0,
+                           forecast_rain_prob_label=0.0, forecast_min_rh=0,
+                           forecast_max_rh=0, forecast_rh_range=0)
+    for _m4_key, _m4_model_key in [
+        ('model_4', 'model_4'),
+        ('model_4_restricted', 'model_4_restricted'),
+    ]:
+        if _m4_key not in _model_cache:
+            continue
+        set_active_model(_m4_model_key)
+        try:
+            _rkw = rain_2b_kwargs or {}
+            _r60 = _rkw.get('rainfall_60m', rainfall_60m_filled)
+            _r120 = _rkw.get('rainfall_120m', rainfall_120m_filled)
+            _fc = {k: _fc_kw.get(k, v) for k, v in _m4_fc_defaults.items()}
+            results[_m4_key] = predict_intraday_tmax_model_3b(
+                current_datetime, max_so_far, temp_now,
+                humidity=rh_current, min_so_far=min_so_far,
+                time_since_max=time_since_max_so_far or 0.0,
+                temp_change_30m_pre=temp_change_30min,
+                temp_change_60m_pre=temp_change_60min,
+                temp_volatility_60m_pre=temp_volatility_60m,
+                temp_acceleration_60m_pre=temp_acceleration_60m,
+                rh_change_60m_pre=rh_change_60m,
+                dew_point_change_60m_pre=dew_point_change_60m,
+                dew_point_spread_change_60m_pre=dew_point_spread_change_60m,
+                temp_buffer=temp_buffer, rh_buffer=rh_buffer,
+                hour=hour, minute=current_datetime.minute if current_datetime else None,
+                forecast_tmax=forecast_tmax, forecast_tmin=forecast_tmin,
+                pressure_current=pressure_current,
+                pressure_change_60m=pressure_change_60m,
+                pressure_change_180m=pressure_change_180m,
+                dew_point_current=None,
+                forecast_age_minutes=forecast_age_minutes,
+                forecast_lead_days=forecast_lead_days,
+                wind_ref_mean=wind_ref_mean,
+                wind_ref_max=wind_ref_max,
+                wind_victoria_harbour_mean=wind_victoria_harbour_mean,
+                wind_victoria_harbour_max=wind_victoria_harbour_max,
+                wind_offshore_highland_mean=wind_offshore_highland_mean,
+                wind_offshore_highland_max=wind_offshore_highland_max,
+                wind_all_change_60m=wind_all_change_60m,
+                wind_kings_park_current=wind_kings_park_current,
+                obs_data_age_minutes=obs_data_age_minutes,
+                wind_data_age_minutes=wind_data_age_minutes,
+                rainfall_60m=_r60,
+                rainfall_120m=_r120,
+                has_recent_rainfall_obs=_rkw.get('has_recent_rainfall_obs', 0),
+                rain_intensity_max_120m=_rkw.get('rain_intensity_max_120m', 0.0),
+                rain_cooling_60m=_rkw.get('rain_cooling_60m', 0.0),
+                rain_after_max_flag=_rkw.get('rain_after_max_flag', 0),
+                post_peak_rain_flag=_rkw.get('post_peak_rain_flag', 0),
+                rain_data_gap_flag=rain_data_gap_flag,
+                rainfall_data_age_minutes=rainfall_data_age_minutes,
+                **_fc,
+            )
+        except Exception as e:
+            logger.warning("Model 4 (%s) prediction failed: %s", _m4_key, e)
+            results[_m4_key] = None
     set_active_model('baseline')
     return results
 
@@ -3639,6 +3731,115 @@ def _compute_trend_features_live(temp_buffer, temp_now):
     return features
 
 
+# ── Interval calibration helpers (residual-based, for Model 3A/3B) ──
+
+_CALIBRATION_CACHE = {}
+
+_MODEL_3A_BUCKETS = [(6, 9, "06-09"), (9, 12, "09-12"), (12, 15, "12-15"),
+                     (15, 18, "15-18"), (18, 24, "18-24")]
+
+
+def _load_calibration_offsets(path):
+    """Lazy-load and cache a calibration_residuals.json by path."""
+    key = str(path)
+    if key not in _CALIBRATION_CACHE:
+        if path.exists():
+            try:
+                import json as _json
+                with open(path) as _f:
+                    _CALIBRATION_CACHE[key] = _json.load(_f)
+            except Exception:
+                _CALIBRATION_CACHE[key] = None
+        else:
+            _CALIBRATION_CACHE[key] = None
+    return _CALIBRATION_CACHE[key]
+
+
+def _pick_cal_entry(hour, cal, has_rain=False):
+    """Select calibration entry by hour (and rain flag for 3B)."""
+    if cal is None:
+        return None, None
+
+    # Find bucket label for this hour
+    bucket_label = None
+    for lo, hi, lb in _MODEL_3A_BUCKETS:
+        if lo <= hour < hi:
+            bucket_label = lb
+            break
+
+    if bucket_label is None:
+        return cal.get("ALL"), "ALL"
+
+    # 3B: rain-specific entry
+    if has_rain:
+        rain_key = f"{bucket_label}_rain"
+        if rain_key in cal:
+            return cal[rain_key], rain_key
+        # Morning combined rain bucket
+        if 6 <= hour < 12 and "06-12_rain" in cal:
+            return cal["06-12_rain"], "06-12_rain"
+
+    # 3B: no-rain entry
+    if not has_rain:
+        no_rain_key = f"{bucket_label}_no_rain"
+        if no_rain_key in cal:
+            return cal[no_rain_key], no_rain_key
+
+    # Bucket-only (mixed) entry
+    if bucket_label in cal:
+        return cal[bucket_label], bucket_label
+
+    # Fallback: regime-level
+    if has_rain:
+        for fallback_key in ("recent_rain", "no_rain"):
+            if fallback_key in cal:
+                return cal[fallback_key], fallback_key
+
+    # Global fallback
+    return cal.get("ALL"), "ALL"
+
+
+def _apply_calibration(remaining_upside_p10, remaining_upside_p25,
+                       remaining_upside_p50, remaining_upside_p75,
+                       remaining_upside_p90, cal_entry, logger=None):
+    """Apply residual-based calibration to q10 and q90, re-sort.
+
+    Returns (p10, p25, p50, p75, p90, cal_used_info).
+    """
+    if cal_entry is None:
+        return (remaining_upside_p10, remaining_upside_p25,
+                remaining_upside_p50, remaining_upside_p75,
+                remaining_upside_p90, None)
+
+    try:
+        p10_offset = cal_entry.get("suggested_cali_q10_offset",
+                                    cal_entry.get("residual_p10", 0))
+        p90_offset = cal_entry.get("suggested_cali_q90_offset",
+                                    cal_entry.get("residual_p90", 0))
+
+        cal_q10 = remaining_upside_p50 + p10_offset
+        cal_q90 = remaining_upside_p50 + p90_offset
+
+        # Ensure q10 <= q50 <= q90
+        cal_q10 = min(cal_q10, remaining_upside_p50)
+        cal_q90 = max(cal_q90, remaining_upside_p50)
+        # Clip non-negative
+        cal_q10 = max(0.0, cal_q10)
+
+        # Re-sort all 5 quantiles
+        quantiles = sorted([cal_q10, remaining_upside_p25,
+                            remaining_upside_p50, remaining_upside_p75, cal_q90])
+        cal_info = {"n": cal_entry.get("n_rows", 0),
+                     "p10_off": round(float(p10_offset), 4),
+                     "p90_off": round(float(p90_offset), 4)}
+        return (quantiles[0], quantiles[1], quantiles[2],
+                quantiles[3], quantiles[4], cal_info)
+    except Exception as e:
+        return (remaining_upside_p10, remaining_upside_p25,
+                remaining_upside_p50, remaining_upside_p75,
+                remaining_upside_p90, None)
+
+
 def predict_intraday_tmax_model_3a(
     current_datetime, max_so_far, temp_now,
     humidity=50.0, pressure_current=None, pressure_change_60m=0.0, pressure_change_180m=0.0,
@@ -3818,6 +4019,16 @@ def predict_intraday_tmax_model_3a(
     quantiles = sorted([q10, q25, q50, q75, q90])
     remaining_upside_p10, remaining_upside_p25, remaining_upside_p50, remaining_upside_p75, remaining_upside_p90 = quantiles
 
+    # ── Interval calibration (residual-based, learned from OOT) ──
+    _cal_3a = _load_calibration_offsets(MINUTE_3A_CALIB_PATH)
+    _cal_entry, _cal_label = _pick_cal_entry(h, _cal_3a, has_rain=False)
+    (remaining_upside_p10, remaining_upside_p25,
+     remaining_upside_p50, remaining_upside_p75,
+     remaining_upside_p90, _cal_used) = _apply_calibration(
+        remaining_upside_p10, remaining_upside_p25,
+        remaining_upside_p50, remaining_upside_p75,
+        remaining_upside_p90, _cal_entry)
+
     prob_max_reached = 0.0
     if active.get('upside_zero') is not None:
         try:
@@ -3854,6 +4065,7 @@ def predict_intraday_tmax_model_3a(
         'pred_tmax_p90': pred_tmax_p90,
         'sample_count': None,
         '_features': _features_log,
+        'cal_used': _cal_used,
     }
 
 
@@ -3881,6 +4093,10 @@ def predict_intraday_tmax_model_3b(
     rain_cooling_60m=0.0, rain_after_max_flag=0,
     post_peak_rain_flag=0, rain_data_gap_flag=0,
     rainfall_data_age_minutes=0.0,
+    # Model 4 forecast rain features (optional, default 0 = no forecast info)
+    forecast_rain_prob_morning=0.0, forecast_rain_prob_afternoon=0.0,
+    forecast_rain_prob_overall=0.0, forecast_rain_prob_missing=1.0,
+    forecast_rain_prob_label=0.0, forecast_min_rh=0, forecast_max_rh=0, forecast_rh_range=0,
 ):
     """Predict remaining upside using Model 3B (2A v2 + rain + 5 trend-relation features).
 
@@ -4029,6 +4245,15 @@ def predict_intraday_tmax_model_3b(
         "temp_volatility_ratio_60m_360m": trend["temp_volatility_ratio_60m_360m"],
         "temp_reversal_count_120m": trend["temp_reversal_count_120m"],
         "temp_direction_persistence_60m": trend["temp_direction_persistence_60m"],
+        # Model 4 forecast rain features
+        "forecast_rain_prob_morning": forecast_rain_prob_morning,
+        "forecast_rain_prob_afternoon": forecast_rain_prob_afternoon,
+        "forecast_rain_prob_overall": forecast_rain_prob_overall,
+        "forecast_rain_prob_missing": forecast_rain_prob_missing,
+        "forecast_rain_prob_label": forecast_rain_prob_label,
+        "forecast_min_rh": forecast_min_rh,
+        "forecast_max_rh": forecast_max_rh,
+        "forecast_rh_range": forecast_rh_range,
     }
 
     _features_log = {}
@@ -4057,6 +4282,22 @@ def predict_intraday_tmax_model_3b(
     quantiles = sorted([q10, q25, q50, q75, q90])
     remaining_upside_p10, remaining_upside_p25, remaining_upside_p50, remaining_upside_p75, remaining_upside_p90 = quantiles
 
+    # ── Interval calibration (residual-based, learned from OOT) ──
+    _cal_path_map = {
+        'model_4': MINUTE_4_CALIB_PATH,
+        'model_4_restricted': MINUTE_4_RESTRICTED_CALIB_PATH,
+    }
+    _cal_path = _cal_path_map.get(_active_model_key, MINUTE_3B_CALIB_PATH)
+    _has_rain_3b = rainfall_60m > 0
+    _cal_data = _load_calibration_offsets(_cal_path)
+    _cal_entry, _cal_label = _pick_cal_entry(h, _cal_data, has_rain=_has_rain_3b)
+    (remaining_upside_p10, remaining_upside_p25,
+     remaining_upside_p50, remaining_upside_p75,
+     remaining_upside_p90, _cal_used) = _apply_calibration(
+        remaining_upside_p10, remaining_upside_p25,
+        remaining_upside_p50, remaining_upside_p75,
+        remaining_upside_p90, _cal_entry)
+
     prob_max_reached = 0.0
     if active.get('upside_zero') is not None:
         try:
@@ -4065,7 +4306,12 @@ def predict_intraday_tmax_model_3b(
         except Exception:
             import json as _json
             import math
-            thresh_path = Path('models/intraday_minute_ai_model_3b/best_threshold.json')
+            _thresh_dir_map = {
+                'model_4': MINUTE_MODEL_4_DIR,
+                'model_4_restricted': MINUTE_MODEL_4_RESTRICTED_DIR,
+            }
+            _thresh_dir = _thresh_dir_map.get(_active_model_key, MINUTE_MODEL_3B_DIR)
+            thresh_path = _thresh_dir / 'best_threshold.json'
             if thresh_path.exists():
                 with open(thresh_path) as _f:
                     th = _json.load(_f).get('upside_zero_threshold', 0.5)
@@ -4093,6 +4339,7 @@ def predict_intraday_tmax_model_3b(
         'pred_tmax_p90': pred_tmax_p90,
         'sample_count': None,
         '_features': _features_log,
+        'cal_used': _cal_used,
     }
 
 
