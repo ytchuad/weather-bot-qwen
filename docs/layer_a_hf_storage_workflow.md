@@ -65,3 +65,34 @@ failed upload 會寫 `.upload_failures/`，bounded exponential backoff 不會使
 API lifespan startup 會 scan complete／incomplete／uploaded partitions，並在 auto-upload 開啟時 retry pending closed partitions。`/api/health` 與 protected `/admin/layer-a-health` 顯示 last cycle、today count、CLOB replay eligibility、pending partitions、last remote upload、upload failures、disk usage、oldest unuploaded partition。
 
 HF Space local filesystem 是 ephemeral。只有已 upload 到 private Dataset repo 或 operator 手動下載的 export archive 能跨 restart、stop 或 rebuild 存活。
+
+## Independent one-minute market loop
+
+`layer_a.market.v1` 使用獨立的 `layer_a.market_capture.MarketSnapshotCollector`。
+API lifespan 啟動後，它每 60 秒只做 Gamma market reference refresh 與一次合併的
+YES/NO CLOB batch fetch；不呼叫 weather ingestion、forecast、model inference、
+paper account 或 strategy execution。既有 `canonical_cycle` 仍維持約五分鐘的
+weather → all models → metadata → DepthCache → frozen `CanonicalCycle` →
+one-time `layer_a.v1` capture。
+
+market-only local layout 為：
+
+```text
+data/layer_a_market/
+  date=YYYY-MM-DD/
+    hour=HH/
+      snapshots-<partition-id>.jsonl.zst
+      manifest-<partition-id>.json
+```
+
+同一 local hour 的 snapshots 先 append 到一個 `.jsonl.tmp`，跨小時或 startup
+recovery 才 close 成 compressed immutable payload；因此不會每分鐘建立三個檔案。
+manifest last rename、SHA-256、upload receipt、pending upload 與 incomplete
+temporary files 的 recovery 規則與 model Layer A 相同。market partition 以
+`layer_a_market/...` prefix 上傳到 optional private HF Dataset repository，且
+不會寫入 Space code repository。
+
+`/api/health` 與 `/admin/layer-a-health` 另外回報 market store 及 collector 的
+last success、failed runs、pending partitions、replay eligibility、upload failures
+與 temporary files。CLOB fetch/storage exception 只影響該 market run；model cycle
+的 capture exception 也不會阻止 market collector。

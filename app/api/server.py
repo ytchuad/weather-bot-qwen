@@ -24,9 +24,27 @@ async def lifespan(app: FastAPI):
         get_default_store().startup_scan()
     except Exception:
         logger.exception("Layer A startup scan failed")
+    try:
+        from layer_a.market_storage import get_default_market_store
+
+        get_default_market_store().startup_scan()
+    except Exception:
+        logger.exception("Layer A market startup scan failed")
+    try:
+        from layer_a.market_capture import get_default_market_collector
+
+        get_default_market_collector().start()
+    except Exception:
+        logger.exception("Layer A market collector start failed")
     strategies.start_scheduler()
     yield
     logger.info("Weather Quant API shutting down")
+    try:
+        from layer_a.market_capture import get_default_market_collector
+
+        get_default_market_collector().stop()
+    except Exception:
+        logger.exception("Layer A market collector stop failed")
     strategies.stop_scheduler()
 
 

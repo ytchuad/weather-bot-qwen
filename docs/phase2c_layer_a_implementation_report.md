@@ -94,11 +94,48 @@ API startup lifespan 會先 `startup_scan()`；開啟 `HF_LAYER_A_AUTO_UPLOAD` �
 
 ## Verification
 
-- Layer A + Phase 1/2A/market-depth targeted suite：`50 passed`；加入 canonical cache、numeric-string timestamp、nested prohibited-state、legacy profile tests 後，Layer A 單獨 suite：`18 passed`。
-- Full repository suite 排除兩個既有 external/dependency-only test files：`142 passed`。
+- Layer A + Phase 1/2A/market-depth targeted suite：`50 passed`；加入 market schema、hourly storage、collector、export 與 replay tests 後，Layer A market suite：`25 passed`。
+- `tests/` suite 排除兩個既有 external/dependency-only test files：`149 passed`。repository-wide pytest discovery 另外會執行既有 `tools/dashboard_strategy_runner_smoke_test.py`，其現有兩個 assertion failures 與 `SystemExit` 不屬於本次 Layer A change。
 - 未排除的 full suite 不能完成：`tests/test_clob_execution_phase2b.py` 與 `tests/test_paper_trader_connect.py` 需要目前 environment 未安裝的 `pm_trader`；paper-trader connectivity tests 另會直接連 Gamma API，而 sandbox 以 `WinError 10013` 阻擋 socket。這不是 Layer A capture failure。
 - touched Layer A/canonical/API/adapter/script/test files 的 `ruff check` 通過；`py_compile` 通過；FastAPI OpenAPI 確認兩個 admin paths 已註冊。
 
-目前 `data/layer_a/` 尚未產生 runtime data，因為測試使用 temporary roots；runtime Layer A data 不會提交到 Space code repository。既有 dirty worktree、runtime CSV/Parquet/JSON、model source changes 均保留，沒有使用 reset/checkout 或刪除操作；model artifact directories 與 strategy config files 未被本階段修改。
+目前 `data/layer_a/` 與 `data/layer_a_market/` 尚未產生 runtime data，因為測試使用 temporary roots；runtime Layer A data 不會提交到 Space code repository。既有 dirty worktree、runtime CSV/Parquet/JSON、model source changes 均保留，沒有使用 reset/checkout 或刪除操作；model artifact directories 與 strategy config files 未被本階段修改。
 
 本階段只建立 Layer A；沒有新增 Layer B/C persistence，也沒有修補歷史上缺乏 exact CLOB evidence 的舊 export。
+
+## Phase 2C-LA extension：one-minute market capture
+
+為保留原本 one-minute Polymarket market-data frequency，新增
+`layer_a/market_capture.py` 與 `layer_a/market_storage.py`。collector 是
+strategy-independent daemon，與 paper accounts 的 scheduler 分離：
+
+```text
+Gamma market metadata (reference only)
+→ one combined YES/NO CLOB batch
+→ exact normalized market snapshot
+→ latest completed five-minute model-cycle link
+→ hourly append-and-close market partition
+```
+
+每分鐘不重跑 weather 或 models。`market_snapshot_id` 是 deterministic，
+storage 以該 ID deduplicate；每一小時只產生一個 compressed JSONL payload
+與一個 manifest。snapshot 保留 market/condition/bucket/token/asset identity、
+full bids/asks、timestamps、source、`fetch_cycle_id`、tick/minimum size、
+validation status/errors。`latest_model_cycle_id` 與 `model_age_seconds` 只指向
+該時間以前的 completed model cycle。Gamma data 僅在 reference 欄位保存。
+
+`export_layer_a()` 現在可將 closed `layer_a_market/` partitions 與五分鐘 model
+partitions 放入同一 downloadable archive；replay 可將一個 model record 對應到
+下一個 model cycle 前的每一本 one-minute CLOB book。新增測試覆蓋四本
+one-minute books 的 replay、hourly append/dedup、model link、exact identity/full
+depth、single-batch collector 與 export archive loading。
+
+## Boundary and failure isolation
+
+five-minute full model capture 的 freeze hook 仍是
+`app/services/canonical_cycle.py::_build_uncached_cycle()`，不受 one-minute
+collector 改動。market collector 不進入任何 account context entry point；它只
+讀取已完成 model store 以建立 link。market fetch/storage failure 被 collector
+捕捉並寫入 health/source status，不會阻止 model cycle；model capture failure
+同樣不會停止 market thread。runtime data root `data/layer_a_market/` 已加入
+`.gitignore`，不會提交到 Space code repository。

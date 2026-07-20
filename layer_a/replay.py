@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from execution.clob_execution import CLOBExecutionSnapshot, DepthLevel, walk_depth
 
+from .market_storage import MarketSnapshotStore
 from .storage import LayerAStore, read_books, read_books_bytes
 
 
@@ -116,6 +117,56 @@ def load_export_records(path: Path | str) -> list[dict[str, Any]]:
     return _records_from_directory(path)
 
 
+def _market_records_from_directory(path: Path) -> list[dict[str, Any]]:
+    candidates = [path / "layer_a_market", path]
+    if path.name == "layer_a":
+        candidates.append(path.parent / "layer_a_market")
+    for root in candidates:
+        store = MarketSnapshotStore(root)
+        if not root.exists():
+            continue
+        partitions = store.scan()
+        if not any(
+            "snapshots" in info.files
+            or any(item.name.startswith("snapshots-") for item in info.temporary_files)
+            for info in partitions
+        ):
+            continue
+        records: list[dict[str, Any]] = []
+        for _info, snapshot in store.read_snapshot_records():
+            records.append(snapshot)
+        return records
+    return []
+
+
+def _market_records_from_zip(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        for name in sorted(names):
+            if not name.startswith("layer_a_market/") or not name.endswith(".jsonl.zst"):
+                continue
+            if "/snapshots-" not in name:
+                continue
+            manifest_name = name.replace("snapshots-", "manifest-").replace(".jsonl.zst", ".json")
+            compression = None
+            if manifest_name in names:
+                try:
+                    compression = json.loads(archive.read(manifest_name)).get("books_compression")
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    compression = None
+            records.extend(read_books_bytes(archive.read(name), compression))
+    return records
+
+
+def load_market_snapshot_records(path: Path | str) -> list[dict[str, Any]]:
+    """Load closed market-only snapshots from a directory or export zip."""
+    path = Path(path)
+    if path.suffix.lower() == ".zip":
+        return _market_records_from_zip(path)
+    return _market_records_from_directory(path)
+
+
 def _strategy_candidates(record: dict[str, Any], threshold: float, shares: float) -> list[dict[str, Any]]:
     books = {
         (str(book.get("bucket")), str(book.get("token_side")).upper()): book
@@ -163,6 +214,78 @@ def _strategy_candidates(record: dict[str, Any], threshold: float, shares: float
     return candidates
 
 
+def replay_market_signal(
+    model_record: dict[str, Any],
+    market_snapshots: Iterable[dict[str, Any]],
+    *,
+    next_model_timestamp: Any = None,
+    model_name: str | None = None,
+    strategy_a_threshold: float = 0.03,
+    requested_shares: float = 1.0,
+) -> dict[str, Any]:
+    """Replay one five-minute model signal against linked one-minute books."""
+    if requested_shares <= 0:
+        raise ValueError("requested_shares must be positive")
+    market_snapshots = list(market_snapshots)
+    model_id = str(model_record.get("decision_cycle_id"))
+    model_time = _dt(model_record["decision_timestamp"])
+    next_time = _dt(next_model_timestamp) if next_model_timestamp is not None else None
+    linked: list[dict[str, Any]] = []
+    for snapshot in market_snapshots:
+        if str(snapshot.get("latest_model_cycle_id")) != model_id:
+            continue
+        try:
+            snapshot_time = _dt(snapshot["decision_timestamp"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if snapshot_time < model_time or (next_time is not None and snapshot_time >= next_time):
+            continue
+        linked.append(snapshot)
+    linked.sort(key=lambda item: _dt(item["decision_timestamp"]))
+    eligible_linked_count = len(linked)
+
+    signal_record = dict(model_record)
+    if model_name is not None:
+        signal_record["models"] = [
+            model for model in model_record.get("models", [])
+            if isinstance(model, dict) and model.get("model_name") == model_name
+        ]
+    candidates_by_snapshot: list[dict[str, Any]] = []
+    valid_book_count = 0
+    for snapshot in linked:
+        books = snapshot.get("clob_books", [])
+        for book in books:
+            if isinstance(book, dict):
+                try:
+                    _snapshot(book)
+                    valid_book_count += 1
+                except (KeyError, TypeError, ValueError):
+                    continue
+        signal_record["clob_books"] = books
+        signal_record["gamma_reference_prices"] = snapshot.get("gamma_reference_prices", {})
+        candidates_by_snapshot.append(
+            {
+                "market_snapshot_id": snapshot.get("market_snapshot_id"),
+                "decision_timestamp": snapshot.get("decision_timestamp"),
+                "model_age_seconds": snapshot.get("model_age_seconds"),
+                "candidates": _strategy_candidates(signal_record, strategy_a_threshold, requested_shares),
+            }
+        )
+
+    return {
+        "model_cycle_id": model_id,
+        "model_name": model_name,
+        "books_evaluated": len(linked),
+        "valid_clob_books_replayed": valid_book_count,
+        "snapshot_ids": [item.get("market_snapshot_id") for item in linked],
+        "model_age_seconds": [item.get("model_age_seconds") for item in linked],
+        "linked_snapshot_count": eligible_linked_count,
+        "candidate_count": sum(len(item["candidates"]) for item in candidates_by_snapshot),
+        "candidates_by_snapshot": candidates_by_snapshot,
+        "all_linked_one_minute_books_replayed": eligible_linked_count == len(linked),
+    }
+
+
 def replay_layer_a(
     path: Path | str,
     *,
@@ -176,6 +299,7 @@ def replay_layer_a(
     if kelly_fraction < 0:
         raise ValueError("kelly_fraction must be non-negative")
     records = load_export_records(path)
+    market_snapshots = load_market_snapshot_records(path)
     model_snapshots = sum(len(record.get("models", [])) for record in records)
     reconstructed_books = 0
     eligible_cycles = 0
@@ -216,6 +340,33 @@ def replay_layer_a(
                     continue
         candidates.extend(_strategy_candidates(record, strategy_a_threshold, requested_shares))
 
+    model_groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        key = (
+            str(record.get("event_date")),
+            str(record.get("event_slug")),
+            str(record.get("market_kind")),
+        )
+        model_groups.setdefault(key, []).append(record)
+    market_signal_replay: list[dict[str, Any]] = []
+    for grouped_records in model_groups.values():
+        grouped_records.sort(key=lambda item: _dt(item["decision_timestamp"]))
+        for index, record in enumerate(grouped_records):
+            next_timestamp = (
+                grouped_records[index + 1].get("decision_timestamp")
+                if index + 1 < len(grouped_records)
+                else None
+            )
+            market_signal_replay.append(
+                replay_market_signal(
+                    record,
+                    market_snapshots,
+                    next_model_timestamp=next_timestamp,
+                    strategy_a_threshold=strategy_a_threshold,
+                    requested_shares=requested_shares,
+                )
+            )
+
     for candidate in candidates:
         price = float(candidate["execution_price"])
         probability = float(candidate["probability"])
@@ -232,6 +383,8 @@ def replay_layer_a(
         "model_probability_snapshots_reconstructed": model_snapshots,
         "clob_books_reconstructed": reconstructed_books,
         "clob_replay_eligible_cycles": eligible_cycles,
+        "market_snapshots_loaded": len(market_snapshots),
+        "market_signal_replay": market_signal_replay,
         "depth_walk": depth_walk,
         "strategy_a_probe": {
             "threshold": strategy_a_threshold,
@@ -246,4 +399,9 @@ def replay_layer_a(
     }
 
 
-__all__ = ["load_export_records", "replay_layer_a"]
+__all__ = [
+    "load_export_records",
+    "load_market_snapshot_records",
+    "replay_layer_a",
+    "replay_market_signal",
+]

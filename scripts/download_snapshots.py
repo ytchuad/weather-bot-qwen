@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from urllib.request import urlopen
 
+csv.field_size_limit(2**31 - 1)  # sys.maxsize overflows C long on Windows
+
 EXPORT_DIR = Path("data/export")
 CSV_FIELDS = [
     "timestamp", "snapshot_date", "slug", "strategy_key", "model_key",

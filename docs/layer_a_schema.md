@@ -143,3 +143,37 @@ current_paper_positions, paper_positions, target_orders,
 simulated_fills, realized_pnl, unrealized_pnl,
 legacy_would_trade, clob_would_trade
 ```
+
+## `layer_a.market.v1`：one-minute market-only snapshot
+
+`layer_a.market.v1` 是與 account、strategy、paper execution 完全分離的
+market sampling record。`market_snapshot_id` 以
+`event_date | location | market_kind | event_slug | one-minute-slot` 做
+deterministic deduplication；同一分鐘的多個 caller 不會產生第二筆 snapshot。
+
+```text
+market_snapshot_id
+schema_version = layer_a.market.v1
+decision_timestamp
+capture_timestamp
+event_date / location / market_kind / event_slug
+market_identity[]
+clob_books[]
+fetch_cycle_id
+latest_model_cycle_id
+latest_model_cycle_timestamp
+model_age_seconds
+gamma_reference_prices / gamma_reference_data
+source_status
+completeness
+```
+
+每個 market identity 明確保存 `market_id`、`condition_id`、`bucket`、
+`explicit_outcomes`、YES/NO token ID、YES/NO asset ID、tick size、minimum
+order size 與 market schema version。`clob_books` 保存 exact normalized YES
+及 NO full bids/asks、book timestamp、source、fetch cycle、validation status
+與 validation errors；Gamma price 只放在 reference 欄位，不能替代 CLOB depth。
+
+每一分鐘 snapshot 只連結到該時間以前最新的 completed five-minute
+`latest_model_cycle_id`，並計算 `model_age_seconds`。沒有可用 model cycle
+時仍可保存 incomplete market snapshot，replay eligibility 會明確標示原因。

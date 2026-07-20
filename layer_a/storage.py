@@ -490,6 +490,29 @@ class LayerAStore:
                 result.append((info, record))
         return result
 
+    def latest_completed_model_record(
+        self,
+        *,
+        event_date: str,
+        event_slug: str,
+        market_kind: str,
+        before_timestamp: Any = None,
+    ) -> dict[str, Any] | None:
+        """Return the latest persisted model cycle at or before a market time."""
+        before = _timestamp(before_timestamp) if before_timestamp is not None else None
+        best_record: dict[str, Any] | None = None
+        best_timestamp: datetime | None = None
+        for _info, record in self.iter_records(date_value=event_date):
+            if record.get("event_slug") != event_slug or record.get("market_kind") != market_kind:
+                continue
+            decision = _timestamp(record.get("decision_timestamp"))
+            if decision is None or (before is not None and decision > before):
+                continue
+            if best_timestamp is None or decision > best_timestamp:
+                best_timestamp = decision
+                best_record = record
+        return best_record
+
     def _configured_uploader(self) -> Any:
         if self._uploader is not None:
             return self._uploader

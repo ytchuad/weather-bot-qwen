@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from layer_a.export import export_layer_a
+from layer_a.market_capture import get_default_market_collector
+from layer_a.market_storage import get_default_market_store
 from layer_a.storage import get_default_store
 
 router = APIRouter(tags=["Layer A Admin"])
@@ -65,4 +67,7 @@ def export_layer_a_endpoint(
 @router.get("/admin/layer-a-health")
 def layer_a_health_endpoint(request: Request) -> dict:
     _require_admin(request)
-    return get_default_store().health_summary()
+    summary = get_default_store().health_summary()
+    summary["market"] = get_default_market_store().health_summary()
+    summary["market_collector"] = get_default_market_collector().health_summary()
+    return summary

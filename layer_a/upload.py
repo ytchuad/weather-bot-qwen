@@ -52,9 +52,9 @@ class DatasetUploader:
         return self.api
 
     @staticmethod
-    def _remote_path(info: Any, path: Path, root: Path) -> str:
+    def _remote_path(info: Any, path: Path, root: Path, remote_prefix: str = "layer_a") -> str:
         relative = path.relative_to(root).as_posix()
-        return f"layer_a/{relative}"
+        return f"{remote_prefix.rstrip('/')}/{relative}"
 
     def _verify_remote(self, api: Any, remote_path: str) -> bool:
         """Verify a remote path without assuming one hub-client version."""
@@ -100,7 +100,13 @@ class DatasetUploader:
         if not self._verify_remote(api, remote_path):
             raise RuntimeError(f"remote verification failed for {remote_path}")
 
-    def upload_partition(self, info: Any, root: Path) -> dict[str, Any]:
+    def upload_partition(
+        self,
+        info: Any,
+        root: Path,
+        *,
+        remote_prefix: str = "layer_a",
+    ) -> dict[str, Any]:
         """Upload a closed partition and write an immutable local receipt."""
         if getattr(info, "status", None) != "complete":
             raise ValueError("only closed complete partitions may be uploaded")
@@ -109,7 +115,7 @@ class DatasetUploader:
         files = getattr(info, "files", {})
         try:
             for path in files.values():
-                remote_path = self._remote_path(info, path, root)
+                remote_path = self._remote_path(info, path, root, remote_prefix)
                 last_error: Exception | None = None
                 for attempt in range(self.max_retries):
                     try:
@@ -137,6 +143,7 @@ class DatasetUploader:
             "partition_id": info.partition_id,
             "repo_id": self.repo_id,
             "repo_type": "dataset",
+            "remote_prefix": remote_prefix.rstrip("/"),
             "remote_paths": uploaded_paths,
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
             "local_checksums": (info.manifest or {}).get("file_checksums", {}),

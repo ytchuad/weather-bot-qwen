@@ -31,6 +31,7 @@ PORTFOLIO_STATE_PATH = DATA_DIR / "portfolio_state.json"
 # ---- Layer A canonical capture (ephemeral local runtime state) ----
 LAYER_A_DIR = Path(os.getenv("LAYER_A_DIR", str(DATA_DIR / "layer_a")))
 LAYER_A_EXPORT_DIR = Path(os.getenv("LAYER_A_EXPORT_DIR", str(DATA_DIR / "layer_a_exports")))
+LAYER_A_MARKET_DIR = Path(os.getenv("LAYER_A_MARKET_DIR", str(DATA_DIR / "layer_a_market")))
 
 # ---- Snapshot export source ----
 HF_SPACE_URL = os.getenv("HF_SPACE_URL", "https://shea-hilton-weather-prediction.hf.space")
