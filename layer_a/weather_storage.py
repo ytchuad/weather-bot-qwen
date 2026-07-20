@@ -72,6 +72,11 @@ def _read_raw_jsonl(path: Path | None) -> list[dict[str, Any]]:
     return records
 
 
+def _is_buffer_backfill(snapshot: Mapping[str, Any]) -> bool:
+    source_status = snapshot.get("source_status")
+    return isinstance(source_status, Mapping) and bool(source_status.get("buffer_backfill"))
+
+
 @dataclass
 class WeatherPartitionInfo:
     partition_id: str
@@ -256,6 +261,18 @@ class WeatherSnapshotStore:
             )
         return known
 
+    def _known_snapshot_records(
+        self,
+        partitions: Iterable[WeatherPartitionInfo] | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        known: dict[str, dict[str, Any]] = {}
+        for info in partitions if partitions is not None else self.scan():
+            for snapshot in self._read_info_snapshots(info):
+                snapshot_id = snapshot.get("weather_snapshot_id")
+                if snapshot_id:
+                    known[str(snapshot_id)] = snapshot
+        return known
+
     def _minute_directory(self, snapshot: Mapping[str, Any]) -> Path:
         decision = _timestamp(snapshot["snapshot_timestamp"])
         if decision is None:
@@ -392,15 +409,24 @@ class WeatherSnapshotStore:
         results: list[WeatherCaptureResult] = []
         with self._lock:
             self.close_due()
-            known = self._known_snapshot_ids()
+            partitions = self.scan()
+            known = self._known_snapshot_ids(partitions)
+            known_records = self._known_snapshot_records(partitions)
             grouped: dict[Path, list[dict[str, Any]]] = {}
             for snapshot in clean:
                 snapshot_id = str(snapshot["weather_snapshot_id"])
-                if snapshot_id in known:
+                existing = known_records.get(snapshot_id)
+                if snapshot_id in known and not (
+                    # Historical captures may already contain a same-minute
+                    # snapshot.  Keep storage append-only while allowing the
+                    # CSV buffer to append the authoritative correction.
+                    _is_buffer_backfill(snapshot) and existing is not None and not _is_buffer_backfill(existing)
+                ):
                     results.append(WeatherCaptureResult("duplicate", snapshot_id, snapshot=snapshot))
                     continue
                 grouped.setdefault(self._minute_directory(snapshot), []).append(snapshot)
                 known.add(snapshot_id)
+                known_records[snapshot_id] = snapshot
             for directory, records in grouped.items():
                 info = self._open_info(directory)
                 raw_path = next(

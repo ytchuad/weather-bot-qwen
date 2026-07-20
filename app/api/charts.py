@@ -73,11 +73,15 @@ def _point_prediction(value: Any) -> float | None:
     return parsed if parsed == parsed else None
 
 
-def _minute_comparison_rows(date: str) -> list[dict[str, Any]]:
+def _minute_comparison_rows(date: str, is_min_temp: bool) -> list[dict[str, Any]]:
     """Build chart rows from the minute projection and its CSV fallback."""
     store = get_default_historical_store()
     try:
-        return store.minute_history(date_value=date, limit=10000)
+        return store.minute_history(
+            date_value=date,
+            market_kind="lowest_temperature" if is_min_temp else "highest_temperature",
+            limit=10000,
+        )
     except Exception as exc:
         # Keep the existing SQLite path available for installations missing an
         # optional Layer A reader dependency.  Normal deployments should use
@@ -135,6 +139,7 @@ def _comparison_payload_from_minute_rows(rows: list[dict[str, Any]]) -> dict[str
 def get_models_comparison_chart(
     date: str | None = None,
     slug: str | None = None,
+    is_min_temp: bool = False,
 ):
     """Return time-series data for the 'All Models vs Market' comparison chart.
 
@@ -146,7 +151,7 @@ def get_models_comparison_chart(
     from app.services.weather_service import hkt_now as _hkt_now
     target_date = date or _hkt_now().strftime("%Y-%m-%d")
 
-    minute_rows = _minute_comparison_rows(target_date)
+    minute_rows = _minute_comparison_rows(target_date, is_min_temp)
     if minute_rows and not slug:
         return _comparison_payload_from_minute_rows(minute_rows)
 

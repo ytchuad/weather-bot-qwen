@@ -4,6 +4,7 @@ import zipfile
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 
 from app.api.layer_a import _require_admin
@@ -200,6 +201,76 @@ def test_weather_collector_reads_state_only_and_links_stored_model(monkeypatch, 
     assert run.snapshots[0]["latest_model_cycle_id"] == "cycle-1"
     assert calls
     assert run.snapshots[0]["source_status"]["clob_fetched"] is False
+
+
+def test_weather_collector_backfills_each_minute_from_hko_csv_buffer(tmp_path):
+    state = {
+        "df_today": pd.DataFrame(
+            {
+                "datetime": pd.to_datetime(
+                    [
+                        "2026-07-20 20:01",
+                        "2026-07-20 20:02",
+                        "2026-07-20 20:03",
+                    ]
+                ),
+                "temp": [29.1, 29.2, 29.0],
+                "rh": [81.0, 82.0, 83.0],
+            }
+        )
+    }
+
+    class ModelStore:
+        def latest_completed_model_record(self, **_kwargs):
+            return None
+
+    run = collect_weather_snapshots_once(
+        target_date=date(2026, 7, 20),
+        event_slug=SLUG,
+        decision_timestamp=datetime(2026, 7, 20, 12, 4, tzinfo=UTC),
+        weather_store=WeatherSnapshotStore(tmp_path),
+        model_store=ModelStore(),
+        state_provider=lambda _key: state,
+    )
+
+    assert len(run.snapshots) == 3
+    assert [item["snapshot_timestamp"] for item in run.snapshots] == [
+        "2026-07-20T12:01:00+00:00",
+        "2026-07-20T12:02:00+00:00",
+        "2026-07-20T12:03:00+00:00",
+    ]
+    assert [item["temperature_current"] for item in run.snapshots] == [29.1, 29.2, 29.0]
+    assert all(item["source_status"]["buffer_backfill"] is True for item in run.snapshots)
+    assert [
+        item["observation_status"]["temperature_current"]["source_timestamp"]
+        for item in run.snapshots
+    ] == [
+        "2026-07-20T12:01:00+00:00",
+        "2026-07-20T12:02:00+00:00",
+        "2026-07-20T12:03:00+00:00",
+    ]
+
+
+def test_buffer_backfill_corrects_an_existing_capture_minute(tmp_path):
+    weather_store = WeatherSnapshotStore(tmp_path / "weather")
+    original = _weather(ts="2026-07-20T10:01:00+00:00", temp=30.0)
+    corrected = _weather(ts="2026-07-20T10:01:00+00:00", temp=29.1)
+    corrected["source_status"] = {"buffer_backfill": True}
+
+    assert weather_store.capture(original).status == "captured"
+    assert weather_store.close_all() == {"closed": 1, "failed": 0}
+    assert weather_store.capture(corrected).status == "captured"
+
+    history = HistoricalStore(
+        local_store=LayerAStore(tmp_path / "model"),
+        local_market_store=MarketSnapshotStore(tmp_path / "market"),
+        local_weather_store=weather_store,
+        cache_dir=tmp_path / "cache",
+        auto_refresh=False,
+    )
+    rows = history.minute_history(date_value=EVENT_DATE)
+    assert len(rows) == 1
+    assert rows[0]["actual_temperature"] == 29.1
 
 
 def test_weather_failure_isolated_and_collector_does_not_raise(tmp_path):

@@ -9,6 +9,7 @@ depth fetching.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -17,6 +18,7 @@ from typing import Any, Callable, Mapping
 
 from execution.market_templates import resolve_slug
 from app.services.weather_service import get_intraday_state
+from features.input_status import DEFAULT_STALE_AFTER_MINUTES, InputStatus
 
 from .schema import jsonable
 from .storage import LayerAStore, get_default_store
@@ -80,6 +82,106 @@ def _latest_model(
     return candidates[-1]
 
 
+def _finite_number(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def _source_timestamp(value: Any) -> datetime | None:
+    if hasattr(value, "to_pydatetime"):
+        value = value.to_pydatetime()
+    if not isinstance(value, datetime):
+        return None
+    return _now_utc(value)
+
+
+def _csv_status(value: Any, timestamp: datetime) -> dict[str, Any]:
+    return InputStatus.from_value(
+        value,
+        source_timestamp=timestamp,
+        decision_timestamp=timestamp,
+        source_name="hko_aws_csv",
+        stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+        observation_method="direct_observation",
+    ).to_dict()
+
+
+def _buffered_weather_snapshots(
+    state: Mapping[str, Any],
+    *,
+    target: date,
+    decision: datetime,
+    model_record: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Normalize every valid minute present in the HKO intraday CSV buffer."""
+    frame = state.get("df_today")
+    if frame is None or not hasattr(frame, "iterrows"):
+        return []
+    try:
+        frame = frame.sort_values("datetime")
+    except Exception:
+        return []
+
+    running_temperatures: list[float] = []
+    snapshots: list[dict[str, Any]] = []
+    model_timestamp = _source_timestamp((model_record or {}).get("decision_timestamp"))
+    model_id = (model_record or {}).get("decision_cycle_id")
+    seen_minutes: set[datetime] = set()
+
+    for _, row in frame.iterrows():
+        timestamp = _source_timestamp(row.get("datetime"))
+        temperature = _finite_number(row.get("temp"))
+        if timestamp is None or temperature is None:
+            continue
+        minute = timestamp.replace(second=0, microsecond=0)
+        if minute in seen_minutes:
+            continue
+        seen_minutes.add(minute)
+        running_temperatures.append(temperature)
+        maximum = max(running_temperatures)
+        minimum = min(running_temperatures)
+        humidity = _finite_number(row.get("rh"))
+        weather_state = {
+            "observations": {
+                "temperature": temperature,
+                "humidity": humidity,
+            },
+            "max_so_far": maximum,
+            "min_so_far": minimum,
+            "source_timestamp": timestamp,
+            "status": {
+                "temperature": _csv_status(temperature, timestamp),
+                "humidity": _csv_status(humidity, timestamp),
+                "max_so_far": _csv_status(maximum, timestamp),
+                "min_so_far": _csv_status(minimum, timestamp),
+            },
+        }
+        row_model_id = model_id if model_timestamp is not None and model_timestamp <= timestamp else None
+        row_model_timestamp = model_timestamp if row_model_id is not None else None
+        snapshots.append(
+            build_weather_snapshot(
+                snapshot_timestamp=timestamp,
+                event_date=target,
+                location="Hong Kong",
+                weather_state=weather_state,
+                latest_model_cycle_id=row_model_id,
+                model_cycle_timestamp=row_model_timestamp,
+                capture_timestamp=decision,
+                source_status={
+                    "collector": "layer_a_weather_only",
+                    "observation_source": "hko_aws_csv_buffer",
+                    "buffer_backfill": True,
+                    "model_link_source": "local_completed_layer_a_cycle" if row_model_id else None,
+                    "clob_fetched": False,
+                },
+            )
+        )
+    return snapshots
+
+
 def collect_weather_snapshots_once(
     *,
     target_date: date | None = None,
@@ -119,21 +221,29 @@ def collect_weather_snapshots_once(
     )
     run.latest_model_cycle_id = (model_record or {}).get("decision_cycle_id")
     try:
-        snapshot = build_weather_snapshot(
-            snapshot_timestamp=decision,
-            event_date=target,
-            location="Hong Kong",
-            weather_state=state,
-            latest_model_cycle_id=(model_record or {}).get("decision_cycle_id"),
-            model_cycle_timestamp=(model_record or {}).get("decision_timestamp"),
-            source_status={
-                "collector": "layer_a_weather_only",
-                "observation_source": "hko_intraday_state",
-                "model_link_source": "local_completed_layer_a_cycle",
-                "clob_fetched": False,
-            },
+        run.snapshots = _buffered_weather_snapshots(
+            state,
+            target=target,
+            decision=decision,
+            model_record=model_record,
         )
-        run.snapshots.append(snapshot)
+        if not run.snapshots:
+            run.snapshots.append(
+                build_weather_snapshot(
+                    snapshot_timestamp=decision,
+                    event_date=target,
+                    location="Hong Kong",
+                    weather_state=state,
+                    latest_model_cycle_id=(model_record or {}).get("decision_cycle_id"),
+                    model_cycle_timestamp=(model_record or {}).get("decision_timestamp"),
+                    source_status={
+                        "collector": "layer_a_weather_only",
+                        "observation_source": "hko_intraday_state",
+                        "model_link_source": "local_completed_layer_a_cycle",
+                        "clob_fetched": False,
+                    },
+                )
+            )
     except Exception as exc:
         run.errors.append({"stage": "weather_snapshot_schema", "error": type(exc).__name__})
         logger.exception("Weather-only snapshot normalization failed")

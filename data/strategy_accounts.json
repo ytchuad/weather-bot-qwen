@@ -10,7 +10,7 @@
       "market_template": "hk-tmax",
       "status": "running",
       "scheduler_on": true,
-      "last_run": "2026-07-20T12:14:33.045133+00:00",
+      "last_run": "2026-07-20T13:47:23.515526+00:00",
       "params": {
         "bias": 0,
         "std_mult": 1.5,
@@ -28,7 +28,7 @@
       "market_template": "hk-tmax",
       "status": "running",
       "scheduler_on": true,
-      "last_run": "2026-07-20T12:14:34.484887+00:00",
+      "last_run": "2026-07-20T13:47:53.702743+00:00",
       "params": {
         "bias": 0,
         "std_mult": 1.0,
@@ -46,7 +46,7 @@
       "market_template": "hk-tmax",
       "status": "running",
       "scheduler_on": true,
-      "last_run": "2026-07-20T12:14:35.990097+00:00",
+      "last_run": "2026-07-20T13:47:53.757553+00:00",
       "params": {
         "bias": -0.3,
         "std_mult": 1.0,

@@ -98,11 +98,11 @@ function SeriesChip({ color, label, dash, dimmed, active, onClick }: {
   )
 }
 
-export default function ModelsComparisonChart({ date, visibleKeys }: { date: string; visibleKeys?: Set<string> }) {
+export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: { date: string; isMinTemp: boolean; visibleKeys?: Set<string> }) {
   const [isolated, setIsolated] = useState<string | null>(null)
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["modelsComparison", date],
-    queryFn: () => fetchModelsComparison(date),
+    queryKey: ["modelsComparison", date, isMinTemp],
+    queryFn: () => fetchModelsComparison(date, isMinTemp),
     refetchInterval: 60_000,
   })
 

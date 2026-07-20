@@ -563,6 +563,16 @@ class HistoricalStore:
         value = record.get(field)
         return str(value) if value not in (None, "") else None
 
+    @staticmethod
+    def _prefer_duplicate(kind: str, candidate: Mapping[str, Any], existing: Mapping[str, Any]) -> bool:
+        if kind != "weather":
+            return False
+        candidate_status = candidate.get("source_status")
+        existing_status = existing.get("source_status")
+        candidate_backfill = isinstance(candidate_status, Mapping) and bool(candidate_status.get("buffer_backfill"))
+        existing_backfill = isinstance(existing_status, Mapping) and bool(existing_status.get("buffer_backfill"))
+        return candidate_backfill and not existing_backfill
+
     def _merged_records(self, kind: str) -> list[dict[str, Any]]:
         local = self._local_records(kind)
         remote = self._remote_records(kind)
@@ -574,7 +584,11 @@ class HistoricalStore:
                     continue
                 valid_rank = rank + (2 if self._valid(kind, record) else 0)
                 existing = merged.get(key)
-                if existing is None or valid_rank > existing[0]:
+                if (
+                    existing is None
+                    or valid_rank > existing[0]
+                    or (valid_rank == existing[0] and self._prefer_duplicate(kind, record, existing[1]))
+                ):
                     merged[key] = (valid_rank, jsonable(record))
         result = [record for _rank, record in merged.values()]
         timestamp_field = "decision_timestamp" if kind != "weather" else "snapshot_timestamp"
@@ -621,6 +635,7 @@ class HistoricalStore:
         date_value: str | None = None,
         start: str | None = None,
         end: str | None = None,
+        market_kind: str | None = None,
         bucket_filters: Iterable[str] | None = None,
         model_filters: Iterable[str] | None = None,
         limit: int = 1000,
@@ -631,6 +646,9 @@ class HistoricalStore:
         cycles = self.records("model", date_value=date_value, end=end)
         markets = self.records("market", date_value=date_value, end=end)
         weather = self.records("weather", date_value=date_value, end=end)
+        if market_kind:
+            cycles = [record for record in cycles if record.get("market_kind") == market_kind]
+            markets = [record for record in markets if record.get("market_kind") == market_kind]
         has_layer_a_records = bool(cycles or markets or weather)
         if not has_layer_a_records:
             dates = _date_strings(date_value=date_value, start=start, end=end, lookback_days=self.lookback_days)

@@ -7,7 +7,6 @@ import BucketChart from "../components/BucketChart"
 import BucketProbsChart from "../components/BucketProbsChart"
 import ComparisonChart from "../components/ComparisonChart"
 import ModelsComparisonChart from "../components/ModelsComparisonChart"
-import MinuteHistoryPanel from "../components/MinuteHistoryPanel"
 import { fetchEvent, fetchPredictions, fetchTodayEvent } from "../api/client"
 
 const MODEL_LABELS: Record<string, string> = {
@@ -289,8 +288,6 @@ export default function Hub() {
 
       <WeatherCards date={date} />
 
-      <MinuteHistoryPanel date={date} />
-
       <section className="panel p-4 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -303,7 +300,7 @@ export default function Hub() {
           </div>
         </div>
         <div className="mt-4 min-h-[320px]">
-          {viewMode === "trajectory" ? <ModelsComparisonChart date={date} visibleKeys={visibleKeys ?? undefined} /> : <BucketProbsChart date={date} bucket={selectedBucket} onBucketChange={setSelectedBucket} visibleKeys={visibleKeys ?? undefined} />}
+          {viewMode === "trajectory" ? <ModelsComparisonChart date={date} isMinTemp={isMinTemp} visibleKeys={visibleKeys ?? undefined} /> : <BucketProbsChart date={date} bucket={selectedBucket} onBucketChange={setSelectedBucket} visibleKeys={visibleKeys ?? undefined} />}
         </div>
         <p className="mono mt-1 text-[10.5px] tracking-wide text-white/25">Click model controls below to change the visible series · all values shown in °C</p>
       </section>

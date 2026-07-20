@@ -76,15 +76,20 @@ def _market(ts: str = "2026-07-20T10:01:00+00:00") -> dict:
     )
 
 
-def _model(ts: str = "2026-07-20T10:00:00+00:00") -> dict:
+def _model(
+    ts: str = "2026-07-20T10:00:00+00:00",
+    *,
+    cycle_id: str = "cycle-debug",
+    market_kind: str = "highest_temperature",
+) -> dict:
     decision = datetime.fromisoformat(ts)
     return build_layer_a_record(
         {
             "decision_timestamp": decision,
-            "decision_cycle_id": "cycle-debug",
+            "decision_cycle_id": cycle_id,
             "event_date": EVENT_DATE,
             "event_slug": SLUG,
-            "market_kind": "highest_temperature",
+            "market_kind": market_kind,
             "weather_state": {"observations": {"temperature": 30.0}},
             "model_states": {
                 "model_debug": {
@@ -258,7 +263,11 @@ def test_trajectory_chart_uses_minute_projection(monkeypatch):
 
     class Store:
         def minute_history(self, **kwargs):
-            assert kwargs == {"date_value": EVENT_DATE, "limit": 10000}
+            assert kwargs == {
+                "date_value": EVENT_DATE,
+                "market_kind": "highest_temperature",
+                "limit": 10000,
+            }
             return [
                 {
                     "timestamp": "2026-07-20T18:00:00+08:00",
@@ -304,6 +313,26 @@ def test_trajectory_chart_uses_minute_projection(monkeypatch):
     )
     assert legacy_payload["granularity"] == "strategy_cycle"
     assert legacy_payload["data_source"] == "legacy_csv"
+
+
+def test_minute_history_does_not_use_other_temperature_market_cycles(tmp_path):
+    store = _history_store(tmp_path)
+    store.local_store.capture(_model(cycle_id="tmax-cycle"))
+    store.local_store.capture(
+        _model(
+            "2026-07-20T10:01:00+00:00",
+            cycle_id="tmin-cycle",
+            market_kind="lowest_temperature",
+        )
+    )
+    store.local_weather_store.capture(_weather("2026-07-20T10:02:00+00:00"))
+
+    rows = store.minute_history(
+        date_value=EVENT_DATE,
+        market_kind="highest_temperature",
+    )
+    row = next(item for item in rows if item["timestamp"].startswith("2026-07-20T18:02"))
+    assert row["model_cycle_id"] == "tmax-cycle"
 
 
 def test_strategy_snapshot_sqlite_connection_waits_for_busy_writer(monkeypatch, tmp_path):
@@ -364,7 +393,7 @@ def test_routes_and_frontend_runtime_contract():
     assert 'cache: "no-store"' in client
     assert "signal" in panel
     assert 'cache: "no-store"' in client
-    assert "MinuteHistoryPanel" in hub
+    assert "MinuteHistoryPanel" not in hub
     assert "Actual observations and execution books" not in panel
 
 
@@ -412,6 +441,7 @@ def test_entrypoint_and_frontend_build_contract():
     assets = list(Path("app/frontend/dist/assets").glob("*.js"))
     if assets:
         bundle_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in assets)
-        assert "Minute history" in bundle_text or "layer-a-minute-history" in bundle_text
+        assert "Historical Prediction Trajectory" in bundle_text
+        assert "LAYER A · MINUTE HISTORY" not in bundle_text
     canonical = Path("layer_a/canonical_capture.py").read_text(encoding="utf-8")
     assert "interval_seconds: float = 300.0" in canonical
