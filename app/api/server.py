@@ -10,9 +10,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import backtest, charts, data, diagnostics, health, layer_a, markets, predictions, strategies, weather
+from app.api import backtest, charts, data, diagnostics, health, history, layer_a, markets, predictions, strategies, weather
 
 logger = logging.getLogger(__name__)
+_layer_a_upload_worker = None
+_layer_a_canonical_collector = None
 
 
 @asynccontextmanager
@@ -31,11 +33,45 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("Layer A market startup scan failed")
     try:
+        from layer_a.weather_storage import get_default_weather_store
+
+        get_default_weather_store().startup_scan()
+    except Exception:
+        logger.exception("Layer A weather startup scan failed")
+    try:
         from layer_a.market_capture import get_default_market_collector
 
         get_default_market_collector().start()
     except Exception:
         logger.exception("Layer A market collector start failed")
+    try:
+        from layer_a.weather_capture import get_default_weather_collector
+
+        get_default_weather_collector().start()
+    except Exception:
+        logger.exception("Layer A weather collector start failed")
+    try:
+        from layer_a.canonical_capture import get_default_canonical_collector
+
+        global _layer_a_canonical_collector
+        _layer_a_canonical_collector = get_default_canonical_collector()
+        _layer_a_canonical_collector.start()
+    except Exception:
+        logger.exception("Layer A canonical cycle collector start failed")
+    try:
+        from layer_a.historical_store import get_default_historical_store
+
+        get_default_historical_store().start_background_refresh()
+    except Exception:
+        logger.exception("Layer A remote history refresh start failed")
+    try:
+        from layer_a.upload_worker import LayerAUploadWorker
+
+        global _layer_a_upload_worker
+        _layer_a_upload_worker = LayerAUploadWorker()
+        _layer_a_upload_worker.start()
+    except Exception:
+        logger.exception("Layer A upload worker start failed")
     strategies.start_scheduler()
     yield
     logger.info("Weather Quant API shutting down")
@@ -45,6 +81,22 @@ async def lifespan(app: FastAPI):
         get_default_market_collector().stop()
     except Exception:
         logger.exception("Layer A market collector stop failed")
+    try:
+        from layer_a.weather_capture import get_default_weather_collector
+
+        get_default_weather_collector().stop()
+    except Exception:
+        logger.exception("Layer A weather collector stop failed")
+    if _layer_a_canonical_collector is not None:
+        _layer_a_canonical_collector.stop()
+    try:
+        from layer_a.historical_store import get_default_historical_store
+
+        get_default_historical_store().stop_background_refresh()
+    except Exception:
+        logger.exception("Layer A remote history refresh stop failed")
+    if _layer_a_upload_worker is not None:
+        _layer_a_upload_worker.stop()
     strategies.stop_scheduler()
 
 
@@ -72,6 +124,7 @@ app.include_router(diagnostics.router)
 app.include_router(charts.router)
 app.include_router(data.router)
 app.include_router(layer_a.router)
+app.include_router(history.router)
 
 _frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 

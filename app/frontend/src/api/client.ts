@@ -30,6 +30,7 @@ import type {
   StrategyChartData,
   ModelsComparisonData,
   BucketProbsData,
+  MinuteHistoryResponse,
 } from "../types"
 
 export function fetchPredictions(
@@ -161,6 +162,10 @@ export function fetchBucketProbs(date: string, bucket?: string): Promise<BucketP
   let q = `date=${encodeURIComponent(date)}`
   if (bucket) q += `&bucket=${encodeURIComponent(bucket)}`
   return get(`/charts/bucket-probs?${q}`)
+}
+
+export function fetchMinuteHistory(date: string, limit = 1000): Promise<MinuteHistoryResponse> {
+  return get(`/history/minute?date=${encodeURIComponent(date)}&limit=${limit}`)
 }
 
 // Strategy chart

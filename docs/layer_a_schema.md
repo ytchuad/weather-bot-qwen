@@ -177,3 +177,40 @@ order size 與 market schema version。`clob_books` 保存 exact normalized YES
 每一分鐘 snapshot 只連結到該時間以前最新的 completed five-minute
 `latest_model_cycle_id`，並計算 `model_age_seconds`。沒有可用 model cycle
 時仍可保存 incomplete market snapshot，replay eligibility 會明確標示原因。
+
+## `layer_a.weather.v1`: one-minute weather observation snapshot
+
+`layer_a.weather.v1` is an account-independent observation stream. It is
+captured every minute and does not run model inference or fetch CLOB data.
+
+```text
+weather_snapshot_id          deterministic event_date | location | minute slot ID
+schema_version = layer_a.weather.v1
+snapshot_timestamp           capture decision minute
+capture_timestamp            actual local capture time
+event_date / location
+latest_model_cycle_id        latest already-completed five-minute cycle, or null
+model_cycle_timestamp        linked cycle timestamp, or null
+model_age_seconds            backward as-of age, or null
+temperature_current
+max_so_far / min_so_far
+relative_humidity
+pressure / dew_point
+rain_current
+observations                 scalar convenience values
+observation_status           Phase 2A status for every observation field
+source_status
+```
+
+`observation_status[field]` preserves `value`, `source_timestamp`,
+`decision_timestamp`, `age_seconds`, `age_minutes`, `is_missing`, `is_stale`,
+`is_fallback`, `fallback_method`, `source_name`, `quality_flags` and
+`raw_status`. Age is recalculated only from supplied timestamps; a missing
+source timestamp always produces `null` age. Numeric zero is a valid value and
+is never converted to missing. A repeated source observation keeps its old
+source timestamp, so its age increases truthfully on later snapshots.
+
+Weather local chunks use `date=YYYY-MM-DD/hour=HH/minute=MM/` and are closed by
+the shared `LAYER_A_MINUTE_PARTITION_MINUTES` setting (default 10 minutes).
+The existing `layer_a.v1` model-cycle schema and `layer_a.market.v1` market
+schema remain compatible and are not rewritten.

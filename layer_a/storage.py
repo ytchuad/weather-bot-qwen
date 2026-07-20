@@ -633,7 +633,9 @@ class LayerAStore:
         failure_count = len(list(self.failures_dir.glob("*.json"))) if self.failures_dir.exists() else 0
         return {
             "last_successful_cycle": latest,
+            "last_model_cycle": latest,
             "cycles_captured_today": len(today_records),
+            "model_cycles_today": len(today_records),
             "clob_replay_eligible_percentage": round(100.0 * len(eligible) / len(today_records), 2) if today_records else 0.0,
             "pending_local_partitions": len(pending),
             "last_successful_remote_upload": last_upload,

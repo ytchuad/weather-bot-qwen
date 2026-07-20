@@ -7,6 +7,7 @@ import BucketChart from "../components/BucketChart"
 import BucketProbsChart from "../components/BucketProbsChart"
 import ComparisonChart from "../components/ComparisonChart"
 import ModelsComparisonChart from "../components/ModelsComparisonChart"
+import MinuteHistoryPanel from "../components/MinuteHistoryPanel"
 import { fetchEvent, fetchPredictions, fetchTodayEvent } from "../api/client"
 
 const MODEL_LABELS: Record<string, string> = {
@@ -287,6 +288,8 @@ export default function Hub() {
       </section>
 
       <WeatherCards date={date} />
+
+      <MinuteHistoryPanel date={date} />
 
       <section className="panel p-4 sm:p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">

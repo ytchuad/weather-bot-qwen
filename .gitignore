@@ -124,6 +124,7 @@ data/paper_adapter_test/
 data/layer_a/
 data/layer_a_exports/
 data/layer_a_market/
+data/layer_a_weather/
 
 # === Generated parquet files (not needed at runtime) ===
 data/forward_test_log.parquet

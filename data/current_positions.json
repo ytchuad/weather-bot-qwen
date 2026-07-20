@@ -5,34 +5,13 @@
       "enhanced_v1_paper": {
         "29-30": {
           "side": "YES",
-          "quantity": 84.27,
-          "entry_price": 0.89
+          "quantity": 85.23,
+          "entry_price": 0.894748
         },
         "30-31": {
           "side": "NO",
-          "quantity": 83.33,
-          "entry_price": 0.09999999999999998
-        }
-      }
-    }
-  },
-  "enhanced_v2_paper": {
-    "highest-temperature-in-hong-kong-on-july-20-2026": {
-      "enhanced_v2_paper": {
-        "29-30": {
-          "side": "YES",
-          "quantity": 8.43,
-          "entry_price": 0.89
-        },
-        "30-31": {
-          "side": "NO",
-          "quantity": 8.33,
-          "entry_price": 0.09999999999999998
-        },
-        "31-32": {
-          "side": "NO",
-          "quantity": 30.63,
-          "entry_price": 0.020499999999999963
+          "quantity": 83.8,
+          "entry_price": 0.895541
         }
       }
     }
@@ -42,18 +21,18 @@
       "enhanced_v3_aggressive_paper": {
         "29-30": {
           "side": "YES",
-          "quantity": 54.92,
-          "entry_price": 0.8922
+          "quantity": 55.53,
+          "entry_price": 0.896862
         },
         "30-31": {
           "side": "NO",
-          "quantity": 54.33,
-          "entry_price": 0.09799999999999998
+          "quantity": 54.63,
+          "entry_price": 0.897612
         },
         "31-32": {
           "side": "NO",
-          "quantity": 102.05,
-          "entry_price": 0.020100000000000007
+          "quantity": 101.29,
+          "entry_price": 0.987237
         }
       }
     }

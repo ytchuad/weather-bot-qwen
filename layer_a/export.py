@@ -14,6 +14,7 @@ from .schema import SCHEMA_VERSION
 from .market_schema import MARKET_SCHEMA_VERSION
 from .market_storage import MarketPartitionInfo, MarketSnapshotStore, get_default_market_store
 from .storage import LayerAStore, PartitionInfo
+from .weather_storage import WeatherPartitionInfo, WeatherSnapshotStore, get_default_weather_store
 
 
 def _sha256_bytes(payload: bytes) -> str:
@@ -37,6 +38,7 @@ def export_layer_a(
     *,
     store: LayerAStore | None = None,
     market_store: MarketSnapshotStore | None = None,
+    weather_store: WeatherSnapshotStore | None = None,
     output: Path | str | None = None,
     date_value: str | None = None,
     start: str | None = None,
@@ -47,12 +49,15 @@ def export_layer_a(
     """Create one archive without mutating any closed Layer A partition."""
     store = store or LayerAStore()
     market_store = market_store or get_default_market_store()
+    weather_store = weather_store or get_default_weather_store()
     start_boundary = _normalise_boundary(start)
     end_boundary = _normalise_boundary(end, end=True)
     selected: dict[str, PartitionInfo] = {}
     records_count = 0
     market_selected: dict[str, MarketPartitionInfo] = {}
     market_records_count = 0
+    weather_selected: dict[str, WeatherPartitionInfo] = {}
+    weather_records_count = 0
     # Iterating records applies date/time filters while selecting a partition
     # only once even if a future multi-row partition contains many cycles.
     for info, _record in store.iter_records(
@@ -75,6 +80,16 @@ def export_layer_a(
         market_selected[info.partition_id] = info
         market_records_count += 1
 
+    for info, _snapshot in weather_store.read_snapshot_records(
+        date_value=date_value,
+        start=start_boundary,
+        end=end_boundary,
+        only_unuploaded=only_unuploaded,
+        verify_checksums=verify_checksums,
+    ):
+        weather_selected[info.partition_id] = info
+        weather_records_count += 1
+
     all_partitions = store.scan()
     pending = [
         info.partition_id
@@ -91,6 +106,17 @@ def export_layer_a(
     market_incomplete = [
         info.as_dict(market_store.root)
         for info in all_market_partitions
+        if info.status != "complete"
+    ]
+    all_weather_partitions = weather_store.scan()
+    weather_pending = [
+        info.partition_id
+        for info in all_weather_partitions
+        if info.status == "complete" and not info.uploaded
+    ]
+    weather_incomplete = [
+        info.as_dict(weather_store.root)
+        for info in all_weather_partitions
         if info.status != "complete"
     ]
     members: dict[str, bytes] = {}
@@ -136,11 +162,33 @@ def export_layer_a(
                 "bytes": len(members[member]),
             }
 
+    selected_weather_manifest_data: list[dict[str, Any]] = []
+    for info in weather_selected.values():
+        selected_weather_manifest_data.append(
+            {
+                "partition_id": info.partition_id,
+                "directory": str(info.directory.relative_to(weather_store.root)).replace("\\", "/"),
+                "uploaded": info.uploaded,
+                "files": {},
+                "first_timestamp": (info.manifest or {}).get("first_timestamp"),
+                "last_timestamp": (info.manifest or {}).get("last_timestamp"),
+                "snapshot_count": (info.manifest or {}).get("snapshot_count", 0),
+            }
+        )
+        for path in info.files.values():
+            member = _partition_member(weather_store.root, path, "layer_a_weather")
+            members[member] = path.read_bytes()
+            selected_weather_manifest_data[-1]["files"][path.name] = {
+                "sha256": _sha256_bytes(members[member]),
+                "bytes": len(members[member]),
+            }
+
     now = datetime.now(timezone.utc).isoformat()
     export_manifest = {
         "schema_version": "layer_a.export_manifest.v1",
         "layer_a_schema_version": SCHEMA_VERSION,
         "layer_a_market_schema_version": MARKET_SCHEMA_VERSION,
+        "layer_a_weather_schema_version": "layer_a.weather.v1",
         "created_at": now,
         "filters": {
             "date": date_value,
@@ -153,14 +201,19 @@ def export_layer_a(
         "partitions": selected_manifest_data,
         "market_snapshot_count": market_records_count,
         "market_partitions": selected_market_manifest_data,
+        "weather_snapshot_count": weather_records_count,
+        "weather_partitions": selected_weather_manifest_data,
         "unuploaded_partition_list": pending,
         "unuploaded_market_partition_list": market_pending,
+        "unuploaded_weather_partition_list": weather_pending,
         "incomplete_partition_list": incomplete,
         "incomplete_market_partition_list": market_incomplete,
+        "incomplete_weather_partition_list": weather_incomplete,
         "notes": [
             "Only closed immutable partitions are included as payload files.",
             "Incomplete temporary partitions remain on local storage and are listed for recovery.",
             "No paper-account, position, order, fill or PnL state is exported by Layer A.",
+            "Weather, market and model files are exported as separate immutable streams.",
         ],
     }
     members["export_manifest.json"] = json.dumps(
@@ -173,6 +226,10 @@ def export_layer_a(
     ]
     members["checksums.sha256"] = ("\n".join(checksum_lines) + "\n").encode("utf-8")
     members["docs/layer_a_schema.md"] = _schema_doc_bytes()
+    for doc_name in ("layer_a_hf_storage_workflow.md", "layer_a_historical_ui.md"):
+        doc_path = Path(__file__).resolve().parents[1] / "docs" / doc_name
+        if doc_path.exists():
+            members[f"docs/{doc_name}"] = doc_path.read_bytes()
     # Add the schema doc to the checksums after its bytes are known.
     checksum_lines = [
         f"{_sha256_bytes(payload)}  {name}"
@@ -197,8 +254,10 @@ def export_layer_a(
         "output": str(output_path),
         "cycle_count": records_count,
         "market_snapshot_count": market_records_count,
+        "weather_snapshot_count": weather_records_count,
         "partition_count": len(selected),
         "market_partition_count": len(market_selected),
+        "weather_partition_count": len(weather_selected),
         "unuploaded_partition_count": len(pending),
         "unuploaded_market_partition_count": len(market_pending),
         "incomplete_partition_count": len(incomplete),

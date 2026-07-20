@@ -32,6 +32,20 @@ PORTFOLIO_STATE_PATH = DATA_DIR / "portfolio_state.json"
 LAYER_A_DIR = Path(os.getenv("LAYER_A_DIR", str(DATA_DIR / "layer_a")))
 LAYER_A_EXPORT_DIR = Path(os.getenv("LAYER_A_EXPORT_DIR", str(DATA_DIR / "layer_a_exports")))
 LAYER_A_MARKET_DIR = Path(os.getenv("LAYER_A_MARKET_DIR", str(DATA_DIR / "layer_a_market")))
+LAYER_A_WEATHER_DIR = Path(os.getenv("LAYER_A_WEATHER_DIR", str(DATA_DIR / "layer_a_weather")))
+LAYER_A_MINUTE_PARTITION_MINUTES = int(os.getenv("LAYER_A_MINUTE_PARTITION_MINUTES", "10"))
+
+# Read-only remote history is intentionally outside the writable capture roots.
+LAYER_A_REMOTE_CACHE_DIR = Path(
+    os.getenv("LAYER_A_REMOTE_CACHE_DIR", "/tmp/layer_a_remote_cache")
+)
+LAYER_A_HISTORY_LOOKBACK_DAYS = int(os.getenv("LAYER_A_HISTORY_LOOKBACK_DAYS", "7"))
+LAYER_A_HISTORY_AUTO_REFRESH = os.getenv("LAYER_A_HISTORY_AUTO_REFRESH", "true").lower() in {
+    "1", "true", "yes", "on"
+}
+LAYER_A_HISTORY_REFRESH_INTERVAL_MINUTES = float(
+    os.getenv("LAYER_A_HISTORY_REFRESH_INTERVAL_MINUTES", "10")
+)
 
 # ---- Snapshot export source ----
 HF_SPACE_URL = os.getenv("HF_SPACE_URL", "https://shea-hilton-weather-prediction.hf.space")

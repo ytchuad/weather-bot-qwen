@@ -96,3 +96,44 @@ temporary files 的 recovery 規則與 model Layer A 相同。market partition �
 last success、failed runs、pending partitions、replay eligibility、upload failures
 與 temporary files。CLOB fetch/storage exception 只影響該 market run；model cycle
 的 capture exception 也不會阻止 market collector。
+
+## Minute streams and remote read cache
+
+The minute market and weather streams use the same close interval:
+
+```text
+LAYER_A_MINUTE_PARTITION_MINUTES=10   # constrained to 5..15
+```
+
+Each stream appends JSONL to one temporary chunk per local
+`date/hour/minute` slot. Closing writes the compressed payload to a sibling
+temporary file, computes SHA-256, writes the manifest, then atomically renames
+the payload and manifest. Temporary files are never silently removed. A
+closed chunk is the only upload-eligible state. Model-cycle `layer_a.v1`
+storage remains one cycle per immutable partition.
+
+`layer_a.historical_store.HistoricalStore` keeps the two storage domains
+separate:
+
+```text
+data/layer_a/                 writable local model cycles
+data/layer_a_market/          writable local market chunks
+data/layer_a_weather/         writable local weather chunks
+/tmp/layer_a_remote_cache/    downloaded remote files; read-only to readers
+```
+
+Remote files are downloaded from the private Dataset repository under
+`layer_a/`, `layer_a_market/` and `layer_a_weather/` prefixes. The cache index
+reuses unchanged paths, and a reader never calls upload APIs or marks a remote
+file as a local pending partition. If refresh fails, local records remain
+available and health reports `degraded` or `unavailable` without exposing the
+repository token.
+
+The optional upload worker is controlled by `HF_LAYER_A_AUTO_UPLOAD` and its
+own `HF_LAYER_A_UPLOAD_INTERVAL_MINUTES`; capture cadence and upload cadence
+are therefore independent.
+
+Server startup also starts the account-independent `CanonicalCycleCollector`
+at 300 seconds. Its process-local cache is shared with strategy adapters, so
+an adapter in the same five-minute slot reuses the frozen cycle instead of
+rerunning inference.

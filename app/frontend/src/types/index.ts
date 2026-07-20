@@ -167,3 +167,35 @@ export interface BucketProbsData {
   bucket: string
   available_buckets: string[]
 }
+
+export interface MinuteHistoryRow {
+  timestamp: string
+  actual_temperature: number | null
+  max_so_far: number | null
+  min_so_far: number | null
+  weather_source_timestamp: string | null
+  weather_age_seconds: number | null
+  weather_quality_status: string
+  market_prices: Record<string, number | null>
+  market: Record<string, {
+    gamma_reference_price: number | null
+    best_bid: number | null
+    best_ask: number | null
+    spread: number | null
+    book_timestamp: string | null
+    book_age_seconds: number | null
+    validation_status: string
+  }>
+  latest_model_cycle_timestamp: string | null
+  model_cycle_timestamp: string | null
+  model_age_seconds: number | null
+  model_predictions: Record<string, { point_prediction?: number | null }>
+  model_probabilities: Record<string, Record<string, number>>
+}
+
+export interface MinuteHistoryResponse {
+  status: string
+  remote_history: Record<string, unknown>
+  minutes: MinuteHistoryRow[]
+  count: number
+}

@@ -5,14 +5,16 @@ from __future__ import annotations
 import io
 import json
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from execution.clob_execution import CLOBExecutionSnapshot, DepthLevel, walk_depth
 
 from .market_storage import MarketSnapshotStore
+from .minute_view import build_minute_view
 from .storage import LayerAStore, read_books, read_books_bytes
+from .weather_storage import WeatherSnapshotStore
 
 
 def _dt(value: Any) -> datetime:
@@ -167,6 +169,99 @@ def load_market_snapshot_records(path: Path | str) -> list[dict[str, Any]]:
     return _market_records_from_directory(path)
 
 
+def _weather_records_from_directory(path: Path) -> list[dict[str, Any]]:
+    candidates = [path / "layer_a_weather", path]
+    if path.name == "layer_a":
+        candidates.append(path.parent / "layer_a_weather")
+    for root in candidates:
+        if not root.exists():
+            continue
+        store = WeatherSnapshotStore(root)
+        if not any("snapshots" in info.files for info in store.scan()):
+            continue
+        return [snapshot for _info, snapshot in store.read_snapshot_records()]
+    return []
+
+
+def _weather_records_from_zip(path: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        for name in sorted(names):
+            if not name.startswith("layer_a_weather/") or not name.endswith(".jsonl.zst"):
+                continue
+            if "/snapshots-" not in name:
+                continue
+            manifest_name = name.replace("snapshots-", "manifest-").replace(".jsonl.zst", ".json")
+            compression = None
+            if manifest_name in names:
+                try:
+                    compression = json.loads(archive.read(manifest_name)).get("compression")
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    compression = None
+            records.extend(read_books_bytes(archive.read(name), compression))
+    return records
+
+
+def load_weather_snapshot_records(path: Path | str) -> list[dict[str, Any]]:
+    """Load closed weather snapshots from a directory or export archive."""
+    path = Path(path)
+    return _weather_records_from_zip(path) if path.suffix.lower() == ".zip" else _weather_records_from_directory(path)
+
+
+def replay_model_cycle_minute_view(
+    model_record: dict[str, Any],
+    market_snapshots: Iterable[dict[str, Any]],
+    weather_snapshots: Iterable[dict[str, Any]] = (),
+    *,
+    next_model_timestamp: Any = None,
+    entry_delay_minutes: int = 0,
+    limit: int = 1000,
+) -> dict[str, Any]:
+    """Replay one stored model output against minute books/weather only.
+
+    ``entry_delay_minutes`` changes the eligible execution minutes but never
+    calls model inference.  The full joined rows are returned for auditing.
+    """
+    model_time = _dt(model_record["decision_timestamp"])
+    next_time = _dt(next_model_timestamp) if next_model_timestamp is not None else model_time + timedelta(minutes=5)
+    if next_time <= model_time:
+        next_time = model_time + timedelta(minutes=5)
+    delay = max(0, int(entry_delay_minutes))
+    eligible_start = model_time + timedelta(minutes=delay)
+    markets = list(market_snapshots)
+    weather = list(weather_snapshots)
+    rows = build_minute_view(
+        [model_record],
+        markets,
+        weather,
+        start=model_time,
+        end=next_time - timedelta(microseconds=1),
+        limit=limit,
+    )
+    execution_rows = [
+        row
+        for row in rows
+        if _dt(row["timestamp"]) >= eligible_start and _dt(row["timestamp"]) < next_time
+    ]
+    return {
+        "model_cycle_id": model_record.get("decision_cycle_id"),
+        "model_cycle_timestamp": model_record.get("decision_timestamp"),
+        "entry_delay_minutes": delay,
+        "model_inference_runs": 0,
+        "minute_rows": rows,
+        "execution_rows": execution_rows,
+        "execution_minutes": [row["timestamp"] for row in execution_rows],
+        "books_evaluated": sum(1 for row in execution_rows if row.get("market_snapshot_id")),
+        "weather_minutes_evaluated": sum(1 for row in execution_rows if row.get("weather_snapshot_id")),
+        "future_model_leakage": any(
+            row.get("model_cycle_timestamp")
+            and _dt(row["model_cycle_timestamp"]) > _dt(row["timestamp"])
+            for row in rows
+        ),
+    }
+
+
 def _strategy_candidates(record: dict[str, Any], threshold: float, shares: float) -> list[dict[str, Any]]:
     books = {
         (str(book.get("bucket")), str(book.get("token_side")).upper()): book
@@ -300,6 +395,7 @@ def replay_layer_a(
         raise ValueError("kelly_fraction must be non-negative")
     records = load_export_records(path)
     market_snapshots = load_market_snapshot_records(path)
+    weather_snapshots = load_weather_snapshot_records(path)
     model_snapshots = sum(len(record.get("models", [])) for record in records)
     reconstructed_books = 0
     eligible_cycles = 0
@@ -349,6 +445,7 @@ def replay_layer_a(
         )
         model_groups.setdefault(key, []).append(record)
     market_signal_replay: list[dict[str, Any]] = []
+    minute_view_replay: list[dict[str, Any]] = []
     for grouped_records in model_groups.values():
         grouped_records.sort(key=lambda item: _dt(item["decision_timestamp"]))
         for index, record in enumerate(grouped_records):
@@ -364,6 +461,14 @@ def replay_layer_a(
                     next_model_timestamp=next_timestamp,
                     strategy_a_threshold=strategy_a_threshold,
                     requested_shares=requested_shares,
+                )
+            )
+            minute_view_replay.append(
+                replay_model_cycle_minute_view(
+                    record,
+                    market_snapshots,
+                    weather_snapshots,
+                    next_model_timestamp=next_timestamp,
                 )
             )
 
@@ -384,7 +489,9 @@ def replay_layer_a(
         "clob_books_reconstructed": reconstructed_books,
         "clob_replay_eligible_cycles": eligible_cycles,
         "market_snapshots_loaded": len(market_snapshots),
+        "weather_snapshots_loaded": len(weather_snapshots),
         "market_signal_replay": market_signal_replay,
+        "minute_view_replay": minute_view_replay,
         "depth_walk": depth_walk,
         "strategy_a_probe": {
             "threshold": strategy_a_threshold,
@@ -402,6 +509,8 @@ def replay_layer_a(
 __all__ = [
     "load_export_records",
     "load_market_snapshot_records",
+    "load_weather_snapshot_records",
+    "replay_model_cycle_minute_view",
     "replay_layer_a",
     "replay_market_signal",
 ]
