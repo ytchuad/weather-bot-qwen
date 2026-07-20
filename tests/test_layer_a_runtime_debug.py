@@ -253,6 +253,74 @@ def test_legacy_csv_hkt_fallback_and_utc_boundary(tmp_path):
     assert store.minute_history(date_value="2026-07-21")[0]["timestamp"].startswith("2026-07-21T00:00")
 
 
+def test_trajectory_chart_uses_minute_projection(monkeypatch):
+    from app.api import charts
+
+    class Store:
+        def minute_history(self, **kwargs):
+            assert kwargs == {"date_value": EVENT_DATE, "limit": 10000}
+            return [
+                {
+                    "timestamp": "2026-07-20T18:00:00+08:00",
+                    "actual_temperature": 30.0,
+                    "market_prices": {"30-31": 0.38},
+                    "model_predictions": {"model_debug": {"point_prediction": 30.2}},
+                },
+                {
+                    "timestamp": "2026-07-20T18:01:00+08:00",
+                    "actual_temperature": 30.1,
+                    "market_prices": {"30-31": 0.40},
+                    "model_predictions": {"model_debug": {"point_prediction": 30.2}},
+                },
+            ]
+
+    monkeypatch.setattr(charts, "get_default_historical_store", lambda: Store())
+    monkeypatch.setattr(
+        charts,
+        "read_models_comparison",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("SQLite cycle data should not be used")),
+    )
+
+    payload = charts.get_models_comparison_chart(date=EVENT_DATE)
+
+    assert payload["granularity"] == "minute"
+    assert payload["data_source"] == "layer_a_minute_view"
+    assert payload["timestamps"] == [
+        "2026-07-20T18:00:00+08:00",
+        "2026-07-20T18:01:00+08:00",
+    ]
+    assert payload["actual_temps"] == [30.0, 30.1]
+    assert payload["models"]["model_debug"] == [30.2, 30.2]
+    assert payload["market_temps"] == [30.5, 30.5]
+
+    legacy_payload = charts._comparison_payload_from_minute_rows(
+        [{
+            "timestamp": "2026-07-20T18:00:00+08:00",
+            "source": "legacy_csv",
+            "actual_temperature": 30.0,
+            "market_expected_temperature": 30.5,
+            "model_predictions": {"model_debug": {"point_prediction": 30.2}},
+        }]
+    )
+    assert legacy_payload["granularity"] == "strategy_cycle"
+    assert legacy_payload["data_source"] == "legacy_csv"
+
+
+def test_strategy_snapshot_sqlite_connection_waits_for_busy_writer(monkeypatch, tmp_path):
+    from features import strategy_snapshot_logger as logger
+
+    previous_conn = getattr(logger._LOCAL, "conn", None)
+    logger._LOCAL.conn = None
+    monkeypatch.setattr(logger, "DB_PATH", tmp_path / "snapshots.db")
+    monkeypatch.setattr(logger, "EXPORT_DIR", tmp_path / "export")
+    try:
+        conn = logger._get_conn()
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 30_000
+        conn.close()
+    finally:
+        logger._LOCAL.conn = previous_conn
+
+
 def test_layer_a_preferred_over_legacy_csv(tmp_path):
     export_dir = tmp_path / "export"
     export_dir.mkdir()
@@ -290,7 +358,10 @@ def test_routes_and_frontend_runtime_contract():
     panel = Path("app/frontend/src/components/MinuteHistoryPanel.tsx").read_text(encoding="utf-8")
     client = Path("app/frontend/src/api/client.ts").read_text(encoding="utf-8")
     hub = Path("app/frontend/src/pages/Hub.tsx").read_text(encoding="utf-8")
+    trajectory = Path("app/frontend/src/components/ModelsComparisonChart.tsx").read_text(encoding="utf-8")
     assert "refetchInterval: 60_000" in panel
+    assert "refetchInterval: 60_000" in trajectory
+    assert 'cache: "no-store"' in client
     assert "signal" in panel
     assert 'cache: "no-store"' in client
     assert "MinuteHistoryPanel" in hub

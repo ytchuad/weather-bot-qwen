@@ -525,6 +525,7 @@ class HistoricalStore:
                     "weather_snapshot_id": None,
                     "weather_observations": {},
                     "market_prices": {},
+                    "market_expected_temperature": _csv_float(latest.get("pm_weighted_temp")),
                     "best_bid": {},
                     "best_ask": {},
                     "spread": {},

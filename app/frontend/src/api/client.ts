@@ -154,7 +154,7 @@ export function runAllStrategies(): Promise<{ results: unknown[]; total: number 
 
 // Models comparison chart (Hub page)
 export function fetchModelsComparison(date: string): Promise<ModelsComparisonData> {
-  return get(`/charts/models-comparison?date=${encodeURIComponent(date)}`)
+  return get(`/charts/models-comparison?date=${encodeURIComponent(date)}`, { cache: "no-store" })
 }
 
 // Bucket probability time-series chart

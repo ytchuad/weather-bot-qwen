@@ -103,7 +103,7 @@ export default function ModelsComparisonChart({ date, visibleKeys }: { date: str
   const { data, isLoading, isError } = useQuery({
     queryKey: ["modelsComparison", date],
     queryFn: () => fetchModelsComparison(date),
-    refetchInterval: 120_000,
+    refetchInterval: 60_000,
   })
 
   const chart = useMemo(() => {
@@ -196,7 +196,13 @@ export default function ModelsComparisonChart({ date, visibleKeys }: { date: str
       { id: "consensus", label: "Consensus", color: "#22d3ee" },
       ...visibleModels.map(([key]) => ({ id: `model:${key}`, label: MODEL_LABELS[key] || key, color: MODEL_COLORS[key] || "#94a3b8" })),
     ]
-    return { option, chips, visibleCount: visibleModels.length, timestampCount: length }
+    return {
+      option,
+      chips,
+      visibleCount: visibleModels.length,
+      timestampCount: length,
+      granularity: data.granularity || "minute",
+    }
   }, [data, isolated, visibleKeys])
 
   if (isLoading) return <div className="flex h-[360px] w-full items-center justify-center text-sm text-white/40">Loading temperature tracking data...</div>

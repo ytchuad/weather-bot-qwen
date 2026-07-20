@@ -33,8 +33,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import sys
 import threading
-from datetime import datetime
+import time
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,11 @@ logger = logging.getLogger(__name__)
 DB_PATH = Path("data/strategy_snapshots.db")
 EXPORT_DIR = Path("data/export")
 _LOCAL = threading.local()
+_DB_INIT_LOCK = threading.RLock()
+_SQLITE_WRITE_LOCK = threading.RLock()
+_SQLITE_TIMEOUT_SECONDS = 30.0
+_SQLITE_BUSY_TIMEOUT_MS = 30_000
+_SQLITE_RETRY_DELAYS = (0.1, 0.25, 0.5, 1.0, 2.0)
 
 CSV_FIELDS = [
     "timestamp", "snapshot_date", "slug", "strategy_key", "model_key",
@@ -86,14 +92,19 @@ CREATE INDEX IF NOT EXISTS idx_snapshots_date
 
 def _get_conn() -> sqlite3.Connection:
     if not hasattr(_LOCAL, "conn") or _LOCAL.conn is None:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.executescript(SCHEMA_SQL)
-        _migrate(conn)
-        import_from_csv(conn)
-        _LOCAL.conn = conn
+        with _DB_INIT_LOCK:
+            if not hasattr(_LOCAL, "conn") or _LOCAL.conn is None:
+                DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+                conn = sqlite3.connect(str(DB_PATH), timeout=_SQLITE_TIMEOUT_SECONDS)
+                with _SQLITE_WRITE_LOCK:
+                    conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    conn.executescript(SCHEMA_SQL)
+                    _migrate(conn)
+                    import_from_csv(conn)
+                    conn.commit()
+                _LOCAL.conn = conn
     return _LOCAL.conn
 
 
@@ -116,8 +127,8 @@ def _add_column_if_missing(conn: sqlite3.Connection, table: str, column: str, co
 
 def write_snapshot(record: dict) -> None:
     conn = _get_conn()
-    _insert_row(conn, record)
-    conn.commit()
+    with _SQLITE_WRITE_LOCK:
+        _retry_locked_write(conn, lambda: _insert_row(conn, record), "write snapshot")
     _append_to_csv(record)
 
 
@@ -314,21 +325,22 @@ def _append_to_csv(record: dict) -> None:
     """Append one snapshot row to the daily CSV export file."""
     import csv
     date = record.get("snapshot_date", "unknown")
-    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    path = EXPORT_DIR / f"{date}.csv"
-    is_new = not path.exists()
-    try:
-        with open(path, "a", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
-            if is_new:
-                writer.writeheader()
-            row = dict(record)
-            for jf in JSON_FIELDS:
-                if jf in row and isinstance(row[jf], (dict, list)):
-                    row[jf] = json.dumps(row[jf], ensure_ascii=False)
-            writer.writerow(row)
-    except Exception as e:
-        logger.warning("Failed to append to CSV %s: %s", path, e)
+    with _SQLITE_WRITE_LOCK:
+        EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+        path = EXPORT_DIR / f"{date}.csv"
+        is_new = not path.exists()
+        try:
+            with open(path, "a", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
+                if is_new:
+                    writer.writeheader()
+                row = dict(record)
+                for jf in JSON_FIELDS:
+                    if jf in row and isinstance(row[jf], (dict, list)):
+                        row[jf] = json.dumps(row[jf], ensure_ascii=False)
+                writer.writerow(row)
+        except Exception as e:
+            logger.warning("Failed to append to CSV %s: %s", path, e)
 
 
 def import_from_csv(conn: sqlite3.Connection) -> int:
@@ -340,29 +352,73 @@ def import_from_csv(conn: sqlite3.Connection) -> int:
     import csv
     if not EXPORT_DIR.exists():
         return 0
+    try:
+        csv.field_size_limit(2**31 - 1)
+    except OverflowError:
+        csv.field_size_limit(sys.maxsize)
+
     count = 0
-    for csv_path in sorted(EXPORT_DIR.glob("*.csv")):
-        try:
-            with open(csv_path, newline="") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    for jf in JSON_FIELDS:
-                        if jf in row and isinstance(row[jf], str):
+    with _SQLITE_WRITE_LOCK:
+        for csv_path in sorted(EXPORT_DIR.glob("*.csv")):
+            for attempt in range(len(_SQLITE_RETRY_DELAYS) + 1):
+                file_count = 0
+                try:
+                    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            for jf in JSON_FIELDS:
+                                if jf in row and isinstance(row[jf], str):
+                                    try:
+                                        row[jf] = json.loads(row[jf])
+                                    except (json.JSONDecodeError, TypeError):
+                                        pass
                             try:
-                                row[jf] = json.loads(row[jf])
-                            except (json.JSONDecodeError, TypeError):
+                                _insert_row(conn, row)
+                                file_count += 1
+                            except sqlite3.IntegrityError:
                                 pass
-                    try:
-                        _insert_row(conn, row)
-                        count += 1
-                    except sqlite3.IntegrityError:
-                        pass
-            conn.commit()
-        except Exception as e:
-            logger.warning("Failed to import CSV %s: %s", csv_path, e)
+                    conn.commit()
+                    count += file_count
+                    break
+                except sqlite3.OperationalError as exc:
+                    conn.rollback()
+                    if "locked" not in str(exc).lower() or attempt >= len(_SQLITE_RETRY_DELAYS):
+                        logger.warning("Failed to import CSV %s: %s", csv_path, exc)
+                        break
+                    logger.debug(
+                        "SQLite busy while importing %s; retry %d/%d",
+                        csv_path,
+                        attempt + 1,
+                        len(_SQLITE_RETRY_DELAYS),
+                    )
+                    time.sleep(_SQLITE_RETRY_DELAYS[attempt])
+                except Exception as exc:
+                    conn.rollback()
+                    logger.warning("Failed to import CSV %s: %s", csv_path, exc)
+                    break
     if count:
         logger.info("Imported %d snapshot(s) from CSV exports", count)
     return count
+
+
+def _retry_locked_write(conn: sqlite3.Connection, operation: Any, label: str) -> None:
+    """Run one SQLite write with a bounded retry for another process' lock."""
+    for attempt in range(len(_SQLITE_RETRY_DELAYS) + 1):
+        try:
+            operation()
+            conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            conn.rollback()
+            if "locked" not in str(exc).lower() or attempt >= len(_SQLITE_RETRY_DELAYS):
+                raise
+            logger.debug(
+                "SQLite busy during %s; retry %d/%d",
+                label,
+                attempt + 1,
+                len(_SQLITE_RETRY_DELAYS),
+            )
+            time.sleep(_SQLITE_RETRY_DELAYS[attempt])
 
 
 def _as_float(v: Any) -> float | None:

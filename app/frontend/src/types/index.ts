@@ -158,6 +158,8 @@ export interface ModelsComparisonData {
   market_temps: (number | null)[]
   actual_temps: (number | null)[]
   models: Record<string, (number | null)[]>
+  granularity?: "minute" | "strategy_cycle"
+  data_source?: string
 }
 
 export interface BucketProbsData {
