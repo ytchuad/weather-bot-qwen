@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import os
 import shutil
+import sys
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -22,6 +24,41 @@ from .weather_storage import WeatherSnapshotStore
 
 logger = logging.getLogger(__name__)
 HKT = timezone(timedelta(hours=8))
+try:
+    csv.field_size_limit(2**31 - 1)
+except OverflowError:
+    csv.field_size_limit(sys.maxsize)
+
+
+def _legacy_csv_root() -> Path:
+    configured = os.getenv("LAYER_A_LEGACY_CSV_DIR")
+    if configured:
+        return Path(configured).expanduser()
+    try:
+        from app.config import LAYER_A_LEGACY_CSV_DIR
+
+        return Path(LAYER_A_LEGACY_CSV_DIR)
+    except ImportError:
+        return Path(__file__).resolve().parents[1] / "data" / "export"
+
+
+def _csv_float(value: Any) -> float | None:
+    if value in (None, "", "null", "None"):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed == parsed and abs(parsed) != float("inf") else None
+
+
+def _csv_json(value: Any) -> Any:
+    if not isinstance(value, str) or not value.strip():
+        return {}
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -82,6 +119,7 @@ class HistoricalStore:
         lookback_days: int | None = None,
         auto_refresh: bool | None = None,
         refresh_interval_minutes: float | None = None,
+        legacy_csv_dir: Path | str | None = None,
         api: Any = None,
     ) -> None:
         self.local_store = local_store or LayerAStore(auto_upload=False)
@@ -116,6 +154,7 @@ class HistoricalStore:
             else max(0.1, float(refresh_interval_minutes))
         )
         self.api = api
+        self.legacy_csv_dir = Path(legacy_csv_dir or _legacy_csv_root()).expanduser()
         self._api_instance: Any = None
         self._lock = threading.RLock()
         self._stop = threading.Event()
@@ -127,6 +166,8 @@ class HistoricalStore:
             "last_refresh": None,
             "latest_timestamp": None,
             "files_cached": 0,
+            "files_found": 0,
+            "files_downloaded": 0,
             "refresh_failures": 0,
             "last_error": None,
             "repo_configured": bool(self.repo_id and self.token),
@@ -259,20 +300,23 @@ class HistoricalStore:
         """Download closed remote date partitions into the read-only cache."""
         with self._lock:
             if not self.repo_id or not self.token:
-                self._status.update({"status": "disabled", "last_error": None})
+                self._status.update({"status": "disabled", "last_error": None, "files_found": 0, "files_downloaded": 0})
+                logger.info("Layer A remote history refresh: repo configured: false; status=disabled")
                 return self.health_summary()
             self._status.update({"status": "loading", "last_error": None})
+        logger.info("Layer A remote history refresh: repo configured: true; status=loading")
         dates = _date_strings(
             date_value=date_value,
             start=start,
             end=end,
             lookback_days=self.lookback_days,
         )
+        entries: list[dict[str, Any]] = []
+        downloaded_count = 0
         try:
             entries = self._remote_entries_for_dates(dates)
             index = self._read_index()
             files_index = index.setdefault("files", {})
-            downloaded_count = 0
             for entry in entries:
                 remote_path = str(entry["path"])
                 destination = self.cache_dir / Path(remote_path)
@@ -298,9 +342,17 @@ class HistoricalStore:
                         "status": "available",
                         "last_refresh": datetime.now(timezone.utc).isoformat(),
                         "files_cached": cached_files,
+                        "files_found": len(entries),
+                        "files_downloaded": downloaded_count,
                         "last_error": None,
                     }
                 )
+            logger.info(
+                "Layer A remote history refresh: status=available files_found=%d files_downloaded=%d latest_cached_timestamp=%s",
+                len(entries),
+                downloaded_count,
+                self.health_summary().get("latest_timestamp"),
+            )
             return self.health_summary()
         except Exception as exc:
             logger.warning("Layer A remote history refresh failed: %s", type(exc).__name__)
@@ -309,6 +361,8 @@ class HistoricalStore:
                     {
                         "status": "degraded" if self._cache_has_files() else "unavailable",
                         "last_refresh": self._status.get("last_refresh"),
+                        "files_found": len(entries),
+                        "files_downloaded": downloaded_count,
                         "refresh_failures": int(self._status.get("refresh_failures", 0)) + 1,
                         "last_error": type(exc).__name__,
                     }
@@ -385,6 +439,112 @@ class HistoricalStore:
             for record in self.local_weather_store.read_partition_snapshots(info)
         ]
 
+    def _legacy_minute_rows(self, dates: set[str]) -> list[dict[str, Any]]:
+        """Read the repository-synced legacy CSV only as a display fallback.
+
+        These rows intentionally do not become model/market/weather records:
+        the CSV has no Layer A snapshot identity and no CLOB book identity.
+        Timestamps without an offset are historical HKT wall-clock values.
+        """
+        grouped: dict[datetime, list[tuple[datetime, Path, dict[str, Any]]]] = {}
+        for date_value in sorted(dates):
+            path = self.legacy_csv_dir / f"{date_value}.csv"
+            if not path.exists():
+                continue
+            try:
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    for raw in csv.DictReader(handle):
+                        parsed = _timestamp(raw.get("timestamp"))
+                        if parsed is None:
+                            continue
+                        local_time = parsed.astimezone(HKT)
+                        row_date = str(raw.get("snapshot_date") or local_time.date().isoformat())
+                        if row_date not in dates:
+                            continue
+                        minute = local_time.replace(second=0, microsecond=0)
+                        grouped.setdefault(minute, []).append((parsed, path, dict(raw)))
+            except (OSError, csv.Error) as exc:
+                logger.warning("Legacy CSV history read failed for %s: %s", path.name, type(exc).__name__)
+
+        rows: list[dict[str, Any]] = []
+        for minute, entries in sorted(grouped.items()):
+            entries.sort(key=lambda item: item[0])
+            latest_timestamp, latest_path, latest = entries[-1]
+            context = _csv_json(latest.get("context_json"))
+            if not isinstance(context, Mapping):
+                context = {}
+            predictions: dict[str, Any] = {}
+            probabilities: dict[str, Any] = {}
+            actual_temperature = None
+            max_so_far = None
+            min_so_far = None
+            for _timestamp_value, _path, raw in entries:
+                actual_temperature = _csv_float(raw.get("actual_temp")) if actual_temperature is None else actual_temperature
+                max_so_far = _csv_float(raw.get("max_so_far")) if max_so_far is None else max_so_far
+                raw_context = _csv_json(raw.get("context_json"))
+                if isinstance(raw_context, Mapping):
+                    min_so_far = (
+                        _csv_float(raw_context.get("min_so_far"))
+                        if min_so_far is None
+                        else min_so_far
+                    )
+                    raw_probs = raw_context.get("model_probs")
+                    if isinstance(raw_probs, Mapping):
+                        probabilities.update({str(key): value for key, value in raw_probs.items()})
+                raw_predictions = _csv_json(raw.get("all_model_predictions"))
+                if isinstance(raw_predictions, Mapping):
+                    for key, value in raw_predictions.items():
+                        parsed_value = _csv_float(value)
+                        if parsed_value is not None:
+                            predictions[str(key)] = {"point_prediction": parsed_value}
+                model_key = str(raw.get("model_key") or "")
+                model_value = _csv_float(raw.get("model_predicted_temp"))
+                if model_key and model_value is not None:
+                    predictions.setdefault(model_key, {"point_prediction": model_value})
+            if min_so_far is None:
+                min_so_far = _csv_float(context.get("min_so_far"))
+            if not predictions:
+                model_key = str(latest.get("model_key") or "")
+                model_value = _csv_float(latest.get("model_predicted_temp"))
+                if model_key and model_value is not None:
+                    predictions[model_key] = {"point_prediction": model_value}
+            timestamp = latest_timestamp.astimezone(HKT).isoformat()
+            rows.append(
+                {
+                    "timestamp": timestamp,
+                    "source": "legacy_csv",
+                    "source_path": latest_path.name,
+                    "legacy_csv_timestamp": latest.get("timestamp"),
+                    "legacy_csv_strategy_rows": len(entries),
+                    "actual_temperature": actual_temperature,
+                    "max_so_far": max_so_far,
+                    "min_so_far": min_so_far,
+                    "weather_source_timestamp": timestamp if actual_temperature is not None else None,
+                    "weather_age_seconds": 0 if actual_temperature is not None else None,
+                    "weather_quality_status": "observed" if actual_temperature is not None else "missing",
+                    "weather_snapshot_id": None,
+                    "weather_observations": {},
+                    "market_prices": {},
+                    "best_bid": {},
+                    "best_ask": {},
+                    "spread": {},
+                    "market_book_timestamp": {},
+                    "market_book_age_seconds": {},
+                    "market": {},
+                    "markets_by_kind": {},
+                    "market_snapshot_id": None,
+                    "market_validation_status": "legacy_csv_no_clob_identity",
+                    "latest_model_cycle_timestamp": timestamp if predictions else None,
+                    "model_cycle_timestamp": timestamp if predictions else None,
+                    "model_cycle_id": None,
+                    "model_age_seconds": 0 if predictions else None,
+                    "model_predictions": predictions,
+                    "model_probabilities": probabilities,
+                    "models": predictions,
+                }
+            )
+        return rows
+
     def _remote_records(self, kind: str) -> list[dict[str, Any]]:
         if kind == "model":
             return [record for _info, record in self._remote_model_store().iter_records()]
@@ -431,13 +591,12 @@ class HistoricalStore:
     ) -> list[dict[str, Any]]:
         if kind not in self._PREFIXES:
             raise ValueError(f"unsupported history kind: {kind}")
+        # Local market/weather partitions remain open for up to ten minutes.
+        # Their mtime changes on every append, so a generation counter that is
+        # advanced only by remote refresh would make the UI stale indefinitely.
+        # Re-scan the small local/remote read set on every API query instead.
         with self._lock:
-            cached = self._records_cache.get(kind)
-            if cached is None or cached[0] != self._generation:
-                data = self._merged_records(kind)
-                self._records_cache[kind] = (self._generation, data)
-            else:
-                data = cached[1]
+            data = self._merged_records(kind)
         start_dt = _timestamp(start) if start else None
         end_dt = _timestamp(end) if end else None
         timestamp_field = "decision_timestamp" if kind != "weather" else "snapshot_timestamp"
@@ -471,7 +630,20 @@ class HistoricalStore:
         cycles = self.records("model", date_value=date_value, end=end)
         markets = self.records("market", date_value=date_value, end=end)
         weather = self.records("weather", date_value=date_value, end=end)
-        return build_minute_view(
+        has_layer_a_records = bool(cycles or markets or weather)
+        if not has_layer_a_records:
+            dates = _date_strings(date_value=date_value, start=start, end=end, lookback_days=self.lookback_days)
+            legacy_rows = self._legacy_minute_rows(dates)
+            start_dt = _timestamp(start) if start else None
+            end_dt = _timestamp(end) if end else None
+            filtered = [
+                row
+                for row in legacy_rows
+                if (start_dt is None or (_timestamp(row["timestamp"]) or datetime.min.replace(tzinfo=timezone.utc)) >= start_dt)
+                and (end_dt is None or (_timestamp(row["timestamp"]) or datetime.max.replace(tzinfo=timezone.utc)) <= end_dt)
+            ]
+            return filtered[: max(0, int(limit))]
+        rows = build_minute_view(
             cycles,
             markets,
             weather,
@@ -481,6 +653,9 @@ class HistoricalStore:
             model_filters=list(model_filters or []),
             limit=limit,
         )
+        for row in rows:
+            row.setdefault("source", "layer_a")
+        return rows
 
     # Explicit read aliases keep callers from depending on the generic kind
     # string and make the read-only boundary obvious in service code/tests.

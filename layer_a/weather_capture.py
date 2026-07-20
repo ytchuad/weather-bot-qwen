@@ -166,8 +166,10 @@ class WeatherSnapshotCollector:
         self._lock = threading.Lock()
         self._runs = 0
         self._failed_runs = 0
+        self._last_tick: str | None = None
         self._last_success: str | None = None
         self._last_failure: str | None = None
+        self._last_error: str | None = None
         self._last_run: dict[str, Any] | None = None
 
     @property
@@ -175,6 +177,9 @@ class WeatherSnapshotCollector:
         return self._thread is not None and self._thread.is_alive()
 
     def run_once(self) -> dict[str, Any]:
+        tick = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self._last_tick = tick
         try:
             report = collect_weather_snapshots_once(**self.once_kwargs).as_dict()
         except Exception as exc:
@@ -188,6 +193,12 @@ class WeatherSnapshotCollector:
         with self._lock:
             self._runs += 1
             self._last_run = report
+            errors = report.get("errors") or []
+            self._last_error = "; ".join(
+                str(item.get("error") or item.get("stage") or "unknown")
+                for item in errors
+                if isinstance(item, Mapping)
+            ) or None
             if report.get("snapshot_count", 0) > 0 and report.get("captured_count", 0) > 0:
                 self._last_success = datetime.now(timezone.utc).isoformat()
             elif report.get("snapshot_count", 0) > 0 and not report.get("errors"):
@@ -224,8 +235,10 @@ class WeatherSnapshotCollector:
                 "interval_seconds": self.interval_seconds,
                 "runs": self._runs,
                 "failed_runs": self._failed_runs,
+                "last_tick": self._last_tick,
                 "last_success": self._last_success,
                 "last_failure": self._last_failure,
+                "last_error": self._last_error,
                 "last_run": jsonable(self._last_run),
             }
 

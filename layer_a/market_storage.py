@@ -67,9 +67,19 @@ def _read_raw_jsonl(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     if not path.exists():
         return records
-    for line in path.read_text(encoding="utf-8").splitlines():
+    raw = path.read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    for index, line in enumerate(lines):
         if line.strip():
-            records.append(json.loads(line))
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                # A collector can be interrupted while appending the final
+                # line.  Keep prior complete records visible and ignore only
+                # that incomplete tail; a later scan will read it again.
+                if index == len(lines) - 1:
+                    continue
+                raise
     return records
 
 

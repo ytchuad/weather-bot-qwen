@@ -34,6 +34,7 @@ LAYER_A_EXPORT_DIR = Path(os.getenv("LAYER_A_EXPORT_DIR", str(DATA_DIR / "layer_
 LAYER_A_MARKET_DIR = Path(os.getenv("LAYER_A_MARKET_DIR", str(DATA_DIR / "layer_a_market")))
 LAYER_A_WEATHER_DIR = Path(os.getenv("LAYER_A_WEATHER_DIR", str(DATA_DIR / "layer_a_weather")))
 LAYER_A_MINUTE_PARTITION_MINUTES = int(os.getenv("LAYER_A_MINUTE_PARTITION_MINUTES", "10"))
+LAYER_A_LEGACY_CSV_DIR = Path(os.getenv("LAYER_A_LEGACY_CSV_DIR", str(DATA_DIR / "export")))
 
 # Read-only remote history is intentionally outside the writable capture roots.
 LAYER_A_REMOTE_CACHE_DIR = Path(

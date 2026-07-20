@@ -41,13 +41,17 @@ async def lifespan(app: FastAPI):
     try:
         from layer_a.market_capture import get_default_market_collector
 
-        get_default_market_collector().start()
+        market_collector = get_default_market_collector()
+        market_collector.start()
+        logger.info("Layer A market collector started")
     except Exception:
         logger.exception("Layer A market collector start failed")
     try:
         from layer_a.weather_capture import get_default_weather_collector
 
-        get_default_weather_collector().start()
+        weather_collector = get_default_weather_collector()
+        weather_collector.start()
+        logger.info("Layer A weather collector started")
     except Exception:
         logger.exception("Layer A weather collector start failed")
     try:
@@ -56,12 +60,18 @@ async def lifespan(app: FastAPI):
         global _layer_a_canonical_collector
         _layer_a_canonical_collector = get_default_canonical_collector()
         _layer_a_canonical_collector.start()
+        logger.info("Layer A canonical-cycle service initialized")
     except Exception:
         logger.exception("Layer A canonical cycle collector start failed")
     try:
         from layer_a.historical_store import get_default_historical_store
 
-        get_default_historical_store().start_background_refresh()
+        remote_history = get_default_historical_store()
+        remote_history.start_background_refresh()
+        if remote_history.auto_refresh and remote_history.repo_id and remote_history.token:
+            logger.info("Layer A remote-history refresh started")
+        else:
+            logger.info("Layer A remote-history refresh disabled")
     except Exception:
         logger.exception("Layer A remote history refresh start failed")
     try:
@@ -70,6 +80,7 @@ async def lifespan(app: FastAPI):
         global _layer_a_upload_worker
         _layer_a_upload_worker = LayerAUploadWorker()
         _layer_a_upload_worker.start()
+        logger.info("Layer A upload worker %s", "started" if _layer_a_upload_worker.enabled else "disabled")
     except Exception:
         logger.exception("Layer A upload worker start failed")
     strategies.start_scheduler()

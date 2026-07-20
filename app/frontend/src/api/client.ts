@@ -1,7 +1,7 @@
 const BASE = "/api"
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
+async function get<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, init)
   if (!res.ok) throw new Error(`GET ${path}: ${res.status}`)
   return res.json()
 }
@@ -164,8 +164,11 @@ export function fetchBucketProbs(date: string, bucket?: string): Promise<BucketP
   return get(`/charts/bucket-probs?${q}`)
 }
 
-export function fetchMinuteHistory(date: string, limit = 1000): Promise<MinuteHistoryResponse> {
-  return get(`/history/minute?date=${encodeURIComponent(date)}&limit=${limit}`)
+export function fetchMinuteHistory(date: string, limit = 1000, signal?: AbortSignal): Promise<MinuteHistoryResponse> {
+  return get(`/history/minute?date=${encodeURIComponent(date)}&limit=${limit}`, {
+    cache: "no-store",
+    signal,
+  })
 }
 
 // Strategy chart

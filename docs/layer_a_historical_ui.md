@@ -58,3 +58,21 @@ thread. Local rows remain visible during `loading`; after refresh the cache
 generation invalidates the read index and remote/local rows become visible in
 one deduplicated view. A remote outage changes health to `degraded` or
 `unavailable`, but does not stop serving or collecting current data.
+
+## Runtime integration 修正
+
+Minute API 不會把 local history 長時間 cache 在 process memory。每次 query
+都會重新掃描 local model、market、weather stores，因此目前仍 open 的
+`*.jsonl.tmp` chunk 也會在下一次 API request 出現；partial final JSONL line
+會被忽略。chunk close 後以 snapshot ID deduplicate，不會產生第二列。
+
+若指定日期沒有任何 Layer A minute record，API 會唯讀讀取
+`LAYER_A_LEGACY_CSV_DIR`（預設 `data/export/`）的
+`YYYY-MM-DD.csv`。legacy row 會標記 `source="legacy_csv"`，naive timestamp
+按照原有 HKT wall-clock 解讀，且不建立 market snapshot 或 CLOB identity。
+只要 Layer A 有資料，就完全優先 Layer A，不混入 legacy rows。
+
+前端 `MinuteHistoryPanel` 在 mount 時立即載入，之後每 60 秒 polling；request
+使用 `cache: "no-store"` 與 React Query `AbortSignal`，unmount 時會取消未完成
+request。UI 只顯示 minute weather/model history，不再顯示
+「Actual observations and execution books」區塊或 execution-book 欄位。

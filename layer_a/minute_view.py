@@ -12,7 +12,10 @@ HKT = timezone(timedelta(hours=8))
 
 
 def _time(value: Any) -> datetime | None:
-    return _parse_datetime(value, naive_timezone=timezone.utc)
+    # Layer A and legacy dashboard timestamps use HKT wall-clock semantics
+    # when an old value has no explicit offset.  New records are written with
+    # an offset, so this branch is only for compatibility.
+    return _parse_datetime(value, naive_timezone=HKT)
 
 
 def _minute(value: Any) -> datetime | None:

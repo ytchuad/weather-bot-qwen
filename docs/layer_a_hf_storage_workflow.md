@@ -137,3 +137,48 @@ Server startup also starts the account-independent `CanonicalCycleCollector`
 at 300 seconds. Its process-local cache is shared with strategy adapters, so
 an adapter in the same five-minute slot reuses the frozen cycle instead of
 rerunning inference.
+
+## Runtime debug checklist
+
+Local development and the HF Docker Space both start the same application:
+
+```text
+uvicorn app.api.server:app --host 0.0.0.0 --port 7860
+```
+
+`Dockerfile` builds `app/frontend` with `npm run build` and copies the result
+to `app/frontend/dist`; `app/api/server.py` serves that directory with
+`StaticFiles`. There is no alternate Procfile or Gradio entrypoint.
+
+The `hf` Git remote in this project points to the Space code repository. It is
+not the private Dataset repository used by `DatasetUploader`. Dynamic
+`data/layer_a*` directories are intentionally gitignored and cannot be
+transferred by `git push hf`. To persist closed Layer A chunks across a Space
+rebuild, configure a separate private Dataset and enable the upload worker:
+
+```text
+HF_LAYER_A_REPO_ID=<owner>/<private-dataset>
+HF_LAYER_A_TOKEN=<secret>
+HF_LAYER_A_AUTO_UPLOAD=true
+```
+
+The uploader and reader both use `repo_type="dataset"` and these exact paths:
+
+```text
+layer_a/date=YYYY-MM-DD/hour=HH/<model files>
+layer_a_market/date=YYYY-MM-DD/hour=HH/minute=MM/<market files>
+layer_a_weather/date=YYYY-MM-DD/hour=HH/minute=MM/<weather files>
+```
+
+The repository-synced legacy CSV is a separate compatibility path. Since
+`data/export/YYYY-MM-DD.csv` is tracked but runtime updates are uncommitted,
+`git push hf` alone does not transfer the latest local rows. Commit the CSV
+before pushing the Space; after rebuild the minute API reads it only when no
+Layer A minute records exist and labels each returned row
+`source="legacy_csv"`.
+
+Use the deployment-safe checklist after startup:
+
+```powershell
+python scripts/layer_a_runtime_diagnostics.py --base-url http://127.0.0.1:7860 --date 2026-07-20 --json
+```

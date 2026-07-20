@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -19,12 +20,15 @@ def _split_filters(values: list[str] | None) -> list[str]:
 
 
 def _envelope(store: Any, records: list[dict[str, Any]], key: str) -> dict[str, Any]:
+    sources = sorted({str(record.get("source") or "layer_a") for record in records})
     return {
         "status": "ok",
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
         "remote_history": store.health_summary(),
         "records": records,
         key: records,
         "count": len(records),
+        "sources": sources,
     }
 
 

@@ -170,6 +170,7 @@ export interface BucketProbsData {
 
 export interface MinuteHistoryRow {
   timestamp: string
+  source?: "layer_a" | "legacy_csv" | string
   actual_temperature: number | null
   max_so_far: number | null
   min_so_far: number | null
@@ -195,7 +196,9 @@ export interface MinuteHistoryRow {
 
 export interface MinuteHistoryResponse {
   status: string
+  retrieved_at?: string
   remote_history: Record<string, unknown>
   minutes: MinuteHistoryRow[]
   count: number
+  sources?: string[]
 }

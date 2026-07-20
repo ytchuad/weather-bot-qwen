@@ -94,12 +94,21 @@ def layer_a_health_endpoint(request: Request) -> dict:
     weather_summary = summary.get("weather", {})
     weather_collector = summary.get("weather_collector", {})
     market_summary = summary.get("market", {})
+    market_collector = summary.get("market_collector", {})
     remote_summary = summary.get("remote_history", {})
     summary.update(
         {
             "last_weather_snapshot": weather_summary.get("last_weather_snapshot"),
             "weather_snapshots_today": weather_summary.get("weather_snapshots_today", 0),
             "weather_capture_failures": int(weather_summary.get("weather_capture_failures", 0)) + int(weather_collector.get("failed_runs", 0)),
+            "market_collector_running": bool(market_collector.get("running", False)),
+            "weather_collector_running": bool(weather_collector.get("running", False)),
+            "market_last_tick": market_collector.get("last_tick"),
+            "weather_last_tick": weather_collector.get("last_tick"),
+            "market_last_success": market_collector.get("last_success"),
+            "weather_last_success": weather_collector.get("last_success"),
+            "market_last_error": market_collector.get("last_error"),
+            "weather_last_error": weather_collector.get("last_error"),
             "last_market_snapshot": market_summary.get("last_market_snapshot", market_summary.get("last_successful_snapshot")),
             "market_snapshots_today": market_summary.get("market_snapshots_today", market_summary.get("market_snapshots_captured_today", 0)),
             "last_model_cycle": summary.get("last_model_cycle", summary.get("last_successful_cycle")),

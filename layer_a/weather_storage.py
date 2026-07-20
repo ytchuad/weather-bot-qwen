@@ -57,7 +57,19 @@ def _write_compressed(path: Path, payload: bytes) -> str:
 def _read_raw_jsonl(path: Path | None) -> list[dict[str, Any]]:
     if path is None or not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    raw = path.read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    records: list[dict[str, Any]] = []
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError:
+            if index == len(lines) - 1:
+                continue
+            raise
+    return records
 
 
 @dataclass

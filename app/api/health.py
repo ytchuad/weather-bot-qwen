@@ -49,15 +49,10 @@ def health():
         layer_a_summary["canonical_collector"] = get_default_canonical_collector().health_summary()
     except Exception:
         layer_a_summary["canonical_collector"] = {"status": "unavailable"}
-    try:
-        from layer_a.canonical_capture import get_default_canonical_collector
-
-        layer_a_summary["canonical_collector"] = get_default_canonical_collector().health_summary()
-    except Exception:
-        layer_a_summary["canonical_collector"] = {"status": "unavailable"}
     weather_summary = layer_a_summary.get("weather", {})
     weather_collector = layer_a_summary.get("weather_collector", {})
     market_summary = layer_a_summary.get("market", {})
+    market_collector = layer_a_summary.get("market_collector", {})
     model_summary = layer_a_summary
     remote_summary = layer_a_summary.get("remote_history", {})
     layer_a_summary.update(
@@ -65,6 +60,14 @@ def health():
             "last_weather_snapshot": weather_summary.get("last_weather_snapshot"),
             "weather_snapshots_today": weather_summary.get("weather_snapshots_today", 0),
             "weather_capture_failures": int(weather_summary.get("weather_capture_failures", 0)) + int(weather_collector.get("failed_runs", 0)),
+            "market_collector_running": bool(market_collector.get("running", False)),
+            "weather_collector_running": bool(weather_collector.get("running", False)),
+            "market_last_tick": market_collector.get("last_tick"),
+            "weather_last_tick": weather_collector.get("last_tick"),
+            "market_last_success": market_collector.get("last_success"),
+            "weather_last_success": weather_collector.get("last_success"),
+            "market_last_error": market_collector.get("last_error"),
+            "weather_last_error": weather_collector.get("last_error"),
             "last_market_snapshot": market_summary.get("last_market_snapshot", market_summary.get("last_successful_snapshot")),
             "market_snapshots_today": market_summary.get("market_snapshots_today", market_summary.get("market_snapshots_captured_today", 0)),
             "last_model_cycle": model_summary.get("last_model_cycle", model_summary.get("last_successful_cycle")),
