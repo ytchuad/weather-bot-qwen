@@ -9,7 +9,7 @@ from __future__ import annotations
 import io
 import logging
 import time as _time
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
@@ -21,12 +21,18 @@ from ..config import (
     HKT_OFFSET,
     HKO_RHRREAD_URL,
     HKO_AWS_CSV_URL,
-    HKO_MAXMIN_URL,
     HKO_FORECAST_URL_TEMPLATE,
     INTRADAY_10MIN_PATH,
     RAIN_15MIN_PATH,
     CACHE_TTL_SHORT,
     CACHE_TTL_MEDIUM,
+)
+from features.input_status import (
+    DEFAULT_STALE_AFTER_MINUTES,
+    InputStatus,
+    build_forecast_status_from_values,
+    build_observation_buffer_status,
+    jsonable,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,6 +46,9 @@ ILENS_FORECAST_URL = "https://i-lens.hk/hkweather/daily_extract.php"
 
 logger = logging.getLogger(__name__)
 
+_hko_rhrread_source_error: str | None = None
+_rain_source_error: str | None = None
+
 
 def hkt_now() -> datetime:
     """Current time in Hong Kong (UTC+8, naive)."""
@@ -51,7 +60,9 @@ def hkt_now() -> datetime:
 @cached(_short_cache)
 def fetch_live_hko_temp_rh() -> tuple[datetime | None, float | None, float | None]:
     """Return (datetime, temp_c, rh_pct) from HKO rhrread API."""
+    global _hko_rhrread_source_error
     try:
+        _hko_rhrread_source_error = None
         r = requests.get(HKO_RHRREAD_URL, timeout=10)
         r.raise_for_status()
         data = r.json()
@@ -80,10 +91,45 @@ def fetch_live_hko_temp_rh() -> tuple[datetime | None, float | None, float | Non
             if dt.tzinfo is not None:
                 dt = dt.tz_convert("Asia/Hong_Kong").tz_localize(None)
             return dt.to_pydatetime(), hko_temp, hko_rh
-        return hkt_now(), hko_temp, hko_rh
+        # A missing recordTime is not an observation timestamp.  Keep the
+        # values for legacy callers, but let truthful status consumers report
+        # a missing source timestamp instead of fabricating the decision time.
+        return None, hko_temp, hko_rh
     except Exception as e:
+        _hko_rhrread_source_error = str(e)
         logger.warning("fetch_live_hko_temp_rh failed: %s", e)
         return None, None, None
+
+
+def fetch_live_hko_temp_rh_with_status(
+    decision_timestamp: datetime | pd.Timestamp | None = None,
+) -> dict:
+    """Return Observatory temperature/RH with truthful source status."""
+    decision = decision_timestamp or hkt_now()
+    source_timestamp, temperature, humidity = fetch_live_hko_temp_rh()
+    return jsonable(
+        {
+            "decision_timestamp": decision,
+            "temperature": InputStatus.from_value(
+                temperature,
+                source_timestamp=source_timestamp,
+                decision_timestamp=decision,
+                source_name="hko_rhrread",
+                stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+                source_error=_hko_rhrread_source_error is not None,
+                observation_method="direct_observation",
+            ),
+            "humidity": InputStatus.from_value(
+                humidity,
+                source_timestamp=source_timestamp,
+                decision_timestamp=decision,
+                source_name="hko_rhrread",
+                stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+                source_error=_hko_rhrread_source_error is not None,
+                observation_method="direct_observation",
+            ),
+        }
+    )
 
 
 @cached(_medium_cache)
@@ -102,6 +148,8 @@ def fetch_hko_data(target_date_str: str) -> dict:
     forecast_max: float | None = None
     forecast_min: float | None = None
     aws_hourly: list[dict] = []
+    forecast_issue_time: pd.Timestamp | None = None
+    forecast_source_error = False
 
     # 1) AWS CSV - last 24 hours, calculate max/min since midnight
     try:
@@ -125,6 +173,12 @@ def fetch_hko_data(target_date_str: str) -> dict:
         r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         r.raise_for_status()
         data = r.json()
+        model_time = data.get("ModelTime")
+        if model_time:
+            try:
+                forecast_issue_time = pd.to_datetime(str(model_time), format="%Y%m%d%H") + HKT_OFFSET
+            except (TypeError, ValueError):
+                forecast_issue_time = None
         hourly_max, hourly_min = -99.0, 99.0
         for entry in data.get("HourlyWeatherForecast", []):
             f_hour = str(entry.get("ForecastHour", ""))
@@ -151,7 +205,24 @@ def fetch_hko_data(target_date_str: str) -> dict:
         if hourly_min < 99.0:
             forecast_min = hourly_min
     except Exception as e:
+        forecast_source_error = True
         logger.debug("AWS forecast fetch: %s", e)
+
+    forecast_source = "hko_aws_hourly" if (forecast_max is not None or forecast_min is not None) else None
+    forecast_status = build_forecast_status_from_values(
+        forecast_max=forecast_max,
+        forecast_min=forecast_min,
+        decision_timestamp=hkt_now(),
+        forecast_issue_time=forecast_issue_time,
+        forecast_target_date=target_date_str,
+        forecast_source=forecast_source,
+        fallback_source="unavailable" if forecast_source is None else None,
+        continuity_anomaly=(
+            (["source_error"] if forecast_source_error else [])
+            + (["missing_issue_timestamp"] if forecast_source and forecast_issue_time is None else [])
+        ),
+        source_error=forecast_source_error,
+    )
 
     return {
         "max_since_midnight": max_since_midnight,
@@ -159,6 +230,10 @@ def fetch_hko_data(target_date_str: str) -> dict:
         "forecast_max": forecast_max,
         "forecast_min": forecast_min,
         "aws_hourly": aws_hourly,
+        "forecast_source": forecast_source,
+        "forecast_issue_time": forecast_issue_time,
+        "forecast_target_date": target_date_str,
+        "forecast_input_status": forecast_status,
     }
 
 
@@ -307,7 +382,7 @@ def get_intraday_state(target_date_str: str) -> dict | None:
         except Exception:
             pass
 
-    return {
+    state = {
         "temp_now": temp_now,
         "temp_30m_ago": temp_30m_ago,
         "temp_60m_ago": temp_60m_ago,
@@ -327,6 +402,45 @@ def get_intraday_state(target_date_str: str) -> dict | None:
         "dew_point_change_60m": dew_point_change_60m,
         "dew_point_spread_change_60m": dew_point_spread_change_60m,
     }
+
+    buffer_status_frame = df_today.copy()
+    if "datetime" in buffer_status_frame.columns:
+        buffer_status_frame = buffer_status_frame.rename(columns={"datetime": "timestamp"})
+    state["decision_timestamp"] = time_now
+    state["observation_buffer_status"] = build_observation_buffer_status(
+        buffer_status_frame,
+        decision_timestamp=time_now,
+        values=state,
+        stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+    )
+    state["weather_input_status"] = {
+        key: state["observation_buffer_status"].get(key)
+        for key in (
+            "temp_current",
+            "rh_current",
+            "pressure_current",
+            "dew_point_current",
+            "max_so_far",
+            "min_so_far",
+            "obs_data_age_minutes",
+        )
+        if key in state["observation_buffer_status"]
+    }
+
+    # RH=50 is the established legacy compatibility default when the HKO
+    # buffer has no usable RH.  Keep that numeric input, but label it as a
+    # default rather than a fresh observation.
+    if "rh" not in df_today.columns or not df_today["rh"].notna().any():
+        state["observation_buffer_status"]["rh_current"] = InputStatus.fallback(
+            rh_now,
+            fallback_method="climatological_default",
+            decision_timestamp=time_now,
+            source_name="hko_weather_obs",
+            raw_status="synthetic_fallback",
+            observation_method="fallback",
+        ).to_dict()
+        state["weather_input_status"]["rh_current"] = state["observation_buffer_status"]["rh_current"]
+    return state
 
 
 # ── rainfall ─────────────────────────────────────────────────────────
@@ -358,12 +472,15 @@ def _parse_rainfall_from_html(html: str) -> list[dict]:
 @cached(_short_cache)
 def fetch_rainfall_live() -> pd.DataFrame:
     """Fetch live rainfall data from i-lens; returns DataFrame with datetime/rainfall."""
+    global _rain_source_error
     try:
+        _rain_source_error = None
         r = requests.get(INSTANT_RAIN_URL, headers=RAIN_HEADERS, timeout=10)
         r.raise_for_status()
         records = _parse_rainfall_from_html(r.text)
         return pd.DataFrame(records) if records else pd.DataFrame()
     except Exception as e:
+        _rain_source_error = str(e)
         logger.warning("fetch_rainfall_live failed: %s", e)
         return pd.DataFrame()
 
@@ -504,6 +621,7 @@ def compute_rain_kwargs(
     rain_120m = 0.0
     rain_data_ok = False
     rain_df = pd.DataFrame()
+    rain_source_error = None
 
     try:
         rain_df = fetch_rainfall_live()
@@ -522,7 +640,11 @@ def compute_rain_kwargs(
                 rain_120m = max(0.0, now_rain - rain_120m_ago)
                 rain_data_ok = True
     except Exception as e:
+        rain_source_error = str(e)
         logger.warning("compute_rain_kwargs: %s", e)
+
+    if _rain_source_error:
+        rain_source_error = _rain_source_error
 
     kwargs: dict[str, Any] = {
         "rain_60m": rain_60m,
@@ -581,6 +703,53 @@ def compute_rain_kwargs(
     except Exception:
         pass
 
+    rain_source_timestamp = None
+    if isinstance(rain_df, pd.DataFrame) and not rain_df.empty and "datetime" in rain_df.columns:
+        rain_times = pd.to_datetime(rain_df["datetime"], errors="coerce").dropna()
+        rain_source_timestamp = rain_times.max() if not rain_times.empty else None
+
+    rain_status: dict[str, object] = {}
+    for field in ("rain_60m", "rain_120m", "rainfall_60m", "rainfall_120m"):
+        value = kwargs.get(field, 0.0)
+        if rain_data_ok and rain_source_timestamp is not None:
+            rain_status[field] = InputStatus.from_value(
+                value,
+                source_timestamp=rain_source_timestamp,
+                decision_timestamp=now_dt,
+                source_name="i-lens_rain_obs",
+                stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+                observation_method="derived_window",
+            ).to_dict()
+        else:
+            rain_status[field] = InputStatus.fallback(
+                0.0 if value is None else value,
+                fallback_method="model_compat_zero",
+                decision_timestamp=now_dt,
+                source_name="i-lens_rain_obs",
+                quality_flags=["source_error"] if rain_source_error else None,
+                raw_status="source_error" if rain_source_error else "synthetic_fallback",
+                observation_method="source_error" if rain_source_error else "unavailable",
+            ).to_dict()
+    if rain_source_timestamp is not None:
+        rain_status["rainfall_data_age_minutes"] = InputStatus.from_value(
+            kwargs.get("rainfall_data_age_minutes"),
+            source_timestamp=rain_source_timestamp,
+            decision_timestamp=now_dt,
+            source_name="i-lens_rain_obs",
+            stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+            observation_method="source_age",
+        ).to_dict()
+    else:
+        rain_status["rainfall_data_age_minutes"] = InputStatus.fallback(
+            kwargs.get("rainfall_data_age_minutes"),
+            fallback_method="unavailable",
+            decision_timestamp=now_dt,
+            source_name="i-lens_rain_obs",
+            quality_flags=["source_error"] if rain_source_error else None,
+            raw_status="source_error" if rain_source_error else "unavailable",
+            observation_method="source_error" if rain_source_error else "unavailable",
+        ).to_dict()
+    kwargs["_input_status"] = jsonable(rain_status)
     return kwargs
 
 
@@ -684,12 +853,16 @@ HKO_PRESSURE_CSV_URL = "https://www.hko.gov.hk/wxinfo/awsgis/hko_pre.csv"
 
 _pressure_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_MEDIUM)
 _last_pressure_kwargs: dict | None = None
+_last_pressure_status: dict | None = None
+_pressure_source_error: str | None = None
 
 
 @cached(_pressure_cache)
 def fetch_pressure_live() -> pd.DataFrame:
     """Fetch 1-min pressure CSV from HKO, return DataFrame with datetime, pressure."""
+    global _pressure_source_error
     try:
+        _pressure_source_error = None
         r = requests.get(HKO_PRESSURE_CSV_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         r.raise_for_status()
         df = pd.read_csv(io.StringIO(r.text))
@@ -698,19 +871,65 @@ def fetch_pressure_live() -> pd.DataFrame:
         df = df.rename(columns={"Pressure": "pressure"})
         return df
     except Exception as e:
+        _pressure_source_error = str(e)
         logger.warning("fetch_pressure_live failed: %s", e)
         return pd.DataFrame()
 
 
-def compute_pressure_kwargs() -> dict:
-    """Compute pressure_current, pressure_30m_ago, pressure_change_60m/180m from live CSV."""
-    global _last_pressure_kwargs
-    df = fetch_pressure_live()
+def compute_pressure_kwargs(
+    decision_timestamp: datetime | pd.Timestamp | None = None,
+) -> dict:
+    """Compute pressure features and attach truthful source status."""
+    global _last_pressure_kwargs, _last_pressure_status, _pressure_source_error
+    decision = decision_timestamp or hkt_now()
+
+    def _pressure_fallback(
+        value: object,
+        method: str,
+        source_timestamp: object = None,
+    ) -> dict:
+        return InputStatus.fallback(
+            value,
+            source_timestamp=source_timestamp,
+            fallback_method=method,
+            decision_timestamp=decision,
+            source_name="hko_pressure",
+            quality_flags=["source_error"] if _pressure_source_error else None,
+            raw_status="source_error" if _pressure_source_error else None,
+            observation_method="source_error" if _pressure_source_error else method,
+        ).to_dict()
+
+    try:
+        df = fetch_pressure_live()
+    except Exception as error:
+        _pressure_source_error = str(error)
+        logger.warning("compute_pressure_kwargs source error: %s", error)
+        df = pd.DataFrame()
     if df.empty:
         if _last_pressure_kwargs is not None:
-            return _last_pressure_kwargs
-        return {"pressure_current": None, "pressure_30m_ago": None,
-                "pressure_change_60m": 0.0, "pressure_change_180m": 0.0}
+            result = dict(_last_pressure_kwargs)
+            result["_input_status"] = {
+                key: _pressure_fallback(
+                    value,
+                    "cached_api_result",
+                    (_last_pressure_status or {}).get(key, {}).get("source_timestamp"),
+                )
+                for key, value in _last_pressure_kwargs.items()
+                if key in {"pressure_current", "pressure_30m_ago", "pressure_change_60m", "pressure_change_180m"}
+            }
+            return result
+        return {
+            "pressure_current": None,
+            "pressure_30m_ago": None,
+            "pressure_change_60m": 0.0,
+            "pressure_change_180m": 0.0,
+            "_input_status": {
+                "pressure_current": _pressure_fallback(1010.0, "climatological_default"),
+                "pressure_30m_ago": _pressure_fallback(1010.0, "climatological_default"),
+                "pressure_change_60m": _pressure_fallback(0.0, "model_compat_zero"),
+                "pressure_change_180m": _pressure_fallback(0.0, "model_compat_zero"),
+            },
+        }
     now = hkt_now()
     latest = float(df["pressure"].iloc[-1])
     t_30 = now - timedelta(minutes=30)
@@ -728,7 +947,28 @@ def compute_pressure_kwargs() -> dict:
         "pressure_change_60m": latest - p_60,
         "pressure_change_180m": latest - p_180,
     }
+    source_times = pd.to_datetime(df["datetime"], errors="coerce").dropna()
+    latest_source = source_times.max() if not source_times.empty else None
+    source_30 = pd.to_datetime(df.loc[idx_30, "datetime"], errors="coerce")
+
+    def _pressure_status(value: object, source: object = latest_source, method: str = "direct_observation") -> dict:
+        return InputStatus.from_value(
+            value,
+            source_timestamp=source,
+            decision_timestamp=decision,
+            source_name="hko_pressure",
+            stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+            observation_method=method,
+        ).to_dict()
+
+    result["_input_status"] = {
+        "pressure_current": _pressure_status(latest, latest_source),
+        "pressure_30m_ago": _pressure_status(p_30, source_30),
+        "pressure_change_60m": _pressure_status(latest - p_60, method="derived_change"),
+        "pressure_change_180m": _pressure_status(latest - p_180, method="derived_change"),
+    }
     _last_pressure_kwargs = result
+    _last_pressure_status = result["_input_status"]
     return result
 
 
@@ -825,12 +1065,16 @@ def _parse_wind_from_html(html: str) -> pd.DataFrame:
 
 _wind_cache = TTLCache(maxsize=1, ttl=CACHE_TTL_MEDIUM)
 _last_wind_kwargs: dict | None = None
+_last_wind_status: dict | None = None
+_wind_source_error: str | None = None
 
 
 @cached(_wind_cache)
 def fetch_wind_live() -> pd.DataFrame:
     """Fetch live wind data from i-Lens DG_WIND, return DataFrame with all stations."""
+    global _wind_source_error
     try:
+        _wind_source_error = None
         r = requests.get(WIND_INSTANT_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
         r.raise_for_status()
         df = _parse_wind_from_html(r.text)
@@ -839,35 +1083,142 @@ def fetch_wind_live() -> pd.DataFrame:
         df["group"] = df["station_type"]
         return df
     except Exception as e:
+        _wind_source_error = str(e)
         logger.warning("fetch_wind_live failed: %s", e)
         return pd.DataFrame()
 
 
-def compute_wind_kwargs() -> dict:
-    """Compute wind features from live i-Lens data."""
-    global _last_wind_kwargs
-    df = fetch_wind_live()
+def compute_wind_kwargs(
+    decision_timestamp: datetime | pd.Timestamp | None = None,
+) -> dict:
+    """Compute wind features and expose per-group source status.
+
+    Numeric keys intentionally retain the legacy values.  Status metadata is
+    stored under ``_input_status`` and is never passed to LightGBM.
+    """
+    global _last_wind_kwargs, _last_wind_status, _wind_source_error
+    decision = decision_timestamp or hkt_now()
+
+    def _fallback_status(value: object, method: str, source_timestamp: object = None) -> dict:
+        return InputStatus.fallback(
+            value,
+            fallback_method=method,
+            source_timestamp=source_timestamp,
+            decision_timestamp=decision,
+            source_name="i-lens_wind_obs",
+            quality_flags=["source_error"] if _wind_source_error else None,
+            raw_status=(
+                "source_error"
+                if _wind_source_error
+                else "cached_fallback" if method == "cached_api_result" else "synthetic_fallback"
+            ),
+            observation_method="source_error" if _wind_source_error else method,
+        ).to_dict()
+
+    def _status_for(value: object, source_timestamp: object, method: str = "direct_observation") -> dict:
+        return InputStatus.from_value(
+            value,
+            source_timestamp=source_timestamp,
+            decision_timestamp=decision,
+            source_name="i-lens_wind_obs",
+            stale_after_minutes=DEFAULT_STALE_AFTER_MINUTES,
+            observation_method=method,
+        ).to_dict()
+
+    def _v1_compatibility_status() -> dict[str, dict]:
+        # The legacy v1 highland semantics are not reconstructed from the
+        # v2 source.  Keep this diagnostic explicit instead of translating
+        # offshore_highland values into v1 fields.
+        return {
+            name: InputStatus.fallback(
+                0.0,
+                fallback_method="model_compat_zero",
+                decision_timestamp=decision,
+                source_name="i-lens_wind_obs",
+                quality_flags=["v1_semantics_unavailable"],
+                raw_status="synthetic_fallback",
+                observation_method="v1_deprecated",
+            ).to_dict()
+            for name in ("wind_highland_mean", "wind_highland_max")
+        }
+
+    numeric_fields = [
+        "wind_ref_mean", "wind_ref_max",
+        "wind_victoria_harbour_mean", "wind_victoria_harbour_max",
+        "wind_offshore_highland_mean", "wind_offshore_highland_max",
+        "wind_all_change_60m", "wind_kings_park_current",
+    ]
+
+    try:
+        df = fetch_wind_live()
+    except Exception as error:
+        _wind_source_error = str(error)
+        logger.warning("compute_wind_kwargs source error: %s", error)
+        df = pd.DataFrame()
     if df.empty:
         if _last_wind_kwargs is not None:
-            return _last_wind_kwargs
-        return {
+            result = {key: value for key, value in _last_wind_kwargs.items() if not key.startswith("_")}
+            cached_status = _last_wind_status or {}
+            field_status = {
+                key: _fallback_status(
+                    result.get(key, 0.0),
+                    "cached_api_result",
+                    cached_status.get(key, {}).get("source_timestamp"),
+                )
+                for key in numeric_fields
+            }
+            field_status["groups"] = _wind_status_groups(field_status)
+            field_status.update(_v1_compatibility_status())
+            result["_input_status"] = field_status
+            result["_decision_timestamp"] = decision
+            return result
+        result = {
             "wind_ref_mean": 0.0, "wind_ref_max": 0.0,
             "wind_victoria_harbour_mean": 0.0, "wind_victoria_harbour_max": 0.0,
             "wind_offshore_highland_mean": 0.0, "wind_offshore_highland_max": 0.0,
             "wind_all_change_60m": 0.0, "wind_kings_park_current": 0.0,
         }
+        field_status = {key: _fallback_status(0.0, "model_compat_zero") for key in numeric_fields}
+        field_status["groups"] = _wind_status_groups(field_status)
+        field_status.update(_v1_compatibility_status())
+        result["_input_status"] = field_status
+        result["_decision_timestamp"] = decision
+        return result
+
     result = {}
+    field_status: dict[str, object] = {}
+
+    def _latest_group_timestamp(subset: pd.DataFrame) -> pd.Timestamp | None:
+        if subset.empty:
+            return None
+        source_column = "timestamp" if "timestamp" in subset.columns else "available_time"
+        if source_column not in subset.columns:
+            return None
+        valid = subset.loc[~subset["wind_speed"].isna()] if "wind_speed" in subset.columns else subset
+        timestamps = pd.to_datetime(valid[source_column], errors="coerce").dropna()
+        return timestamps.max() if not timestamps.empty else None
+
     for grp in _WIND_GROUP_GROUPS:
         sub = df[df["group"] == grp]
         if not sub.empty:
             result[f"wind_{grp}_mean"] = float(sub.groupby("timestamp")["wind_speed"].mean().mean())
             result[f"wind_{grp}_max"] = float(sub.groupby("timestamp")["wind_speed"].max().max())
+            source_timestamp = _latest_group_timestamp(sub)
+            field_status[f"wind_{grp}_mean"] = _status_for(result[f"wind_{grp}_mean"], source_timestamp)
+            field_status[f"wind_{grp}_max"] = _status_for(result[f"wind_{grp}_max"], source_timestamp)
         else:
             result[f"wind_{grp}_mean"] = 0.0
             result[f"wind_{grp}_max"] = 0.0
+            field_status[f"wind_{grp}_mean"] = _fallback_status(0.0, "model_compat_zero")
+            field_status[f"wind_{grp}_max"] = _fallback_status(0.0, "model_compat_zero")
     # Kings Park
     kp = df[df["station"] == "京士柏"]
     result["wind_kings_park_current"] = float(kp["wind_speed"].iloc[-1]) if not kp.empty else 0.0
+    field_status["wind_kings_park_current"] = (
+        _status_for(result["wind_kings_park_current"], _latest_group_timestamp(kp))
+        if not kp.empty
+        else _fallback_status(0.0, "model_compat_zero")
+    )
     # All stations — compute 60m change
     all_ts = df.groupby("timestamp")["wind_speed"].mean().reset_index()
     all_ts = all_ts.sort_values("timestamp")
@@ -877,8 +1228,39 @@ def compute_wind_kwargs() -> dict:
     past = all_ts[all_ts["timestamp"] <= t_60]
     past_mean = past["wind_speed"].iloc[-1] if not past.empty else now_mean
     result["wind_all_change_60m"] = float(now_mean - past_mean)
+    aggregate_source = pd.to_datetime(all_ts["timestamp"], errors="coerce").dropna()
+    field_status["wind_all_change_60m"] = _status_for(
+        result["wind_all_change_60m"],
+        aggregate_source.max() if not aggregate_source.empty else None,
+        method="derived_change",
+    )
+    field_status["groups"] = _wind_status_groups(field_status)
+    field_status.update(_v1_compatibility_status())
+    result["_input_status"] = field_status
+    result["_decision_timestamp"] = decision
     _last_wind_kwargs = result
+    _last_wind_status = field_status
     return result
+
+
+def _wind_status_groups(field_status: dict[str, object]) -> dict[str, object]:
+    """Return stable group names while retaining flat per-feature statuses."""
+    return {
+        "reference": {
+            "mean": field_status.get("wind_ref_mean"),
+            "max": field_status.get("wind_ref_max"),
+        },
+        "victoria_harbour": {
+            "mean": field_status.get("wind_victoria_harbour_mean"),
+            "max": field_status.get("wind_victoria_harbour_max"),
+        },
+        "offshore_highland": {
+            "mean": field_status.get("wind_offshore_highland_mean"),
+            "max": field_status.get("wind_offshore_highland_max"),
+        },
+        "kings_park": {"current": field_status.get("wind_kings_park_current")},
+        "aggregate_change": {"change_60m": field_status.get("wind_all_change_60m")},
+    }
 
 
 @cached(_ilens_forecast_cache, key=lambda target_date_str, **kw: (target_date_str,))

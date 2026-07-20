@@ -10,7 +10,8 @@ def compute_multi_kelly_bets(
     prices_dict: dict, 
     capital: float, 
     max_per_bucket: float = 0.15, 
-    total_max: float = 0.50
+    total_max: float = 0.50,
+    executable_sides: dict | None = None,
 ) -> dict:
     """
     基於互斥事件 (Mutually Exclusive) 的嚴格 Kelly 求解器。
@@ -23,18 +24,25 @@ def compute_multi_kelly_bets(
     
     for label in all_labels:
         p_yes = probs_dict[label]
-        price_yes = np.clip(prices_dict.get(label, 0.5), 0.01, 0.99)
-        
+        raw_price = prices_dict.get(label)
+        if raw_price is None:
+            # A missing CLOB quote is not a 50/50 placeholder.  The caller may
+            # still optimize other buckets, but this bucket is not eligible.
+            continue
+        price_yes = np.clip(raw_price, 0.01, 0.99)
+
+        side_availability = (executable_sides or {}).get(label, {})
+
         edge_yes = p_yes - price_yes
         edge_no = price_yes - p_yes 
         
         # 將正 Edge 的選項加入候選 (同一個桶 YES 和 NO 互斥，只會加入一個)
-        if edge_yes > 0:
+        if edge_yes > 0 and side_availability.get("YES", True):
             candidates.append({
                 'type': 'YES', 'label': label,
                 'prob': p_yes, 'price': price_yes, 'edge': edge_yes
             })
-        elif edge_no > 0:
+        elif edge_no > 0 and side_availability.get("NO", True):
             candidates.append({
                 'type': 'NO', 'label': label,
                 'prob': 1.0 - p_yes, 'price': 1.0 - price_yes, 'edge': edge_no

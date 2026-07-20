@@ -1,0 +1,67 @@
+# Layer A local／Hugging Face Dataset workflow
+
+## Canonical flow
+
+`app/services/canonical_cycle.py` 是唯一 upstream cycle builder。背景 scheduler 與 manual strategy runner 都透過 deterministic five-minute cycle key 取得同一個 `CanonicalCycle`；第二個 account 或第二個 entry point 只讀 process-local frozen payload。
+
+builder 的順序是：
+
+```text
+weather／forecast／wind
+→ all model outputs
+→ market metadata
+→ one YES／NO DepthCache bundle
+→ CLOB snapshot validation
+→ freeze cycle object
+→ Layer A capture once
+→ account context adapters
+```
+
+Layer A storage 失敗會記錄 error，但不會阻止既有 paper strategy cycle；下一次 startup／health 可見 incomplete 或 pending state。
+
+## Local partitions
+
+```text
+data/layer_a/
+  date=YYYY-MM-DD/
+    hour=HH/
+      cycles-<uuid>.parquet
+      books-<uuid>.jsonl.zst
+      manifest-<uuid>.json
+```
+
+每個 closed partition 目前包含一個 canonical cycle，避免 open partition rewrite。Parquet 與 JSONL 先寫 sibling `.tmp`，manifest 最後以 atomic rename close。manifest 包含 schema version、first／last timestamp、cycle count、cycle ID、檔案大小與 SHA-256。manifest 自身的 hash 由 export bundle 的 `checksums.sha256` 計算，避免 self-hash circularity。
+
+若 process 在 close 中斷，startup scan 會列出 `.tmp` 或缺檔 partition；不會自動刪除、覆寫或假裝 complete。
+
+`zstandard` 是 production dependency。minimal local environment 若沒有此 package，manifest 會明確標記 `books_compression=plain_fallback`；HF Space deployment 應使用 real zstd。
+
+## Export
+
+```powershell
+python scripts/export_layer_a.py --date 2026-07-20 --verify-checksums
+python scripts/export_layer_a.py --start 2026-07-20 --end 2026-07-20 --only-unuploaded --output .\layer_a.zip
+```
+
+archive 內容包括 selected closed Layer A files、partition manifests、`docs/layer_a_schema.md`、`export_manifest.json`、`checksums.sha256`、unuploaded partition list 與 incomplete partition list。Export 只讀 local state，不修改 partition。
+
+Space endpoint 是 `GET /admin/export-layer-a`，使用 `LAYER_A_ADMIN_TOKEN` 的 `X-Layer-A-Admin-Token` 或 Bearer token；未設定 token 時 endpoint disabled。endpoint 沒有任意 path 參數，也不會回傳 secrets。
+
+## Optional Dataset upload
+
+```text
+HF_LAYER_A_REPO_ID=<private-dataset-repo>
+HF_LAYER_A_TOKEN=<secret>
+HF_LAYER_A_AUTO_UPLOAD=false
+HF_LAYER_A_UPLOAD_INTERVAL_MINUTES=30
+```
+
+upload client 固定使用 `repo_type="dataset"`，remote path 為 `layer_a/date=.../hour=.../<file>`。只上傳 closed immutable partition；每個 file upload 後以 Hub API（若 client 支援）verify remote existence，全部成功才寫 `.upload_receipts/<partition-id>.json`。已存在的 remote file 會跳過，不覆寫。
+
+failed upload 會寫 `.upload_failures/`，bounded exponential backoff 不會使 local capture 失敗。token 不會寫入 log、receipt 或 health output。HF Dataset repo 與 Space code repo 是不同 repository，因此 Dataset upload 不觸發 Space code rebuild。
+
+## Startup and ephemeral Space storage
+
+API lifespan startup 會 scan complete／incomplete／uploaded partitions，並在 auto-upload 開啟時 retry pending closed partitions。`/api/health` 與 protected `/admin/layer-a-health` 顯示 last cycle、today count、CLOB replay eligibility、pending partitions、last remote upload、upload failures、disk usage、oldest unuploaded partition。
+
+HF Space local filesystem 是 ephemeral。只有已 upload 到 private Dataset repo 或 operator 手動下載的 export archive 能跨 restart、stop 或 rebuild 存活。

@@ -120,6 +120,10 @@ data/paper_trader_test/
 data/pa_test_v2/
 data/paper_adapter_test/
 
+# Layer A runtime capture is ephemeral Space state; export/upload it separately.
+data/layer_a/
+data/layer_a_exports/
+
 # === Generated parquet files (not needed at runtime) ===
 data/forward_test_log.parquet
 data/hko_historical_forecasts.parquet

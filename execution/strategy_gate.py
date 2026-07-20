@@ -757,7 +757,13 @@ def evaluate_refined_entry(bucket: str, model_prob: float, market_price: float, 
     # 5. Slippage-adjusted edge positive
     if adjusted_bet:
         slippage_pct = adjusted_bet.get('slippage_pct', 0)
-        edge_after = (model_prob - market_price) - (slippage_pct / 100)
+        if adjusted_bet.get('execution_price_is_all_in'):
+            # The CLOB path passes the size-specific all-in token price as
+            # market_price.  Subtracting depth slippage again would double
+            # charge the edge; depth_slippage_pct remains a diagnostic.
+            edge_after = model_prob - market_price
+        else:
+            edge_after = (model_prob - market_price) - (slippage_pct / 100)
         if edge_after <= 0:
             return {'passes': False, 'reason': 'SLIPPAGE_EATS_EDGE', 'detail': f'edge_after={edge_after:.4f}'}
 

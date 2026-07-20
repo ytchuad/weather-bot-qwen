@@ -6,11 +6,12 @@ checks on Model 2A canonical sources.
 """
 
 import pandas as pd
-import numpy as np
 import logging
 from pathlib import Path
+from typing import Optional
 
 from monitoring.data_quality_checks_base import run_data_quality_checks
+from inference.model_2a_adapters import get_model_2a_adapter
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,9 @@ def run_model_2a_data_quality_checks(
     weather_canonical: pd.DataFrame,
     wind_canonical: pd.DataFrame,
     forecast_canonical: pd.DataFrame,
-    model_spec_path: str = "config/model_2a_feature_spec.yaml",
+    model_spec_path: Optional[str] = None,
     output_path: str = "reports",
+    model_version: Optional[str] = None,
 ) -> pd.DataFrame:
     """Run Model 2A specific data quality checks.
 
@@ -37,13 +39,17 @@ def run_model_2a_data_quality_checks(
         forecast_canonical: Canonical forecast DataFrame.
         model_spec_path: Path to model spec YAML.
         output_path: Directory for output reports.
+        model_version: Explicitly selected ``v1`` or ``v2``.
 
     Returns:
         DataFrame with data quality check results.
     """
-    import yaml
-    with open(model_spec_path, "r") as f:
-        spec = yaml.safe_load(f)
+    adapter = get_model_2a_adapter(
+        model_version=model_version,
+        model_spec_path=model_spec_path,
+    )
+    lineage = adapter.validate_lineage()
+    spec = adapter.load_spec()
 
     canonical_sources = {}
     if weather_canonical is not None:
@@ -60,12 +66,19 @@ def run_model_2a_data_quality_checks(
         canonical_sources=canonical_sources,
         spec=spec,
         output_path=str(output_dir),
-        model_name="model_2a",
+        model_name=f"model_2a_{adapter.model_version}",
+        run_metadata={
+            "model_version": adapter.model_version,
+            "feature_version": adapter.feature_version,
+            "spec_path": lineage["spec_path"],
+            "artifact_directory": lineage["artifact_directory"],
+            "artifact_identity": lineage["artifact_identity"],
+        },
     )
 
     _run_model_2a_specific_checks(
         weather_canonical, wind_canonical, forecast_canonical,
-        spec, output_dir,
+        spec, output_dir, adapter.model_version, lineage,
     )
 
     return checks
@@ -77,9 +90,10 @@ def _run_model_2a_specific_checks(
     forecast: pd.DataFrame,
     spec: dict,
     output_dir: Path,
+    model_version: str,
+    lineage: dict,
 ) -> list:
     """Run Model 2A specific quality checks beyond the generic ones."""
-    import csv
     specific_checks = []
     temp_cleaning = spec.get("temperature_cleaning", {})
     valid_min = temp_cleaning.get("valid_min_temp", 0)
@@ -108,16 +122,22 @@ def _run_model_2a_specific_checks(
     if wind is not None and "station_group" in wind.columns:
         coverage = wind["station_group"].value_counts().to_dict()
         ref_present = "ref" in coverage or "urban" in coverage
-        offshore_highland_present = "offshore_highland" in coverage
+        expected_wind_group = (
+            "offshore_highland" if model_version == "v2" else "highland"
+        )
+        expected_wind_group_present = expected_wind_group in coverage
         missing_groups = []
         if not ref_present:
             missing_groups.append("ref/urban")
-        if not offshore_highland_present:
-            missing_groups.append("offshore_highland")
+        if not expected_wind_group_present:
+            missing_groups.append(expected_wind_group)
         specific_checks.append({
             "check": "wind_station_coverage",
             "status": "pass" if not missing_groups else "warn",
-            "detail": f"Station groups: {coverage}, missing: {missing_groups if missing_groups else 'none'}",
+            "detail": (
+                f"Model {model_version} station groups: {coverage}, "
+                f"missing: {missing_groups if missing_groups else 'none'}"
+            ),
         })
 
     # Forecast max >= min check
@@ -145,7 +165,11 @@ def _run_model_2a_specific_checks(
 
     specific_df = pd.DataFrame(specific_checks)
     if len(specific_df) > 0:
-        specific_path = output_dir / "model_2a_specific_dq_checks.csv"
+        specific_df.insert(0, "model_version", model_version)
+        specific_df.insert(1, "spec_path", lineage["spec_path"])
+        specific_df.insert(2, "artifact_directory", lineage["artifact_directory"])
+        specific_df.insert(3, "artifact_identity", lineage["artifact_identity"])
+        specific_path = output_dir / f"model_2a_{model_version}_specific_dq_checks.csv"
         specific_df.to_csv(specific_path, index=False)
 
     return specific_checks

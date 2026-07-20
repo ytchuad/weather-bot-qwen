@@ -9,7 +9,6 @@ Converts raw historical/live data into canonical schemas for:
 
 import pandas as pd
 import numpy as np
-from typing import Optional
 
 STATION_GROUP_MAP = {
     "參考": "ref",
@@ -25,6 +24,31 @@ SPECIAL_STATIONS = {
 }
 
 HKT = "Asia/Hong_Kong"
+
+
+def _quality_flag_mask(values, index: pd.Index) -> pd.Series:
+    """Return a null-safe boolean quality-flag mask aligned to ``index``."""
+    if values is None:
+        return pd.Series(False, index=index, dtype=bool)
+
+    if isinstance(values, pd.Series):
+        values = values.reindex(index)
+    else:
+        values = pd.Series(values, index=index)
+
+    if pd.api.types.is_bool_dtype(values):
+        return values.fillna(False).astype(bool)
+
+    # Quality flags are booleans in the canonical contract.  Numeric values
+    # are accepted for already-encoded inputs; non-numeric anomalies are
+    # treated as false rather than raising during source standardization.
+    numeric = pd.to_numeric(values, errors="coerce")
+    return numeric.fillna(0).ne(0)
+
+
+def _quality_flag_bit(values, index: pd.Index, bit: int) -> pd.Series:
+    """Encode one quality flag without relying on pandas Series bit shifts."""
+    return _quality_flag_mask(values, index).astype("int64") * (1 << bit)
 
 
 def standardize_weather_obs(
@@ -62,12 +86,17 @@ def standardize_weather_obs(
 
     temp_col = "temp_current"
     if temp_col in result.columns:
-        result["temp_current_raw"] = result[temp_col].astype(float)
+        result["temp_current_raw"] = pd.to_numeric(
+            result[temp_col], errors="coerce"
+        )
         result["temp_current_clean"] = result["temp_current_raw"].where(
             result["temp_current_raw"].between(valid_temp_min, valid_temp_max)
         )
+        anomaly_mask = _quality_flag_mask(
+            result.get("temp_anomaly_flag"), result.index
+        )
         result["temp_current_clean"] = result["temp_current_clean"].where(
-            ~result.get("temp_anomaly_flag", pd.Series([False] * len(result))), np.nan
+            ~anomaly_mask, np.nan
         )
     else:
         result["temp_current_raw"] = np.nan
@@ -83,10 +112,10 @@ def standardize_weather_obs(
         result["wind_missing_flag"] = True
 
     result["data_quality_flags"] = (
-        result["temp_anomaly_flag"].astype(int)
-        | (result["temp_spike_flag"].astype(int) << 1)
-        | (result["wind_missing_flag"].astype(int) << 2)
-    )
+        _quality_flag_bit(result.get("temp_anomaly_flag"), result.index, 0)
+        + _quality_flag_bit(result.get("temp_spike_flag"), result.index, 1)
+        + _quality_flag_bit(result.get("wind_missing_flag"), result.index, 2)
+    ).astype("int64")
 
     canonical_cols = [
         "source_system", "source_mode", "available_time", "timestamp",
@@ -150,7 +179,8 @@ def standardize_wind_obs(
         vic_harbour_mask = result["station_id"].isin(VICTORIA_HARBOUR_STATIONS)
         result.loc[vic_harbour_mask, "station_group"] = "victoria_harbour"
         default_mask = result["station_group"].isna() & (
-            result["station_type"].str.lower() == "victoria harbour"
+            result["station_type"].astype("string").str.lower()
+            == "victoria harbour"
         )
         result.loc[default_mask, "station_group"] = "victoria_harbour"
     else:
@@ -169,9 +199,9 @@ def standardize_wind_obs(
         result["wind_anomaly_flag"] = False
 
     result["data_quality_flags"] = (
-        result["wind_missing_flag"].astype(int)
-        | (result["wind_anomaly_flag"].astype(int) << 1)
-    )
+        _quality_flag_bit(result.get("wind_missing_flag"), result.index, 0)
+        + _quality_flag_bit(result.get("wind_anomaly_flag"), result.index, 1)
+    ).astype("int64")
 
     canonical_cols = [
         "source_system", "source_mode", "available_time", "timestamp",
@@ -235,6 +265,9 @@ def standardize_forecast(
     if "forecast_issue_datetime" not in result.columns:
         result["forecast_issue_datetime"] = result["available_time"]
 
+    if "forecast_source" not in result.columns:
+        result["forecast_source"] = result["source_system"]
+
     if "forecast_missing_flag" not in result.columns:
         result["forecast_missing_flag"] = (
             result["forecast_max_temp"].isna() | result["forecast_min_temp"].isna()
@@ -251,7 +284,8 @@ def standardize_forecast(
     canonical_cols = [
         "source_system", "source_mode", "available_time", "timestamp",
         "forecast_issue_datetime", "forecast_max_temp",
-        "forecast_min_temp", "forecast_missing_flag",
+        "forecast_min_temp", "target_date", "forecast_source",
+        "forecast_missing_flag",
         "forecast_lead_days", "data_quality_flags",
     ]
     for col in canonical_cols:

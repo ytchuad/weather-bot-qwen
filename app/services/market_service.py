@@ -302,6 +302,23 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
         if clob_ids and len(clob_ids) >= 2:
             extras["token_id"] = clob_ids[0]
             extras["no_token_id"] = clob_ids[1]
+        outcomes = m.get("outcomes", [])
+        if isinstance(outcomes, str):
+            try:
+                outcomes = json.loads(outcomes)
+            except (TypeError, json.JSONDecodeError):
+                outcomes = []
+        if isinstance(outcomes, list):
+            extras["outcomes"] = outcomes
+        for k in ("id", "slug", "orderPriceMinTickSize", "orderMinSize", "minimumOrderSize"):
+            v = m.get(k)
+            if v is not None:
+                extras[k] = v
+        # This identifies the normalized market-identity contract used by
+        # canonical Layer A capture; it is not a strategy or pricing field.
+        extras["market_schema_version"] = str(
+            m.get("market_schema_version") or m.get("schemaVersion") or "gamma_market.v1"
+        )
         for k in ("conditionId", "bestAsk", "spread", "lastTradePrice",
                   "liquidityClob", "volume24hrClob"):
             v = m.get(k)

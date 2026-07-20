@@ -265,6 +265,60 @@ def _result(status, account_id, strategy, error=None, **extra):
     return d
 
 
+def _execute_target_positions_for_mode(
+    *,
+    target_positions,
+    portfolio_id,
+    slug,
+    strategy_key,
+    prices_dict,
+    context,
+    strategy_config,
+    model_key,
+    paper_execution_mode,
+    partial_fill_policy,
+):
+    """Route fills explicitly; there is no silent CLOB-to-Gamma fallback."""
+    strategy_context = {
+        "strategy_key": strategy_key,
+        "strategy_version": strategy_config.get("label", ""),
+        "scheduler_source": context.get("scheduler_source", "manual"),
+        "selected_model": model_key,
+        "paper_execution_mode": paper_execution_mode,
+        "partial_fill_policy": partial_fill_policy,
+        "clob_execution_by_bucket": context.get("execution_diagnostics", {}),
+    }
+    if paper_execution_mode == "clob_depth":
+        from execution.clob_paper_adapter import get_clob_depth_adapter
+        adapter = get_clob_depth_adapter()
+        fills = adapter.execute_target_positions(
+            target_positions,
+            portfolio_id,
+            slug,
+            strategy_key,
+            prices_dict,
+            strategy_context,
+            markets=context.get("markets", []),
+            execution_snapshots=context.get("execution_snapshots") or {},
+            partial_fill_policy=partial_fill_policy,
+        )
+        adapter.last_summary["mark_to_market"] = adapter.mark_positions(
+            context.get("markets", []), context.get("execution_snapshots") or {}
+        )
+        return fills, adapter.last_summary
+
+    from execution.paper_adapter import _get_adapter
+    fills = _get_adapter().execute_target_positions(
+        target_positions,
+        portfolio_id,
+        slug,
+        strategy_key,
+        prices_dict,
+        strategy_context,
+    )
+    return fills, {}
+
+
 def _default_slug(now=None):
     if now is None:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -365,21 +419,28 @@ def run_single_strategy_cycle(strategy_key, strategy_config, portfolio_id=None, 
     model_key = context.get("model_key", strategy_key)
     capital = context.get("capital", 1000.0)
     mock_slippage = context.get("mock_slippage", True)
+    paper_execution_mode = context.get("paper_execution_mode", "legacy_gamma_mock")
+    partial_fill_policy = context.get("partial_fill_policy", "fail_closed")
+    execution_snapshots = context.get("execution_snapshots") or {}
+    gamma_reference_prices = context.get("gamma_reference_prices") or {}
+    execution_snapshot_error = context.get("execution_snapshot_error")
 
     try:
         if entry_point == "run_config_rebalance_cycle":
             target_probs = context.get("target_probs")
             prices_dict = context.get("prices_dict")
             token_ids_dict = context.get("token_ids_dict")
-            if not target_probs or not prices_dict:
+            if not target_probs or (not prices_dict and paper_execution_mode != "clob_depth"):
                 return _result("dependency_missing", strategy_key, model_key,
                                "target_probs and prices_dict required in context")
+            prices_dict = prices_dict or {}
 
             config = load_config_for_strategy(strategy_key)
 
+            legacy_mode = "legacy_gamma_mock" if paper_execution_mode == "clob_depth_shadow" else paper_execution_mode
             summary = fn(
                 slug=slug, model_key=model_key, capital=capital,
-                mock_slippage=mock_slippage,
+                mock_slippage=True if paper_execution_mode == "clob_depth_shadow" else mock_slippage,
                 target_probs=target_probs, prices_dict=prices_dict,
                 token_ids_dict=token_ids_dict,
                 config=config, strategy_key=strategy_key,
@@ -396,26 +457,80 @@ def run_single_strategy_cycle(strategy_key, strategy_config, portfolio_id=None, 
                 probs_old=context.get("probs_old"),
                 probs_new=context.get("probs_new"),
                 post_mean=context.get("post_mean"),
+                execution_snapshots=({} if legacy_mode == "legacy_gamma_mock" else execution_snapshots),
+                paper_execution_mode=legacy_mode,
+                partial_fill_policy=partial_fill_policy,
+                gamma_reference_prices=gamma_reference_prices,
             )
 
+            shadow_records = []
+            if paper_execution_mode == "clob_depth_shadow":
+                clob_summary = fn(
+                    slug=slug, model_key=model_key, capital=capital,
+                    mock_slippage=False,
+                    target_probs=target_probs, prices_dict=prices_dict,
+                    token_ids_dict=token_ids_dict,
+                    config=config, strategy_key=strategy_key,
+                    dt_now=None, current_positions=None,
+                    temp_now=context.get("temp_now"),
+                    max_so_far=context.get("max_so_far"),
+                    rain_regime=context.get("rain_regime"),
+                    model_std=context.get("model_std", 1.0),
+                    recent_price_volatility=context.get("recent_price_volatility", 0.0),
+                    hours_to_settlement=context.get("hours_to_settlement", 24.0),
+                    nowcast_stale=context.get("nowcast_stale", False),
+                    data_missing=context.get("data_missing", False),
+                    drawdown_pct=context.get("drawdown_pct", 0.0),
+                    probs_old=context.get("probs_old"),
+                    probs_new=context.get("probs_new"),
+                    post_mean=context.get("post_mean"),
+                    execution_snapshots=execution_snapshots,
+                    paper_execution_mode="clob_depth",
+                    partial_fill_policy=partial_fill_policy,
+                    gamma_reference_prices=gamma_reference_prices,
+                )
+                from execution.shadow_logger import build_shadow_records, write_shadow_records
+                shadow_records = build_shadow_records(
+                    strategy=strategy_key,
+                    model=model_key,
+                    target_probs=target_probs,
+                    gamma_reference_prices=gamma_reference_prices or {},
+                    legacy_summary=summary,
+                    clob_summary=clob_summary,
+                    execution_snapshots=execution_snapshots,
+                    snapshot_error=execution_snapshot_error,
+                )
+                write_shadow_records(shadow_records)
+                summary["shadow_comparison_count"] = len(shadow_records)
+
             target_positions = summary.get("target_positions", {})
+            execution_result = {}
             if target_positions:
-                from execution.paper_adapter import _get_adapter
-                strategy_context = {
-                    "strategy_key": strategy_key,
-                    "strategy_version": strategy_config.get("label", ""),
-                    "scheduler_source": context.get("scheduler_source", "manual"),
-                    "selected_model": model_key,
-                }
-                _get_adapter().execute_target_positions(
-                    target_positions, pid, slug, strategy_key, prices_dict, strategy_context
+                fills, execution_result = _execute_target_positions_for_mode(
+                    target_positions=target_positions,
+                    portfolio_id=pid,
+                    slug=slug,
+                    strategy_key=strategy_key,
+                    prices_dict=prices_dict,
+                    context=context,
+                    strategy_config=strategy_config,
+                    model_key=model_key,
+                    paper_execution_mode=(
+                        "legacy_gamma_mock"
+                        if paper_execution_mode == "clob_depth_shadow"
+                        else paper_execution_mode
+                    ),
+                    partial_fill_policy=partial_fill_policy,
                 )
 
             return _result("completed", strategy_key, model_key,
                            f"{len(target_positions)} buckets updated",
                            decisions=summary.get("decisions", []),
                            time_slot=summary.get("time_slot", ""),
-                           rebalance_triggers=summary.get("rebalance_triggers", []))
+                           rebalance_triggers=summary.get("rebalance_triggers", []),
+                           fills=fills if target_positions else [],
+                           execution_summary=execution_result,
+                           shadow_comparison_count=summary.get("shadow_comparison_count", 0))
 
         if entry_point == "run_rebalance_cycle":
             rain_regime = context.get("rain_regime")
@@ -432,13 +547,15 @@ def run_single_strategy_cycle(strategy_key, strategy_config, portfolio_id=None, 
             target_probs = context.get("target_probs")
             prices_dict = context.get("prices_dict")
             token_ids_dict = context.get("token_ids_dict")
-            if not target_probs or not prices_dict:
+            if not target_probs or (not prices_dict and paper_execution_mode != "clob_depth"):
                 return _result("dependency_missing", strategy_key, model_key,
                                "target_probs and prices_dict required in context")
+            prices_dict = prices_dict or {}
 
+            legacy_mode = "legacy_gamma_mock" if paper_execution_mode == "clob_depth_shadow" else paper_execution_mode
             summary = fn(
                 slug=slug, model_key=model_key, capital=capital,
-                mock_slippage=mock_slippage,
+                mock_slippage=True if paper_execution_mode == "clob_depth_shadow" else mock_slippage,
                 target_probs=target_probs, prices_dict=prices_dict,
                 token_ids_dict=token_ids_dict,
                 dt_now=now, current_positions=None,
@@ -447,28 +564,78 @@ def run_single_strategy_cycle(strategy_key, strategy_config, portfolio_id=None, 
                 rain_regime=context.get("rain_regime"),
                 model_std=context.get("model_std", 1.0),
                 recent_price_volatility=context.get("recent_price_volatility", 0.0),
+                execution_snapshots=({} if legacy_mode == "legacy_gamma_mock" else execution_snapshots),
+                paper_execution_mode=legacy_mode,
+                partial_fill_policy=partial_fill_policy,
+                gamma_reference_prices=gamma_reference_prices,
             )
 
+            if paper_execution_mode == "clob_depth_shadow":
+                clob_summary = fn(
+                    slug=slug, model_key=model_key, capital=capital,
+                    mock_slippage=False,
+                    target_probs=target_probs, prices_dict=prices_dict,
+                    token_ids_dict=token_ids_dict,
+                    dt_now=now, current_positions=None,
+                    temp_now=context.get("temp_now"),
+                    max_so_far=context.get("max_so_far"),
+                    rain_regime=context.get("rain_regime"),
+                    model_std=context.get("model_std", 1.0),
+                    recent_price_volatility=context.get("recent_price_volatility", 0.0),
+                    execution_snapshots=execution_snapshots,
+                    paper_execution_mode="clob_depth",
+                    partial_fill_policy=partial_fill_policy,
+                    gamma_reference_prices=gamma_reference_prices,
+                )
+                from execution.shadow_logger import build_shadow_records, write_shadow_records
+                shadow_records = build_shadow_records(
+                    strategy=strategy_key,
+                    model=model_key,
+                    target_probs=target_probs,
+                    gamma_reference_prices=gamma_reference_prices or {},
+                    legacy_summary=summary,
+                    clob_summary=clob_summary,
+                    execution_snapshots=execution_snapshots,
+                    snapshot_error=execution_snapshot_error,
+                )
+                write_shadow_records(shadow_records)
+                summary["shadow_comparison_count"] = len(shadow_records)
+
             target_positions = summary.get("target_positions", {})
+            execution_result = {}
             if target_positions:
-                from execution.paper_adapter import _get_adapter
-                strategy_context = {
-                    "strategy_key": strategy_key,
-                    "strategy_version": strategy_config.get("label", ""),
-                    "scheduler_source": context.get("scheduler_source", "manual"),
-                    "selected_model": model_key,
-                }
-                _get_adapter().execute_target_positions(
-                    target_positions, pid, slug, strategy_key, prices_dict, strategy_context
+                fills, execution_result = _execute_target_positions_for_mode(
+                    target_positions=target_positions,
+                    portfolio_id=pid,
+                    slug=slug,
+                    strategy_key=strategy_key,
+                    prices_dict=prices_dict,
+                    context=context,
+                    strategy_config=strategy_config,
+                    model_key=model_key,
+                    paper_execution_mode=(
+                        "legacy_gamma_mock"
+                        if paper_execution_mode == "clob_depth_shadow"
+                        else paper_execution_mode
+                    ),
+                    partial_fill_policy=partial_fill_policy,
                 )
 
             return _result("completed", strategy_key, model_key,
                            f"{len(target_positions)} buckets updated",
                            decisions=summary.get("decisions", []),
                            time_slot=summary.get("time_slot", ""),
-                           effective_limit=summary.get("effective_exposure_limit", 0))
+                           effective_limit=summary.get("effective_exposure_limit", 0),
+                           fills=fills if target_positions else [],
+                           execution_summary=execution_result,
+                           shadow_comparison_count=summary.get("shadow_comparison_count", 0))
 
         if entry_point == "generate_orders_from_probs":
+            if paper_execution_mode == "clob_depth":
+                return _result(
+                    "blocked", strategy_key, model_key,
+                    "clob_depth is not implemented for the inactive rebalancer path",
+                )
             target_probs = context.get("target_probs")
             prices_dict = context.get("prices_dict")
             token_ids_dict = context.get("token_ids_dict")

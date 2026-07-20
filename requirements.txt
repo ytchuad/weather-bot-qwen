@@ -13,3 +13,5 @@ polymarket-paper-trader>=0.1.7
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
 cachetools>=5.3.3
+zstandard>=0.22.0
+huggingface_hub>=0.23.0

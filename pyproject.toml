@@ -16,8 +16,10 @@ dependencies = [
     "lightgbm",
     "pyyaml",
     "polymarket-paper-trader>=0.1.7",
+    "zstandard>=0.22.0",
+    "huggingface_hub>=0.23.0",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["app*", "execution*", "models*", "features*", "data*"]
+include = ["app*", "execution*", "models*", "features*", "data*", "layer_a*"]

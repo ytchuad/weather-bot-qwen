@@ -202,6 +202,7 @@ def build_audit_events(reconciliation_result: ReconciliationResult, prices_dict:
     ctx = reconciliation_result.strategy_context or {}
     events = []
     for action in reconciliation_result.actions:
+        fill = (ctx.get('execution_fill_by_bucket') or {}).get(action.bucket, {})
         events.append({
             'timestamp': reconciliation_result.timestamp,
             'run_id': reconciliation_result.run_id,
@@ -229,6 +230,22 @@ def build_audit_events(reconciliation_result: ReconciliationResult, prices_dict:
             'rain_nowcast_age_minutes': ctx.get('rain_nowcast_age_minutes', None),
             'data_quality_flags': ctx.get('data_quality_flags', ''),
             'reason_code': ctx.get('reason_code', ''),
+            'execution_mode': ctx.get('execution_mode', ctx.get('paper_execution_mode', '')),
+            'partial_fill_policy': ctx.get('partial_fill_policy', ''),
+            'execution_status': fill.get('status', ''),
+            'execution_side': fill.get('side', ''),
+            'execution_filled_qty': fill.get('filled_qty', None),
+            'execution_residual_shares': fill.get(
+                'residual_shares', fill.get('residual_unfilled', None)
+            ),
+            'execution_gross_vwap': fill.get('avg_price', None),
+            'execution_all_in_buy_vwap': fill.get('all_in_buy_vwap', None),
+            'execution_net_sell_vwap': fill.get('net_sell_vwap', None),
+            'execution_fee': fill.get('fee', None),
+            'execution_fill_ratio': fill.get('fill_ratio', None),
+            'execution_depth_levels_consumed': fill.get('depth_levels_consumed', None),
+            'execution_is_partial': fill.get('is_partial', None),
+            'execution_fill_detail': json.dumps(fill, ensure_ascii=False, default=str),
         })
     return events
 

@@ -21,10 +21,111 @@ from ..config import (
     CACHE_TTL_MEDIUM,
     HKT_OFFSET,
 )
+from features.input_status import (
+    InputStatus,
+    build_forecast_status_from_values,
+    build_observation_buffer_status,
+    jsonable,
+    make_status_bundle,
+)
 
 logger = logging.getLogger(__name__)
 
 _medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
+
+
+def _model_2a_lineage_metadata() -> dict:
+    """Return lineage metadata without reloading trained model artifacts."""
+    from inference.model_2a_adapters import Model2AV1Adapter, Model2AV2Adapter
+
+    metadata = {}
+    for key, adapter_cls in (("model_2a", Model2AV1Adapter), ("model_2a_v2", Model2AV2Adapter)):
+        adapter = adapter_cls()
+        metadata[key] = {
+            "model_version": adapter.model_version,
+            "feature_version": adapter.feature_version,
+            "artifact_identity": adapter.artifact_identity,
+            "artifact_directory": str(adapter.artifact_directory),
+            "feature_spec": str(adapter.feature_spec_path),
+            "feature_spec_path": str(adapter.feature_spec_path),
+            "feature_list_path": str(adapter.feature_list_path),
+            "wind_fields": "wind_highland_only" if adapter.model_version == "v1" else "wind_offshore_highland_only",
+        }
+    return metadata
+
+
+def _rebuild_legacy_forecast_status(
+    *,
+    forecast_max: float | None,
+    forecast_min: float | None,
+    decision_timestamp,
+    input_status: dict,
+) -> dict:
+    """Recalculate forecast age at the actual inference decision time."""
+    existing = input_status.get("forecast_input_status") if isinstance(input_status, dict) else None
+    existing_max = existing.get("forecast_max", {}) if isinstance(existing, dict) else {}
+    existing_min = existing.get("forecast_min", {}) if isinstance(existing, dict) else {}
+    issue_time = (
+        input_status.get("forecast_issue_time")
+        if isinstance(input_status, dict)
+        else None
+    ) or existing_max.get("forecast_issue_time")
+    source = (
+        input_status.get("forecast_source")
+        if isinstance(input_status, dict)
+        else None
+    ) or existing_max.get("forecast_source")
+    anomalies = []
+    if isinstance(existing, dict):
+        anomalies.extend(existing_max.get("continuity_anomaly", []))
+        anomalies.extend(existing_min.get("continuity_anomaly", []))
+    return build_forecast_status_from_values(
+        forecast_max=forecast_max,
+        forecast_min=forecast_min,
+        decision_timestamp=decision_timestamp,
+        forecast_issue_time=issue_time,
+        forecast_target_date=(
+            input_status.get("forecast_target_date")
+            if isinstance(input_status, dict)
+            else None
+        ) or existing_max.get("forecast_target_date"),
+        forecast_source=source,
+        previous_forecast_max=existing_max.get("previous_forecast_value"),
+        previous_forecast_min=existing_min.get("previous_forecast_value"),
+        continuity_anomaly=list(dict.fromkeys(anomalies)),
+    )
+
+
+def _build_nowcast_status(nowcast_features: dict, decision_timestamp) -> dict:
+    issue_time = nowcast_features.get("_issue_time") if nowcast_features else None
+    if not nowcast_features:
+        return {
+            "rain_nowcast": InputStatus.fallback(
+                None,
+                fallback_method="unavailable",
+                decision_timestamp=decision_timestamp,
+                source_name="hko_rain_nowcast",
+                raw_status="unavailable",
+            ).to_dict()
+        }
+    status = {}
+    for key in (
+        "rain_nc_sum_0_60m",
+        "rain_nc_sum_0_120m",
+        "rain_nowcast_age_minutes",
+        "rain_nowcast_missing_flag",
+    ):
+        if key not in nowcast_features:
+            continue
+        status[key] = InputStatus.from_value(
+            nowcast_features.get(key),
+            source_timestamp=issue_time,
+            decision_timestamp=decision_timestamp,
+            source_name="hko_rain_nowcast",
+            stale_after_minutes=180.0,
+            observation_method="nowcast_issue",
+        ).to_dict()
+    return status
 
 
 # ── 9-day XGBoost ────────────────────────────────────────────────────
@@ -92,6 +193,7 @@ def predict_intraday_all(
     rain_kwargs: dict | None = None,
     forecast_max: float | None = None,
     forecast_min: float | None = None,
+    input_status: dict | None = None,
 ) -> dict[str, dict]:
     """Run all intraday models and fuse with prior.
 
@@ -139,11 +241,24 @@ def predict_intraday_all(
         fetch_hko_ilens_forecast,
         hkt_now,
     )
+    # ``state['time_now']`` is the latest observation timestamp, not the
+    # inference decision time.  Use the actual orchestration time so ages are
+    # truthful when an observation buffer is delayed.
+    decision_timestamp = hkt_now()
     pressure_kw = {}
     wind_kw = {}
     try:
-        pressure_kw = compute_pressure_kwargs()
-        wind_kw = compute_wind_kwargs()
+        try:
+            pressure_kw = compute_pressure_kwargs(
+                decision_timestamp=decision_timestamp
+            )
+        except TypeError:
+            # Preserve compatibility with test doubles and older integrations.
+            pressure_kw = compute_pressure_kwargs()
+        try:
+            wind_kw = compute_wind_kwargs(decision_timestamp=decision_timestamp)
+        except TypeError:
+            wind_kw = compute_wind_kwargs()
     except Exception as _e:
         logger.warning("Failed to collect live pressure/wind data: %s", _e)
 
@@ -254,6 +369,64 @@ def predict_intraday_all(
     # Inject nowcast features directly (bypass ALLOWED_RAIN_KWARGS whitelist)
     common.update({k: v for k, v in nc_features.items() if k != "_issue_time" and k not in common})
 
+    observation_values = {
+        key: state.get(key)
+        for key in (
+            "temp_now", "rh_now", "max_so_far", "min_so_far",
+            "temp_30m_ago", "temp_60m_ago", "temp_120m_ago",
+            "temp_change_30m", "temp_change_60m", "temp_volatility_60m",
+            "temp_acceleration_60m", "rh_change_60m",
+            "dew_point_change_60m", "dew_point_spread_change_60m",
+            "time_since_max", "time_since_min",
+        )
+    }
+    observation_buffer_status = build_observation_buffer_status(
+        state.get("df_today"),
+        decision_timestamp=decision_timestamp,
+        values=observation_values,
+    )
+    previous_rh_status = (state.get("weather_input_status") or {}).get(
+        "rh_current", {}
+    )
+    if previous_rh_status.get("fallback_method") == "climatological_default":
+        observation_buffer_status["rh_current"] = InputStatus.fallback(
+            state.get("rh_now", 50.0),
+            fallback_method="climatological_default",
+            decision_timestamp=decision_timestamp,
+            source_name="hko_weather_obs",
+            raw_status="synthetic_fallback",
+            observation_method="fallback",
+        ).to_dict()
+    weather_input_status = {
+        key: observation_buffer_status.get(key)
+        for key in (
+            "temp_current", "rh_current", "pressure_current",
+            "dew_point_current", "max_so_far", "min_so_far",
+            "obs_data_age_minutes",
+        )
+        if key in observation_buffer_status
+    }
+    forecast_input_status = _rebuild_legacy_forecast_status(
+        forecast_max=forecast_max,
+        forecast_min=forecast_min,
+        decision_timestamp=decision_timestamp,
+        input_status=input_status or {},
+    )
+    status_bundle = make_status_bundle(
+        {
+            "weather_input_status": weather_input_status,
+            "observation_buffer_status": observation_buffer_status,
+            "wind_input_status": wind_kw.get("_input_status", {}),
+            "pressure_input_status": pressure_kw.get("_input_status", {}),
+            "forecast_input_status": forecast_input_status,
+            "rain_input_status": rain_kw.get("_input_status", {}),
+            "nowcast_input_status": _build_nowcast_status(
+                nc_features, decision_timestamp
+            ),
+        },
+        decision_timestamp=decision_timestamp,
+    )
+
     # Fetch i-lens forecast (same source as training) for Model 2A1
     ilens_forecast = None
     ilens_forecast_tmax = None
@@ -282,6 +455,7 @@ def predict_intraday_all(
             raw_preds = predict_intraday_tmin_all(**common)
         else:
             common_tmax = dict(common)
+            common_tmax["input_status"] = status_bundle
             common_tmax["time_since_max_so_far"] = state.get("time_since_max", 0.0)
             common_tmax["ilens_forecast_tmax"] = ilens_forecast_tmax
             common_tmax["ilens_forecast_tmin"] = ilens_forecast_tmin
@@ -330,12 +504,35 @@ def predict_intraday_all(
             "raw": raw_pred,
         }
     results["_feature_metadata"] = {
-        "pressure_kwargs": pressure_kw,
-        "wind_kwargs": wind_kw,
-        "nowcast_features": nc_features,
+        "pressure_kwargs": jsonable(pressure_kw),
+        "wind_kwargs": jsonable(wind_kw),
+        "nowcast_features": jsonable(nc_features),
         "forecast_age_minutes": forecast_age_minutes,
         "forecast_lead_days": forecast_lead_days,
+        "input_status": status_bundle,
+        "status_contract_version": status_bundle["status_contract_version"],
+        "numeric_policy": status_bundle["numeric_policy"],
+        "status_policy": status_bundle["status_policy"],
+        "decision_timestamp": status_bundle["decision_timestamp"],
+        "weather_input_status": status_bundle["weather_input_status"],
+        "wind_input_status": status_bundle["wind_input_status"],
+        "pressure_input_status": status_bundle["pressure_input_status"],
+        "forecast_input_status": status_bundle["forecast_input_status"],
+        "observation_buffer_status": status_bundle["observation_buffer_status"],
+        "rain_input_status": status_bundle["rain_input_status"],
+        "nowcast_input_status": status_bundle["nowcast_input_status"],
     }
+    try:
+        lineage = _model_2a_lineage_metadata()
+        results["_feature_metadata"]["model_lineage"] = lineage
+        results["_feature_metadata"]["feature_spec"] = {
+            key: value["feature_spec_path"] for key, value in lineage.items()
+        }
+    except Exception as _lineage_error:
+        logger.warning("Could not collect Model 2A lineage metadata: %s", _lineage_error)
+        results["_feature_metadata"]["model_lineage"] = {
+            "error": str(_lineage_error)
+        }
     return results
 
 
@@ -406,6 +603,7 @@ def run_all_models(
     forecast_max: float | None = None,
     forecast_min: float | None = None,
     is_today: bool = True,
+    input_status: dict | None = None,
 ) -> dict[str, dict]:
     """Run all models and compute bucket probabilities for each.
 
@@ -450,6 +648,7 @@ def run_all_models(
         intra_preds = predict_intraday_all(
             target_date_str, is_min_temp, state, rain_kwargs,
             forecast_max=forecast_max, forecast_min=forecast_min,
+            input_status=input_status,
         )
         if intra_preds:
             if "_error" in intra_preds:

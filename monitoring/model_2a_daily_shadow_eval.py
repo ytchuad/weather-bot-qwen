@@ -8,8 +8,12 @@ import pandas as pd
 import numpy as np
 import logging
 from pathlib import Path
+from typing import Optional
 
-from monitoring.daily_shadow_eval_base import run_daily_shadow_eval
+from inference.model_2a_adapters import (
+    Model2AVersionError,
+    get_model_2a_adapter,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +21,9 @@ logger = logging.getLogger(__name__)
 def run_model_2a_shadow_eval(
     inference_log_path: str = "logs/model_2a_inference_log.parquet",
     actual_high_source: str = "data/hko_tmax_historical.parquet",
-    model_spec_path: str = "config/model_2a_feature_spec.yaml",
+    model_spec_path: Optional[str] = None,
     output_path: str = "reports",
+    model_version: Optional[str] = None,
 ) -> pd.DataFrame:
     """Run Model 2A shadow evaluation against actual daily high temperatures.
 
@@ -29,6 +34,7 @@ def run_model_2a_shadow_eval(
         actual_high_source: Path to actual high temperature data.
         model_spec_path: Path to model spec YAML.
         output_path: Directory for output reports.
+        model_version: Explicitly selected ``v1`` or ``v2``.
 
     Returns:
         DataFrame with shadow evaluation metrics.
@@ -36,9 +42,12 @@ def run_model_2a_shadow_eval(
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    import yaml
-    with open(model_spec_path, "r") as f:
-        spec = yaml.safe_load(f)
+    adapter = get_model_2a_adapter(
+        model_version=model_version,
+        model_spec_path=model_spec_path,
+    )
+    lineage = adapter.validate_lineage()
+    spec = adapter.load_spec()
 
     log_path = Path(inference_log_path)
     if not log_path.exists():
@@ -46,7 +55,8 @@ def run_model_2a_shadow_eval(
         return pd.DataFrame()
 
     inference_log = pd.read_parquet(log_path)
-    model_name = spec.get("model_name", "model_2a")
+    _validate_inference_log_version(inference_log, adapter.model_version)
+    model_name = f"model_2a_{adapter.model_version}"
 
     actual = _load_actual_highs(actual_high_source)
     if actual is None or len(actual) == 0:
@@ -71,6 +81,13 @@ def run_model_2a_shadow_eval(
         return pd.DataFrame()
 
     metrics = _compute_model_2a_metrics(merged, spec)
+    metrics.update({
+        "model_version": adapter.model_version,
+        "feature_version": adapter.feature_version,
+        "spec_path": lineage["spec_path"],
+        "artifact_directory": lineage["artifact_directory"],
+        "artifact_identity": lineage["artifact_identity"],
+    })
 
     metrics_path = output_dir / f"{model_name}_live_shadow_metrics.csv"
     metrics_df = pd.DataFrame([metrics])
@@ -78,6 +95,23 @@ def run_model_2a_shadow_eval(
     logger.info(f"Model 2A shadow metrics written to {metrics_path}")
 
     return metrics_df
+
+
+def _validate_inference_log_version(
+    inference_log: pd.DataFrame,
+    model_version: str,
+) -> None:
+    """Reject missing or mixed version metadata before shadow evaluation."""
+    if "model_version" not in inference_log.columns:
+        raise Model2AVersionError(
+            "Model 2A shadow log has no model_version metadata; version is ambiguous."
+        )
+    versions = set(inference_log["model_version"].dropna().astype(str))
+    if versions != {model_version}:
+        raise Model2AVersionError(
+            f"Model 2A shadow log versions {sorted(versions)!r} do not match "
+            f"the explicitly selected {model_version!r}."
+        )
 
 
 def _load_actual_highs(source: str) -> pd.DataFrame:
@@ -145,7 +179,7 @@ def _compute_model_2a_metrics(
 
     actual_col = _find_actual_col(merged)
     if actual_col is None or "pred_tmax_q50" not in merged.columns:
-        logger.warning(f"Cannot compute metrics: missing actual column or pred_tmax_q50")
+        logger.warning("Cannot compute metrics: missing actual column or pred_tmax_q50")
         return metrics
 
     actual = merged[actual_col].values.astype(float)

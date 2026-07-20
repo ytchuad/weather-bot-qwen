@@ -7,27 +7,31 @@ with Model 2A specific adapters, feature builder, and guardrails.
 
 import pandas as pd
 import numpy as np
-import json
 import logging
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
+from typing import Optional
 
 from inference.realtime_inference_base import (
     load_model_spec,
     validate_active_hours,
     validate_decision_grid,
 )
+from inference.model_2a_adapters import (
+    Model2AAdapter,
+    get_model_2a_adapter,
+)
 from features.model_2a_source_adapters import (
     standardize_weather_obs,
     standardize_wind_obs,
     standardize_forecast,
 )
-from features.model_2a_feature_builder import build_model_2a_features
+from features.model_2a_feature_builder import build_model_2a_input_status
+from features.input_status import jsonable, serialize_status
 
 logger = logging.getLogger(__name__)
 
 HKT = timedelta(hours=8)
-MODEL_DIR = Path("models/intraday_minute_ml_model_2a_v2")
 
 
 def run_model_2a_inference(
@@ -35,7 +39,8 @@ def run_model_2a_inference(
     raw_weather: pd.DataFrame,
     raw_wind: pd.DataFrame,
     raw_forecast: pd.DataFrame,
-    model_spec_path: str = "config/model_2a_feature_spec.yaml",
+    model_spec_path: Optional[str] = None,
+    model_version: Optional[str] = None,
 ) -> dict:
     """Run Model 2A real-time inference end-to-end.
 
@@ -44,15 +49,45 @@ def run_model_2a_inference(
         raw_weather: Raw weather observation data.
         raw_wind: Raw wind observation data.
         raw_forecast: Raw forecast data.
-        model_spec_path: Path to model spec YAML.
+        model_spec_path: Optional path to the selected model spec YAML.
+        model_version: Explicitly selected ``v1`` or ``v2``.
 
     Returns:
         Prediction payload dict with warnings and metadata.
     """
-    spec = load_model_spec(model_spec_path)
+    adapter = get_model_2a_adapter(
+        model_version=model_version,
+        model_spec_path=model_spec_path,
+    )
+    lineage = adapter.validate_lineage()
+    spec = load_model_spec(str(adapter.feature_spec_path))
+
+    lineage_metadata = {
+        "model_version": adapter.model_version,
+        "feature_version": adapter.feature_version,
+        "spec_path": lineage["spec_path"],
+        "feature_spec_path": lineage["feature_spec_path"],
+        "feature_spec": lineage["feature_spec_path"],
+        "artifact_directory": lineage["artifact_directory"],
+        "artifact_identity": lineage["artifact_identity"],
+        "feature_list_path": lineage["feature_list_path"],
+    }
+
+    if not adapter.supports_realtime:
+        return {
+            **lineage_metadata,
+            "error": (
+                "Model 2A v1 realtime inference is deprecated/unsupported: "
+                "the original v1 highland source semantics cannot be "
+                "reconstructed safely."
+            ),
+            "warning_flags": ["unsupported_model_version"],
+            "prediction": None,
+        }
 
     if not validate_active_hours(decision_time, spec):
         return {
+            **lineage_metadata,
             "error": f"Decision time {decision_time} outside active hours",
             "warning_flags": ["outside_active_hours"],
             "prediction": None,
@@ -60,6 +95,7 @@ def run_model_2a_inference(
 
     if not validate_decision_grid(decision_time, spec):
         return {
+            **lineage_metadata,
             "error": f"Decision time {decision_time} not on {spec['decision_grid_minutes']}-min grid",
             "warning_flags": ["off_grid"],
             "prediction": None,
@@ -75,7 +111,7 @@ def run_model_2a_inference(
     wind_canonical = standardize_wind_obs(raw_wind, "live")
     forecast_canonical = standardize_forecast(raw_forecast, "live")
 
-    features = build_model_2a_features(
+    features = adapter.feature_builder(
         decision_time=decision_time,
         weather_canonical=weather_canonical,
         wind_canonical=wind_canonical,
@@ -84,7 +120,7 @@ def run_model_2a_inference(
         mode="live",
     )
 
-    model_cache = _load_model_2a(spec)
+    model_cache = _load_model_2a(adapter, spec, lineage=lineage)
     feature_cols = model_cache["feature_cols"]
 
     missing_feats = [c for c in feature_cols if c not in features.columns]
@@ -92,6 +128,25 @@ def run_model_2a_inference(
         raise ValueError(f"Missing required features: {missing_feats}")
 
     X = features[feature_cols]
+
+    try:
+        input_status = build_model_2a_input_status(
+            decision_time=decision_time,
+            weather_canonical=weather_canonical,
+            wind_canonical=wind_canonical,
+            forecast_canonical=forecast_canonical,
+            spec=spec,
+            mode="live",
+        )
+    except Exception as status_error:
+        logger.warning("Model 2A input status build failed: %s", status_error)
+        input_status = {
+            "status_contract_version": "phase2a.v1",
+            "numeric_policy": "legacy_compatible",
+            "status_policy": "truthful",
+            "decision_timestamp": decision_time,
+            "status_build_error": str(status_error),
+        }
 
     upside_q10 = model_cache["upside_q10"].predict(X)[0]
     upside_q25 = model_cache["upside_q25"].predict(X)[0]
@@ -124,11 +179,12 @@ def run_model_2a_inference(
 
     temp_anomaly_flag, temp_spike_flag, any_source_missing_flag, wind_missing_flag, forecast_missing_flag = \
         _update_missing_flags_from_canonical(
-            weather_canonical, wind_canonical, forecast_canonical)
+            weather_canonical, wind_canonical, forecast_canonical
+        )
 
     prediction = {
+        **lineage_metadata,
         "model_name": spec["model_name"],
-        "model_version": spec["model_version"],
         "decision_time": decision_time,
         "run_timestamp": datetime.now(),
         "source_mode": "live",
@@ -170,6 +226,14 @@ def run_model_2a_inference(
         "warning_flags": stop_conditions,
         "guardrail_violation": len([k for k, v in guardrail_flags.items() if v]) > 0,
         "feature_parity_status": "pending",
+        "decision_timestamp": decision_time,
+        "input_status": jsonable(input_status),
+        "weather_input_status": jsonable(input_status.get("weather_input_status", {})),
+        "wind_input_status": jsonable(input_status.get("wind_input_status", {})),
+        "forecast_input_status": jsonable(input_status.get("forecast_input_status", {})),
+        "observation_buffer_status": jsonable(input_status.get("observation_buffer_status", {})),
+        "feature_values": jsonable(features.iloc[0].to_dict()),
+        "numeric_features": jsonable(features.iloc[0].to_dict()),
     }
 
     _write_inference_log(prediction, spec)
@@ -177,35 +241,32 @@ def run_model_2a_inference(
     return prediction
 
 
-def _load_model_2a(spec: dict) -> dict:
-    """Load Model 2A model artifacts."""
+def _load_model_2a(
+    adapter: Model2AAdapter,
+    spec: dict,
+    lineage: Optional[dict] = None,
+) -> dict:
+    """Load only the artifacts proven by the selected version adapter."""
     import lightgbm as lgb
 
-    model_dir = Path(spec.get("feature_list_path", str(MODEL_DIR))).parent
-    fl_path = model_dir / "feature_list.json"
+    lineage = lineage or adapter.validate_lineage(spec=spec)
+    model_dir = Path(lineage["artifact_directory"])
+    feature_cols = list(lineage["ordered_feature_names"])
 
-    if not fl_path.exists():
-        fl_path = MODEL_DIR / "feature_list.json"
-        model_dir = MODEL_DIR
-
-    with open(fl_path, "r") as f:
-        feature_cols = json.load(f)
-
-    cache = {"feature_cols": feature_cols}
+    cache = {
+        "feature_cols": feature_cols,
+        "model_version": adapter.model_version,
+        "spec_path": lineage["spec_path"],
+        "artifact_directory": lineage["artifact_directory"],
+        "artifact_identity": lineage["artifact_identity"],
+    }
     for q in [10, 25, 50, 75, 90]:
         f_path = model_dir / f"upside_q{q}.txt"
-        if f_path.exists():
-            cache[f"upside_q{q}"] = lgb.Booster(model_file=str(f_path))
+        cache[f"upside_q{q}"] = lgb.Booster(model_file=str(f_path))
 
     zero_path = model_dir / "upside_zero.txt"
-    cache["upside_zero"] = lgb.Booster(model_file=str(zero_path)) if zero_path.exists() else None
-
-    best_threshold_path = model_dir / "best_threshold.json"
-    if cache["upside_zero"] is not None and best_threshold_path.exists():
-        with open(best_threshold_path) as f:
-            cache["upside_zero_threshold"] = json.load(f).get("upside_zero_threshold", 0.5)
-    else:
-        cache["upside_zero_threshold"] = 0.5
+    cache["upside_zero"] = lgb.Booster(model_file=str(zero_path))
+    cache["upside_zero_threshold"] = lineage["threshold_metadata"]["value"]
 
     return cache
 
@@ -274,8 +335,6 @@ def _evaluate_stop_conditions(
     if pd.isna(temp_current):
         triggered.append("temp_current_missing")
 
-    hour = features.index[0].hour if hasattr(features.index, "dtype") else 0
-
     if guardrail_flags.get("late_day_unreasonable_upside_flag", 0) > 0:
         triggered.append("late_day_unreasonable_upside")
 
@@ -292,8 +351,6 @@ def _update_missing_flags_from_canonical(
     weather: pd.DataFrame,
     wind: pd.DataFrame,
     forecast: pd.DataFrame,
-    temp_anomaly_flag: bool,
-    temp_spike_flag: bool,
 ) -> tuple[bool, bool, bool, bool, bool]:
     """Check canonical sources for missing data flags and return them."""
     w_missing = weather is None or len(weather) == 0
@@ -334,6 +391,34 @@ def _write_inference_log(prediction: dict, spec: dict) -> None:
             log_row[field] = str(prediction.get("guardrail_flags", {}))
         else:
             log_row[field] = prediction.get(field)
+
+    # Supplemental Phase 2A diagnostics are serialized as clean JSON strings
+    # so nested status maps never enter the model feature vector or an object
+    # dtype parquet column.
+    for field in (
+        "input_status",
+        "weather_input_status",
+        "wind_input_status",
+        "forecast_input_status",
+        "observation_buffer_status",
+        "feature_values",
+        "numeric_features",
+        "source_timestamps",
+        "source_available_times",
+        "source_systems",
+    ):
+        if field in prediction:
+            log_row[field] = serialize_status(prediction.get(field))
+    for field in (
+        "decision_timestamp",
+        "feature_spec",
+        "feature_spec_path",
+        "artifact_identity",
+        "model_version",
+        "feature_version",
+    ):
+        if field in prediction:
+            log_row[field] = jsonable(prediction.get(field))
 
     new_row_df = pd.DataFrame([log_row])
 

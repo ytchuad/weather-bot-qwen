@@ -12,6 +12,7 @@ def run_data_quality_checks(
     spec: dict,
     output_path: str,
     model_name: str = "unknown",
+    run_metadata: dict = None,
 ) -> pd.DataFrame:
     """Generic data quality and drift monitoring checks.
 
@@ -34,8 +35,6 @@ def run_data_quality_checks(
     Returns:
         DataFrame with data quality check results.
     """
-    import yaml
-
     output_dir = Path(output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -64,6 +63,10 @@ def run_data_quality_checks(
 
     # Source availability checks
     all_checks.append(_check_source_availability(canonical_sources, spec))
+
+    run_metadata = dict(run_metadata or {})
+    if run_metadata:
+        all_checks = [{**check, **run_metadata} for check in all_checks]
 
     checks_df = pd.DataFrame(all_checks)
     report_path = output_dir / f"{model_name}_data_quality_report.csv"

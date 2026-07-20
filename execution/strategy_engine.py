@@ -29,6 +29,11 @@ from execution.strategy_gate import (
 from execution.portfolio_reconciler import PM_MIN_QTY
 from execution.kelly_betting import compute_multi_kelly_bets
 from execution.clob_slippage import apply_slippage_to_bets
+from execution.clob_execution import (
+    CLOBExecutionSnapshot,
+    compute_depth_adjusted_bets,
+    compute_sell_execution,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +60,35 @@ REASON_REDUCE_50_PCT = 'REDUCE_50_PCT'
 REASON_HOLD_UNTIL_EXPIRY = 'HOLD_UNTIL_EXPIRY'
 REASON_LIQUIDITY_INSUFFICIENT = 'LIQUIDITY_INSUFFICIENT'
 REASON_TIME_WINDOW_CLOSED = 'TIME_WINDOW_CLOSED'
+REASON_NO_EXECUTABLE_QUOTE = 'NO_EXECUTABLE_QUOTE'
+REASON_PARTIAL_FILL = 'PARTIAL_FILL_REJECTED'
+
+
+def _is_clob_mode(paper_execution_mode: str) -> bool:
+    return paper_execution_mode == "clob_depth"
+
+
+def _snapshot_for_position(
+    execution_snapshots: dict,
+    bucket: str,
+    side: str,
+) -> CLOBExecutionSnapshot | None:
+    return (execution_snapshots.get(bucket) or {}).get(str(side).upper())
+
+
+def _clob_reference_prices(
+    execution_snapshots: dict | None,
+) -> dict[str, float]:
+    """Return YES-space CLOB references for rebalance diagnostics."""
+    prices: dict[str, float] = {}
+    for bucket, side_map in (execution_snapshots or {}).items():
+        yes = side_map.get("YES") if isinstance(side_map, dict) else None
+        no = side_map.get("NO") if isinstance(side_map, dict) else None
+        if yes is not None and yes.best_ask is not None:
+            prices[bucket] = yes.best_ask.price
+        elif no is not None and no.best_ask is not None:
+            prices[bucket] = 1.0 - no.best_ask.price
+    return prices
 
 
 def get_time_slot(dt_now: datetime) -> str:
@@ -226,25 +260,59 @@ def compute_enhanced_orders(
     rain_regime: str = None,
     model_std: float = 1.0,
     recent_price_volatility: float = 0.0,
-    max_per_bucket: float = 0.15
+    max_per_bucket: float = 0.15,
+    execution_snapshots: dict | None = None,
+    paper_execution_mode: str = "legacy_gamma_mock",
+    partial_fill_policy: str = "fail_closed",
+    gamma_reference_prices: dict | None = None,
 ) -> tuple:
     effective_limit = get_effective_exposure_limit(
         dt_now, model_std, recent_price_volatility, max_per_bucket * 3
     )
     total_max_limit = min(effective_limit, 0.50)
 
-    bets = compute_multi_kelly_bets(
-        target_probs, prices_dict, capital,
-        max_per_bucket=max_per_bucket, total_max=total_max_limit
-    )
-    adjusted_bets = apply_slippage_to_bets(
-        bets, token_ids_dict, prices_dict=prices_dict, mock_mode=mock_slippage
-    )
+    clob_sizing = None
+    if _is_clob_mode(paper_execution_mode):
+        if execution_snapshots:
+            clob_sizing = compute_depth_adjusted_bets(
+                target_probs=target_probs,
+                gamma_reference_prices=gamma_reference_prices or prices_dict,
+                capital=capital,
+                snapshots=execution_snapshots,
+                max_per_bucket=max_per_bucket,
+                total_max=total_max_limit,
+                partial_fill_policy=partial_fill_policy,
+            )
+            adjusted_bets = clob_sizing.adjusted_bets
+        else:
+            adjusted_bets = {}
+    else:
+        bets = compute_multi_kelly_bets(
+            target_probs, prices_dict, capital,
+            max_per_bucket=max_per_bucket, total_max=total_max_limit
+        )
+        adjusted_bets = apply_slippage_to_bets(
+            bets, token_ids_dict, prices_dict=prices_dict, mock_mode=mock_slippage
+        )
 
     market_positions = current_positions.get(model_key, {}).get(slug, {})
     all_buckets = set(list(market_positions.keys()) + list(target_probs.keys()))
     target_positions = {}
     decisions = []
+    exit_quotes = {}
+
+    if _is_clob_mode(paper_execution_mode):
+        for bucket, current_pos in market_positions.items():
+            quantity = float(current_pos.get("quantity", 0.0))
+            if quantity <= 0.0:
+                continue
+            snapshot = _snapshot_for_position(
+                execution_snapshots or {}, bucket, current_pos.get("side", "YES")
+            )
+            exit_quotes[bucket] = (
+                compute_sell_execution(snapshot, quantity, partial_fill_policy)
+                if snapshot is not None else None
+            )
 
     for bucket in sorted(all_buckets):
         model_prob = target_probs.get(bucket, 0.5)
@@ -252,9 +320,30 @@ def compute_enhanced_orders(
         current_pos = market_positions.get(bucket, {})
         bet = adjusted_bets.get(bucket, {})
         kel_qty = bet.get('adjusted_quantity', 0)
-        kel_side = 'YES' if bet.get('action') == 'BUY_YES' else None
 
         if current_pos.get('quantity', 0) > 0:
+            clob_exit = exit_quotes.get(bucket) if _is_clob_mode(paper_execution_mode) else None
+            if _is_clob_mode(paper_execution_mode):
+                if clob_exit is None or clob_exit.filled_shares <= 0:
+                    decisions.append({
+                        'bucket': bucket, 'action': 'BLOCKED',
+                        'reason': REASON_NO_EXECUTABLE_QUOTE,
+                        'detail': 'no valid CLOB bid depth for exit; residual retained'
+                    })
+                    continue
+                if not clob_exit.is_full_fill and partial_fill_policy == 'fail_closed':
+                    decisions.append({
+                        'bucket': bucket, 'action': 'BLOCKED',
+                        'reason': REASON_PARTIAL_FILL,
+                        'detail': 'exit depth is insufficient under fail_closed policy'
+                    })
+                    continue
+                exit_token_price = clob_exit.net_sell_vwap
+                market_price = (
+                    exit_token_price
+                    if str(current_pos.get('side', 'YES')).upper() == 'YES'
+                    else 1.0 - exit_token_price
+                )
             exit_result = check_enhanced_exit(
                 bucket, current_pos, model_prob, market_price,
                 model_std, dt_now, max_so_far, temp_now, rain_regime
@@ -262,10 +351,17 @@ def compute_enhanced_orders(
             if exit_result.passed and exit_result.reason_code != REASON_HOLD_UNTIL_EXPIRY:
                 if exit_result.reason_code == REASON_STD_SPIKE:
                     reduce_qty = current_pos['quantity'] * 0.5
+                    if _is_clob_mode(paper_execution_mode):
+                        reduce_qty = max(
+                            0.0, float(current_pos['quantity']) - clob_exit.filled_shares
+                        )
                     target_positions[bucket] = {
                         'side': current_pos['side'],
                         'quantity': round(reduce_qty, 2),
-                        'target_price': market_price
+                        'target_price': (
+                            clob_exit.net_sell_vwap
+                            if _is_clob_mode(paper_execution_mode) else market_price
+                        )
                     }
                     decisions.append({
                         'bucket': bucket, 'action': 'REDUCE',
@@ -275,8 +371,14 @@ def compute_enhanced_orders(
                 elif exit_result.reason_code == REASON_EXIT_SIGNAL:
                     target_positions[bucket] = {
                         'side': current_pos['side'],
-                        'quantity': 0.0,
-                        'target_price': market_price
+                        'quantity': (
+                            max(0.0, float(current_pos['quantity']) - clob_exit.filled_shares)
+                            if _is_clob_mode(paper_execution_mode) else 0.0
+                        ),
+                        'target_price': (
+                            clob_exit.net_sell_vwap
+                            if _is_clob_mode(paper_execution_mode) else market_price
+                        )
                     }
                     decisions.append({
                         'bucket': bucket, 'action': 'EXIT',
@@ -286,8 +388,14 @@ def compute_enhanced_orders(
                 else:
                     target_positions[bucket] = {
                         'side': current_pos['side'],
-                        'quantity': 0.0,
-                        'target_price': market_price
+                        'quantity': (
+                            max(0.0, float(current_pos['quantity']) - clob_exit.filled_shares)
+                            if _is_clob_mode(paper_execution_mode) else 0.0
+                        ),
+                        'target_price': (
+                            clob_exit.net_sell_vwap
+                            if _is_clob_mode(paper_execution_mode) else market_price
+                        )
                     }
                     decisions.append({
                         'bucket': bucket, 'action': 'EXIT',
@@ -315,6 +423,19 @@ def compute_enhanced_orders(
             kel_side_calc = 'YES' if bet.get('action') == 'BUY_YES' else 'NO'
             entry_qty = kel_qty
 
+            if _is_clob_mode(paper_execution_mode):
+                if not bet:
+                    decisions.append({
+                        'bucket': bucket, 'action': 'BLOCKED',
+                        'reason': (
+                            clob_sizing.rejected.get(bucket, REASON_NO_EXECUTABLE_QUOTE)
+                            if clob_sizing else REASON_NO_EXECUTABLE_QUOTE
+                        ),
+                        'detail': 'no size-specific CLOB execution quote'
+                    })
+                    continue
+                market_price = bet.get('execution_yes_price', market_price)
+
             if entry_qty < PM_MIN_QTY:
                 decisions.append({
                     'bucket': bucket, 'action': 'NO_TRADE',
@@ -323,8 +444,18 @@ def compute_enhanced_orders(
                 })
                 continue
 
+            gate_bet = bet
+            if (
+                _is_clob_mode(paper_execution_mode)
+                and partial_fill_policy in {"accept_partial", "reduce_to_available"}
+                and bet.get("is_partial")
+            ):
+                # The target quantity is already reduced to the available
+                # filled shares.  Let the explicit partial-fill policy carry
+                # that reduced target through the entry gate.
+                gate_bet = {**bet, "filled": True}
             entry_result = check_enhanced_entry(
-                bucket, model_prob, market_price, dt_now, adjusted_bet=bet
+                bucket, model_prob, market_price, dt_now, adjusted_bet=gate_bet
             )
 
             if entry_result.passed:
@@ -336,7 +467,13 @@ def compute_enhanced_orders(
                 decisions.append({
                     'bucket': bucket, 'action': 'ENTRY',
                     'reason': REASON_ENTRY_SIGNAL,
-                    'detail': entry_result.detail
+                    'detail': entry_result.detail,
+                    'requested_shares': bet.get('requested_shares'),
+                    'depth_adjusted_vwap': bet.get('execution_price'),
+                    'fee': bet.get('fee'),
+                    'fill_ratio': bet.get('fill_ratio'),
+                    'diagnostic_edge': bet.get('diagnostic_edge'),
+                    'executable_edge_at_final_size': bet.get('executable_edge_at_final_size'),
                 })
             else:
                 decisions.append({
@@ -363,7 +500,11 @@ def run_enhanced_rebalance_cycle(
     rain_regime: str = None,
     model_std: float = 1.0,
     recent_price_volatility: float = 0.0,
-    max_per_bucket: float = 0.15
+    max_per_bucket: float = 0.15,
+    execution_snapshots: dict | None = None,
+    paper_execution_mode: str = "legacy_gamma_mock",
+    partial_fill_policy: str = "fail_closed",
+    gamma_reference_prices: dict | None = None,
 ) -> dict:
     if dt_now is None:
         dt_now = hkt_now()
@@ -386,7 +527,11 @@ def run_enhanced_rebalance_cycle(
         rain_regime=rain_regime,
         model_std=model_std,
         recent_price_volatility=recent_price_volatility,
-        max_per_bucket=max_per_bucket
+        max_per_bucket=max_per_bucket,
+        execution_snapshots=execution_snapshots,
+        paper_execution_mode=paper_execution_mode,
+        partial_fill_policy=partial_fill_policy,
+        gamma_reference_prices=gamma_reference_prices,
     )
 
     slot = get_time_slot(dt_now)
@@ -406,6 +551,7 @@ def run_enhanced_rebalance_cycle(
         'total_exit_count': sum(1 for d in decisions if d['action'] == 'EXIT' or d['action'] == 'REDUCE'),
         'total_hold_count': sum(1 for d in decisions if d['action'] == 'HOLD' or d['action'] == 'HOLD_UNTIL_EXPIRY'),
         'total_blocked_count': sum(1 for d in decisions if d['action'] in ('BLOCKED', 'NO_TRADE')),
+        'execution_mode': paper_execution_mode,
     }
 
     return summary
@@ -505,7 +651,11 @@ def compute_config_orders(
     data_missing: bool = False,
     probs_old: dict = None,
     probs_new: dict = None,
-    post_mean: float = None
+    post_mean: float = None,
+    execution_snapshots: dict | None = None,
+    paper_execution_mode: str = "legacy_gamma_mock",
+    partial_fill_policy: str = "fail_closed",
+    gamma_reference_prices: dict | None = None,
 ) -> tuple:
     """Config-driven order computation using strategy_gate v2 gates."""
     if config is None:
@@ -519,18 +669,48 @@ def compute_config_orders(
     total_max = sc.get('total_max', 0.50)
     max_per_bucket = sc.get('max_per_bucket', 0.15)
 
-    bets = compute_multi_kelly_bets(
-        target_probs, prices_dict, capital,
-        max_per_bucket=max_per_bucket, total_max=total_max
-    )
-    adjusted_bets = apply_slippage_to_bets(
-        bets, token_ids_dict, prices_dict=prices_dict, mock_mode=mock_slippage
-    )
+    clob_sizing = None
+    if _is_clob_mode(paper_execution_mode):
+        if execution_snapshots:
+            clob_sizing = compute_depth_adjusted_bets(
+                target_probs=target_probs,
+                gamma_reference_prices=gamma_reference_prices or prices_dict,
+                capital=capital,
+                snapshots=execution_snapshots,
+                max_per_bucket=max_per_bucket,
+                total_max=total_max,
+                partial_fill_policy=partial_fill_policy,
+            )
+            adjusted_bets = clob_sizing.adjusted_bets
+        else:
+            adjusted_bets = {}
+    else:
+        bets = compute_multi_kelly_bets(
+            target_probs, prices_dict, capital,
+            max_per_bucket=max_per_bucket, total_max=total_max
+        )
+        adjusted_bets = apply_slippage_to_bets(
+            bets, token_ids_dict, prices_dict=prices_dict, mock_mode=mock_slippage
+        )
 
     market_positions = current_positions.get(model_key, {}).get(slug, {})
     all_buckets = set(list(market_positions.keys()) + list(target_probs.keys()))
     target_positions = {}
     decisions = []
+    exit_quotes = {}
+
+    if _is_clob_mode(paper_execution_mode):
+        for bucket, current_pos in market_positions.items():
+            quantity = float(current_pos.get("quantity", 0.0))
+            if quantity <= 0.0:
+                continue
+            snapshot = _snapshot_for_position(
+                execution_snapshots or {}, bucket, current_pos.get("side", "YES")
+            )
+            exit_quotes[bucket] = (
+                compute_sell_execution(snapshot, quantity, partial_fill_policy)
+                if snapshot is not None else None
+            )
 
     # Pre-compute drawdown and T2S multipliers
     dd_result = compute_drawdown_multiplier(drawdown_pct, config)
@@ -560,6 +740,24 @@ def compute_config_orders(
         kel_qty = bet.get('adjusted_quantity', bet.get('quantity', 0))
 
         if current_pos.get('quantity', 0) > 0:
+            clob_exit = exit_quotes.get(bucket) if _is_clob_mode(paper_execution_mode) else None
+            if _is_clob_mode(paper_execution_mode):
+                if clob_exit is None or clob_exit.filled_shares <= 0:
+                    decisions.append({'bucket': bucket, 'action': 'BLOCKED',
+                                      'reason': REASON_NO_EXECUTABLE_QUOTE,
+                                      'detail': 'no valid CLOB bid depth for exit; residual retained'})
+                    continue
+                if not clob_exit.is_full_fill and partial_fill_policy == 'fail_closed':
+                    decisions.append({'bucket': bucket, 'action': 'BLOCKED',
+                                      'reason': REASON_PARTIAL_FILL,
+                                      'detail': 'exit depth is insufficient under fail_closed policy'})
+                    continue
+                exit_token_price = clob_exit.net_sell_vwap
+                market_price = (
+                    exit_token_price
+                    if str(current_pos.get('side', 'YES')).upper() == 'YES'
+                    else 1.0 - exit_token_price
+                )
             # Evaluate exit
             exit_result = check_config_exit(
                 bucket, current_pos, model_prob, market_price, model_std,
@@ -574,23 +772,46 @@ def compute_config_orders(
 
             if action == 'HARD_FLATTEN':
                 target_positions[bucket] = {
-                    'side': current_pos['side'], 'quantity': 0.0, 'target_price': market_price
+                    'side': current_pos['side'],
+                    'quantity': (
+                        max(0.0, float(current_pos['quantity']) - clob_exit.filled_shares)
+                        if _is_clob_mode(paper_execution_mode) else 0.0
+                    ),
+                    'target_price': (
+                        clob_exit.net_sell_vwap
+                        if _is_clob_mode(paper_execution_mode) else market_price
+                    )
                 }
                 decisions.append({'bucket': bucket, 'action': 'EXIT', 'reason': 'DRAWDOWN_HARD',
                                   'detail': exit_result.get('detail', '')})
                 continue
             if action == 'EXIT' or mult <= 0:
                 target_positions[bucket] = {
-                    'side': current_pos['side'], 'quantity': 0.0, 'target_price': market_price
+                    'side': current_pos['side'],
+                    'quantity': (
+                        max(0.0, float(current_pos['quantity']) - clob_exit.filled_shares)
+                        if _is_clob_mode(paper_execution_mode) else 0.0
+                    ),
+                    'target_price': (
+                        clob_exit.net_sell_vwap
+                        if _is_clob_mode(paper_execution_mode) else market_price
+                    )
                 }
                 decisions.append({'bucket': bucket, 'action': 'EXIT', 'reason': ';'.join(reasons),
                                   'detail': exit_result.get('detail', '')})
                 continue
             if action == 'REDUCE' and mult < 1.0:
                 reduce_qty = current_pos['quantity'] * mult
+                if _is_clob_mode(paper_execution_mode):
+                    reduce_qty = max(
+                        0.0, float(current_pos['quantity']) - clob_exit.filled_shares
+                    )
                 target_positions[bucket] = {
                     'side': current_pos['side'], 'quantity': round(reduce_qty, 2),
-                    'target_price': market_price
+                    'target_price': (
+                        clob_exit.net_sell_vwap
+                        if _is_clob_mode(paper_execution_mode) else market_price
+                    )
                 }
                 decisions.append({'bucket': bucket, 'action': 'REDUCE', 'reason': ';'.join(reasons),
                                   'detail': exit_result.get('detail', '')})
@@ -602,6 +823,15 @@ def compute_config_orders(
         else:
             kel_side_calc = 'YES' if bet.get('action') == 'BUY_YES' else 'NO'
             entry_qty = kel_qty
+
+            if _is_clob_mode(paper_execution_mode):
+                if not bet:
+                    decisions.append({'bucket': bucket, 'action': 'BLOCKED',
+                                      'reason': (clob_sizing.rejected.get(bucket, REASON_NO_EXECUTABLE_QUOTE)
+                                                if clob_sizing else REASON_NO_EXECUTABLE_QUOTE),
+                                      'detail': 'no size-specific CLOB execution quote'})
+                    continue
+                market_price = bet.get('execution_yes_price', market_price)
 
             if entry_qty < sc.get('min_qty', 5.0):
                 decisions.append({'bucket': bucket, 'action': 'NO_TRADE',
@@ -623,7 +853,6 @@ def compute_config_orders(
             )
             if entry_result.get('passes', False):
                 # Apply sizing multipliers
-                regime = entry_result.get('regime', get_entry_regime(dt_now, rain_regime, config))
                 boundary_mult = entry_result.get('boundary_multiplier', 1.0)
                 distance_std = entry_result.get('distance_std', 999.0)
                 final_qty = compute_position_size(
@@ -639,7 +868,13 @@ def compute_config_orders(
                     }
                     decisions.append({'bucket': bucket, 'action': 'ENTRY',
                                       'reason': 'ENTRY_SIGNAL',
-                                      'detail': entry_result.get('detail', '')})
+                                      'detail': entry_result.get('detail', ''),
+                                      'requested_shares': bet.get('requested_shares'),
+                                      'depth_adjusted_vwap': bet.get('execution_price'),
+                                      'fee': bet.get('fee'),
+                                      'fill_ratio': bet.get('fill_ratio'),
+                                      'diagnostic_edge': bet.get('diagnostic_edge'),
+                                      'executable_edge_at_final_size': bet.get('executable_edge_at_final_size')})
                 else:
                     decisions.append({'bucket': bucket, 'action': 'BLOCKED',
                                       'reason': 'QTY_BELOW_MIN_AFTER_MULT',
@@ -675,7 +910,11 @@ def run_config_rebalance_cycle(
     drawdown_pct: float = 0.0,
     probs_old: dict = None,
     probs_new: dict = None,
-    post_mean: float = None
+    post_mean: float = None,
+    execution_snapshots: dict | None = None,
+    paper_execution_mode: str = "legacy_gamma_mock",
+    partial_fill_policy: str = "fail_closed",
+    gamma_reference_prices: dict | None = None,
 ) -> dict:
     """Full config-driven rebalance cycle."""
     if dt_now is None:
@@ -708,16 +947,23 @@ def run_config_rebalance_cycle(
         data_missing=data_missing,
         probs_old=probs_old,
         probs_new=probs_new,
-        post_mean=post_mean
+        post_mean=post_mean,
+        execution_snapshots=execution_snapshots,
+        paper_execution_mode=paper_execution_mode,
+        partial_fill_policy=partial_fill_policy,
+        gamma_reference_prices=gamma_reference_prices,
     )
 
     # Rebalance decision
+    rebalance_prices = prices_dict
+    if _is_clob_mode(paper_execution_mode):
+        rebalance_prices = _clob_reference_prices(execution_snapshots)
     rb_result = should_rebalance(
         current_positions.get(model_key, {}).get(slug, {}),
         target_positions,
         probs_old or {},
         probs_new or target_probs,
-        prices_dict,
+        rebalance_prices,
         nowcast_stale, drawdown_pct, hours_to_settlement, config
     )
 
@@ -742,6 +988,8 @@ def run_config_rebalance_cycle(
         'total_exit_count': sum(1 for d in decisions if d['action'] == 'EXIT' or d['action'] == 'REDUCE'),
         'total_hold_count': sum(1 for d in decisions if d['action'] == 'HOLD'),
         'total_blocked_count': sum(1 for d in decisions if d['action'] in ('BLOCKED', 'NO_TRADE')),
+        'execution_mode': paper_execution_mode,
+        'depth_sizing': None,
     }
 
     return summary

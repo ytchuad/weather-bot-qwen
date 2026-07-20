@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import backtest, charts, data, diagnostics, health, markets, predictions, strategies, weather
+from app.api import backtest, charts, data, diagnostics, health, layer_a, markets, predictions, strategies, weather
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Weather Quant API starting")
+    try:
+        from layer_a.storage import get_default_store
+
+        get_default_store().startup_scan()
+    except Exception:
+        logger.exception("Layer A startup scan failed")
     strategies.start_scheduler()
     yield
     logger.info("Weather Quant API shutting down")
@@ -47,6 +53,7 @@ app.include_router(backtest.router)
 app.include_router(diagnostics.router)
 app.include_router(charts.router)
 app.include_router(data.router)
+app.include_router(layer_a.router)
 
 _frontend_dist = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 

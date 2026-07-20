@@ -75,6 +75,37 @@ _model_cache = {}
 _active_model_key = 'baseline'
 
 
+def _status_age_minutes(status_map, field):
+    if not isinstance(status_map, dict):
+        return None
+    field_status = status_map.get(field)
+    if not isinstance(field_status, dict):
+        return None
+    return field_status.get('age_minutes')
+
+
+def _feature_logs_with_truthful_ages(features, input_status=None):
+    """Keep the model vector unchanged while making diagnostic ages truthful."""
+    numeric_features = dict(features)
+    diagnostic_features = dict(features)
+    if input_status is None:
+        return diagnostic_features, numeric_features
+
+    wind_status = input_status.get('wind_input_status', {})
+    observation_status = input_status.get('observation_buffer_status', {})
+    forecast_status = input_status.get('forecast_input_status', {})
+    diagnostic_features['wind_data_age_minutes'] = _status_age_minutes(
+        wind_status, 'wind_ref_mean'
+    )
+    diagnostic_features['obs_data_age_minutes'] = _status_age_minutes(
+        observation_status, 'obs_data_age_minutes'
+    )
+    diagnostic_features['forecast_age_minutes'] = _status_age_minutes(
+        forecast_status, 'forecast_max'
+    )
+    return diagnostic_features, numeric_features
+
+
 
 def _get_lgb():
     import lightgbm as _lgb
@@ -2256,6 +2287,7 @@ def predict_intraday_tmax_all(
     ilens_forecast_tmax=None, ilens_forecast_tmin=None,
     ilens_forecast_age_minutes=None, ilens_forecast_lead_days=None,
     obs_data_age_minutes=None, wind_data_age_minutes=None,
+    input_status=None,
     **rain_kwargs):
     _load_models()
     # Strip any Model A/D/E params that may have leaked into rain_kwargs (defensive)
@@ -2410,6 +2442,7 @@ def predict_intraday_tmax_all(
                 wind_kings_park_current=wind_kings_park_current,
                 obs_data_age_minutes=obs_data_age_minutes,
                 wind_data_age_minutes=wind_data_age_minutes,
+                input_status=input_status,
             )
         except Exception as e:
             logger.warning("Model 2A prediction failed: %s", e)
@@ -2484,6 +2517,7 @@ def predict_intraday_tmax_all(
                 wind_kings_park_current=wind_kings_park_current,
                 obs_data_age_minutes=obs_data_age_minutes,
                 wind_data_age_minutes=wind_data_age_minutes,
+                input_status=input_status,
             )
         except Exception as e:
             logger.warning("Model 2A v2 prediction failed: %s", e)
@@ -2810,6 +2844,7 @@ def predict_intraday_tmax_model_2a(
     wind_highland_mean=None, wind_highland_max=None,
     wind_all_change_60m=None, wind_kings_park_current=None,
     obs_data_age_minutes=None, wind_data_age_minutes=None,
+    input_status=None,
     hour=None, minute=None,
 ):
     """Predict remaining upside using Model 2A (core baseline with forecast + wind).
@@ -2955,6 +2990,9 @@ def predict_intraday_tmax_model_2a(
             _features_log[__k] = bool(__v)
         else:
             _features_log[__k] = __v
+    _diagnostic_features_log, _numeric_features_log = _feature_logs_with_truthful_ages(
+        _features_log, input_status
+    )
 
     active = _get_active()
     feature_cols = active['feature_cols']
@@ -3006,7 +3044,8 @@ def predict_intraday_tmax_model_2a(
         'pred_tmax_p75': pred_tmax_p75,
         'pred_tmax_p90': pred_tmax_p90,
         'sample_count': None,
-        '_features': _features_log,
+        '_features': _diagnostic_features_log,
+        '_numeric_features': _numeric_features_log,
     }
 
 
@@ -3241,6 +3280,7 @@ def predict_intraday_tmax_model_2a_v2(
     wind_offshore_highland_mean=None, wind_offshore_highland_max=None,
     wind_all_change_60m=None, wind_kings_park_current=None,
     obs_data_age_minutes=None, wind_data_age_minutes=None,
+    input_status=None,
     hour=None, minute=None,
 ):
     """Predict remaining upside using Model 2A v2 (wind_offshore_highland variant)."""
@@ -3378,6 +3418,9 @@ def predict_intraday_tmax_model_2a_v2(
             _features_log[__k] = bool(__v)
         else:
             _features_log[__k] = __v
+    _diagnostic_features_log, _numeric_features_log = _feature_logs_with_truthful_ages(
+        _features_log, input_status
+    )
 
     active = _get_active()
     feature_cols = active['feature_cols']
@@ -3429,7 +3472,8 @@ def predict_intraday_tmax_model_2a_v2(
         'pred_tmax_p75': pred_tmax_p75,
         'pred_tmax_p90': pred_tmax_p90,
         'sample_count': None,
-        '_features': _features_log,
+        '_features': _diagnostic_features_log,
+        '_numeric_features': _numeric_features_log,
     }
 
 

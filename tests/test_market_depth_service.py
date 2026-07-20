@@ -56,3 +56,25 @@ def test_batch_handles_missing_books():
 
 def test_batch_empty_input():
     assert mds.fetch_market_depths_batch({}) == {}
+
+
+def test_execution_estimate_fails_closed_without_clob_even_with_gamma_quote():
+    result = mds.compute_execution_estimate(
+        "BUY", 10.0, None, gamma_ask=0.10, gamma_bid=0.09
+    )
+    assert result["shares_filled"] == 0
+    assert result["fill_frac"] == 0.0
+
+
+def test_execution_estimate_walks_complete_clob_depth():
+    summary = mds.compute_depth_summary({
+        "asset_id": "TOKEN_A",
+        "bids": [],
+        "asks": [
+            {"price": "0.20", "size": "10"},
+            {"price": "0.40", "size": "10"},
+        ],
+    })
+    result = mds.compute_execution_estimate("BUY", 6.0, summary, gamma_ask=0.01)
+    assert result["shares_filled"] == pytest.approx(20.0)
+    assert result["avg_price"] == pytest.approx(0.30)

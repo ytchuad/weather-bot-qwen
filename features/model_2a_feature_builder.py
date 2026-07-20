@@ -7,11 +7,21 @@ Used for:
 3. Replay parity check
 
 All features respect: available_time <= decision_time
-Feature names must EXACTLY match models/intraday_minute_ml_model_2a/feature_list.json
+This canonical builder is the Model 2A v2 builder.  Its feature names must
+exactly match models/intraday_minute_ml_model_2a_v2/feature_list.json.  Model
+2A v1 must not call this builder because its trained wind semantics differ.
 """
 
 import pandas as pd
 import numpy as np
+
+from features.input_status import (
+    DEFAULT_STALE_AFTER_MINUTES,
+    InputStatus,
+    build_forecast_input_status,
+    build_observation_buffer_status,
+    jsonable,
+)
 
 
 def build_model_2a_features(
@@ -236,6 +246,236 @@ def build_model_2a_features(
     feature_df = pd.DataFrame([features], index=[decision_time])
     feature_df.index.name = "decision_time"
     return feature_df
+
+
+def build_model_2a_input_status(
+    decision_time: pd.Timestamp,
+    weather_canonical: pd.DataFrame,
+    wind_canonical: pd.DataFrame,
+    forecast_canonical: pd.DataFrame,
+    spec: dict,
+    mode: str,
+) -> dict:
+    """Build source-status metadata alongside the v2 numeric feature frame.
+
+    This function deliberately does not alter or return the LightGBM feature
+    vector.  It is safe to call after ``build_model_2a_features`` and records
+    the provenance of zero-valued observations separately from missing data.
+    """
+    features = build_model_2a_features(
+        decision_time=decision_time,
+        weather_canonical=weather_canonical,
+        wind_canonical=wind_canonical,
+        forecast_canonical=forecast_canonical,
+        spec=spec,
+        mode=mode,
+    )
+    row = features.iloc[0].to_dict() if not features.empty else {}
+    stale_after = float(
+        spec.get("data_quality_rules", {})
+        .get("max_data_age_minutes", DEFAULT_STALE_AFTER_MINUTES)
+    )
+
+    weather = _filter_available(weather_canonical, decision_time, "available_time")
+    wind = _filter_available(wind_canonical, decision_time, "available_time")
+
+    def _source_timestamp(frame: pd.DataFrame, value_column: str | None) -> pd.Timestamp | None:
+        if frame is None or frame.empty:
+            return None
+        source_column = "timestamp" if "timestamp" in frame.columns else "available_time"
+        if source_column not in frame.columns:
+            return None
+        subset = frame
+        if value_column and value_column in subset.columns:
+            subset = subset.loc[~subset[value_column].isna()]
+        if subset.empty:
+            return None
+        timestamps = pd.to_datetime(subset[source_column], errors="coerce").dropna()
+        return timestamps.max() if not timestamps.empty else None
+
+    def _canonical_status(
+        name: str,
+        value: object,
+        frame: pd.DataFrame,
+        value_column: str | None,
+        source_name: str,
+        *,
+        selector=None,
+        observation_method: str = "direct_observation",
+    ) -> dict:
+        subset = frame
+        if selector is not None and not frame.empty:
+            subset = frame.loc[selector]
+        source = _source_timestamp(subset, value_column)
+        if subset.empty or (value_column and value_column in subset.columns and subset[value_column].dropna().empty):
+            return InputStatus.fallback(
+                None,
+                fallback_method="unavailable",
+                decision_timestamp=decision_time,
+                source_name=source_name,
+                observation_method="insufficient_history",
+            ).to_dict()
+        return InputStatus.from_value(
+            value,
+            source_timestamp=source,
+            decision_timestamp=decision_time,
+            source_name=source_name,
+            stale_after_minutes=stale_after,
+            observation_method=observation_method,
+        ).to_dict()
+
+    weather_status = {}
+    for name, column in (
+        ("temp_current", "temp_current_clean"),
+        ("rh_current", "rh_current"),
+        ("pressure_current", "pressure_current"),
+        ("dew_point_current", "dew_point_current"),
+    ):
+        weather_status[name] = _canonical_status(
+            name,
+            row.get(name),
+            weather,
+            column,
+            "hko_weather_obs",
+        )
+
+    for name in ("max_so_far", "min_so_far"):
+        value = row.get(name)
+        selector = None
+        if "temp_current_clean" in weather.columns and value is not None and not pd.isna(value):
+            selector = weather["temp_current_clean"].eq(float(value))
+        weather_status[name] = _canonical_status(
+            name,
+            value,
+            weather,
+            "temp_current_clean",
+            "hko_weather_obs",
+            selector=selector,
+        )
+
+    weather_status["obs_data_age_minutes"] = InputStatus.from_value(
+        row.get("obs_data_age_minutes"),
+        source_timestamp=_source_timestamp(weather, "temp_current_clean"),
+        decision_timestamp=decision_time,
+        source_name="hko_weather_obs",
+        stale_after_minutes=stale_after,
+        observation_method="source_age",
+    ).to_dict()
+
+    wind_field_groups = {
+        "reference": ("ref", "wind_ref_mean", "wind_ref_max"),
+        "victoria_harbour": (
+            "victoria_harbour",
+            "wind_victoria_harbour_mean",
+            "wind_victoria_harbour_max",
+        ),
+        "offshore_highland": (
+            "offshore_highland",
+            "wind_offshore_highland_mean",
+            "wind_offshore_highland_max",
+        ),
+    }
+    wind_status: dict[str, object] = {}
+    wind_groups: dict[str, object] = {}
+    for group_name, (canonical_group, mean_name, max_name) in wind_field_groups.items():
+        selector = wind.get("station_group", pd.Series(index=wind.index, dtype=object)).eq(canonical_group)
+        subset = wind.loc[selector] if not wind.empty else wind
+        mean_status = _canonical_status(
+            mean_name,
+            row.get(mean_name),
+            subset,
+            "wind_speed",
+            "i-lens_wind_obs",
+        )
+        max_status = _canonical_status(
+            max_name,
+            row.get(max_name),
+            subset,
+            "wind_speed",
+            "i-lens_wind_obs",
+        )
+        wind_status[mean_name] = mean_status
+        wind_status[max_name] = max_status
+        wind_groups[group_name] = {"mean": mean_status, "max": max_status}
+
+    kings_selector = wind.get("station_id", pd.Series(index=wind.index, dtype=object)).eq("京士柏")
+    kings_status = _canonical_status(
+        "wind_kings_park_current",
+        row.get("wind_kings_park_current"),
+        wind.loc[kings_selector] if not wind.empty else wind,
+        "wind_speed",
+        "i-lens_wind_obs",
+    )
+    wind_status["wind_kings_park_current"] = kings_status
+    wind_groups["kings_park"] = {"current": kings_status}
+
+    all_wind_source = _source_timestamp(wind, "wind_speed")
+    change_status = InputStatus.from_value(
+        row.get("wind_all_change_60m"),
+        source_timestamp=all_wind_source,
+        decision_timestamp=decision_time,
+        source_name="i-lens_wind_obs",
+        stale_after_minutes=stale_after,
+        observation_method="derived_change",
+    ).to_dict()
+    wind_status["wind_all_change_60m"] = change_status
+    wind_groups["aggregate_change"] = {"change_60m": change_status}
+    wind_status["groups"] = wind_groups
+
+    forecast_status = build_forecast_input_status(
+        forecast_canonical,
+        decision_timestamp=decision_time,
+        target_date=decision_time.normalize(),
+        stale_after_minutes=stale_after,
+    )
+    # Keep both the canonical forecast names and feature names convenient for
+    # snapshot consumers without putting these dicts into the model vector.
+    forecast_status["forecast_max_temp"] = forecast_status.get("forecast_max")
+    forecast_status["forecast_min_temp"] = forecast_status.get("forecast_min")
+
+    weather_buffer = weather.copy()
+    if not weather_buffer.empty:
+        if "temp" not in weather_buffer.columns:
+            weather_buffer["temp"] = weather_buffer.get("temp_current_clean", np.nan)
+        if "rh" not in weather_buffer.columns:
+            weather_buffer["rh"] = weather_buffer.get("rh_current", np.nan)
+    buffer_values = {
+        "temp_now": row.get("temp_current"),
+        "rh_now": row.get("rh_current"),
+        "max_so_far": row.get("max_so_far"),
+        "min_so_far": row.get("min_so_far"),
+        "temp_30m_ago": _lookback_value(weather, "temp_current_clean", decision_time, 30),
+        "temp_60m_ago": _lookback_value(weather, "temp_current_clean", decision_time, 60),
+        "temp_120m_ago": _lookback_value(weather, "temp_current_clean", decision_time, 120),
+        "temp_change_30m": row.get("temp_change_30m"),
+        "temp_change_60m": row.get("temp_change_60m"),
+        "temp_volatility_60m": row.get("temp_volatility_60m"),
+        "temp_acceleration_60m": row.get("temp_acceleration_60m"),
+        "rh_change_60m": row.get("rh_change_60m"),
+        "dew_point_change_60m": row.get("dew_point_change_60m"),
+        "dew_point_spread_change_60m": row.get("dew_point_spread_change_60m"),
+        "time_since_max": row.get("time_since_max"),
+    }
+    observation_status = build_observation_buffer_status(
+        weather_buffer,
+        decision_timestamp=decision_time,
+        values=buffer_values,
+        stale_after_minutes=stale_after,
+    )
+
+    return jsonable(
+        {
+            "status_contract_version": "phase2a.v1",
+            "numeric_policy": "legacy_compatible",
+            "status_policy": "truthful",
+            "decision_timestamp": decision_time,
+            "mode": mode,
+            "weather_input_status": weather_status,
+            "wind_input_status": wind_status,
+            "forecast_input_status": forecast_status,
+            "observation_buffer_status": observation_status,
+        }
+    )
 
 
 # --- Helper functions ---

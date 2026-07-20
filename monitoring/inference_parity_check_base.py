@@ -15,6 +15,7 @@ def run_parity_check(
     source_adapter_fn=None,
     feature_builder_fn=None,
     model_name: str = "unknown",
+    run_metadata: dict = None,
 ) -> dict:
     """Generic replay parity check.
 
@@ -51,7 +52,8 @@ def run_parity_check(
 
     inference_log = pd.read_parquet(log_path)
     tolerances = spec.get("feature_tolerances", {})
-    model_name = spec.get("model_name", model_name)
+    report_model_name = model_name if model_name != "unknown" else spec.get("model_name", model_name)
+    run_metadata = dict(run_metadata or {})
 
     canonical_sources = {}
     if source_adapter_fn is not None:
@@ -135,7 +137,7 @@ def run_parity_check(
                 if not is_pass and abs_diff >= 5.0:
                     spike_detection_count += 1
 
-                all_comparisons.append({
+                comparison = {
                     "decision_time": decision_time,
                     "feature_name": fname,
                     "live_value": live_num,
@@ -143,10 +145,12 @@ def run_parity_check(
                     "abs_diff": abs_diff,
                     "rel_diff": rel_diff,
                     "pass_flag": is_pass,
-                })
+                }
+                comparison.update(run_metadata)
+                all_comparisons.append(comparison)
 
     report_df = pd.DataFrame(all_comparisons)
-    report_path = output_dir / f"{model_name}_feature_parity_report.csv"
+    report_path = output_dir / f"{report_model_name}_feature_parity_report.csv"
     report_df.to_csv(report_path, index=False)
     logger.info(f"Parity report written to {report_path}")
 
@@ -158,6 +162,7 @@ def run_parity_check(
     missing_feature_rate = missing_feature_count / total_feature_checks if total_feature_checks > 0 else 0.0
 
     summary = {
+        **run_metadata,
         "n_inference_rows": n_rows,
         "n_feature_comparisons": n_comparisons,
         "overall_pass_rate": overall_pass_rate,
@@ -170,7 +175,7 @@ def run_parity_check(
         ).sum()) if "guardrail_flags" in inference_log.columns else 0,
     }
 
-    summary_path = output_dir / f"{model_name}_feature_parity_summary.txt"
+    summary_path = output_dir / f"{report_model_name}_feature_parity_summary.txt"
     with open(summary_path, "w") as f:
         f.write(f"Feature Parity Summary - {model_name}\n")
         f.write(f"{'=' * 60}\n")

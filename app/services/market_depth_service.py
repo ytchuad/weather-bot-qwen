@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any
 
 import requests
 
@@ -65,7 +64,10 @@ def fetch_order_books_batch(token_ids: list[str]) -> list[dict]:
 # ── depth summary with correct sort order ─────────────────────────────
 
 
-def compute_depth_summary(book: dict | None) -> dict | None:
+def compute_depth_summary(
+    book: dict | None,
+    fetch_cycle_id: str | None = None,
+) -> dict | None:
     """Compact depth summary from a raw order book dict.
 
     CLOB returns asks *descending* (highest price first) and bids *ascending*
@@ -84,21 +86,32 @@ def compute_depth_summary(book: dict | None) -> dict | None:
     raw_asks = book.get("asks", [])
     ts_raw = book.get("timestamp")
 
-    def _extract(levels: list) -> list[dict]:
+    validation_errors: list[str] = []
+
+    def _extract(levels: list, side_name: str) -> list[dict]:
         """Parse all price/size levels, filtering out zero-size entries."""
         out: list[dict] = []
-        for l in levels:
+        if not isinstance(levels, list):
+            validation_errors.append(f"{side_name}_levels_not_list")
+            return out
+        for index, level in enumerate(levels):
             try:
-                p = float(l["price"])
-                s = float(l["size"])
-                if s > 0:
-                    out.append({"price": round(p, 6), "size": round(s, 2)})
-            except (ValueError, TypeError):
+                p = float(level["price"])
+                s = float(level["size"])
+                if not (0.0 < p < 1.0):
+                    validation_errors.append(f"{side_name}[{index}]_invalid_price")
+                    continue
+                if s <= 0:
+                    validation_errors.append(f"{side_name}[{index}]_non_positive_size")
+                    continue
+                out.append({"price": round(p, 8), "size": round(s, 8)})
+            except (KeyError, ValueError, TypeError):
+                validation_errors.append(f"{side_name}[{index}]_non_numeric")
                 continue
         return out
 
-    bids_parsed = _extract(raw_bids)
-    asks_parsed = _extract(raw_asks)
+    bids_parsed = _extract(raw_bids, "bids")
+    asks_parsed = _extract(raw_asks, "asks")
 
     # bids: highest price first (best for seller)
     # asks: lowest price first (best for buyer)
@@ -111,8 +124,8 @@ def compute_depth_summary(book: dict | None) -> dict | None:
     best_bid = top_bids[0] if top_bids else None
     best_ask = top_asks[0] if top_asks else None
 
-    total_bid_size = round(sum(l["size"] for l in bids_sorted), 2)
-    total_ask_size = round(sum(l["size"] for l in asks_sorted), 2)
+    total_bid_size = round(sum(level["size"] for level in bids_sorted), 2)
+    total_ask_size = round(sum(level["size"] for level in asks_sorted), 2)
 
     spread = round(best_ask["price"] - best_bid["price"], 6) if (best_bid and best_ask) else None
     midpoint = round((best_bid["price"] + best_ask["price"]) / 2, 6) if (best_bid and best_ask) else None
@@ -120,8 +133,8 @@ def compute_depth_summary(book: dict | None) -> dict | None:
     # size-weighted mid (VWAP across top levels)
     weighted_mid = None
     if top_bids and top_asks:
-        bid_vwap = sum(l["price"] * l["size"] for l in top_bids) / sum(l["size"] for l in top_bids)
-        ask_vwap = sum(l["price"] * l["size"] for l in top_asks) / sum(l["size"] for l in top_asks)
+        bid_vwap = sum(level["price"] * level["size"] for level in top_bids) / sum(level["size"] for level in top_bids)
+        ask_vwap = sum(level["price"] * level["size"] for level in top_asks) / sum(level["size"] for level in top_asks)
         weighted_mid = round((bid_vwap + ask_vwap) / 2, 6)
 
     # depth imbalance: +1 = all bid pressure, -1 = all ask pressure
@@ -131,7 +144,13 @@ def compute_depth_summary(book: dict | None) -> dict | None:
         depth_imbalance = round((total_bid_size - total_ask_size) / denom, 4)
 
     return {
+        "asset_id": book.get("asset_id") or book.get("market"),
         "timestamp": ts_raw,
+        "tick_size": book.get("tick_size"),
+        "minimum_order_size": book.get("min_order_size", book.get("minimum_order_size")),
+        "fetch_cycle_id": fetch_cycle_id,
+        "source_name": "polymarket_clob",
+        "validation_errors": validation_errors,
         "best_bid": best_bid,
         "best_ask": best_ask,
         "spread": spread,
@@ -144,6 +163,10 @@ def compute_depth_summary(book: dict | None) -> dict | None:
         "depth_imbalance": depth_imbalance,
         "top_bids": top_bids,
         "top_asks": top_asks,
+        # Keep the complete normalized depth for execution.  The top_* fields
+        # remain compact diagnostics for the dashboard.
+        "bids": bids_sorted,
+        "asks": asks_sorted,
     }
 
 
@@ -231,62 +254,32 @@ def compute_execution_estimate(
     gamma_ask: float | None = None,
     gamma_bid: float | None = None,
 ) -> dict:
-    """Best-effort execution estimate using CLOB depth + Gamma fallback.
+    """CLOB-only execution estimate; missing depth fails closed.
 
     For small orders the Gamma best-ask/best-bid (which includes AMM
-    liquidity) is usually tighter than the CLOB top-of-book.  This function
-    picks the cheaper source automatically.
+    liquidity) is diagnostic only and is intentionally ignored here.  This
+    function never substitutes Gamma for a missing CLOB quote.
 
     Returns the same keys as :func:`walk_book`.
     """
+    # Gamma arguments are retained for API compatibility only.  They cannot
+    # supply an executable quote when the CLOB book is absent or incomplete.
+    del gamma_ask, gamma_bid
+    if depth_summary:
+        depth_summary = dict(depth_summary)
+        if depth_summary.get("asks") is not None:
+            depth_summary["top_asks"] = depth_summary["asks"]
+        if depth_summary.get("bids") is not None:
+            depth_summary["top_bids"] = depth_summary["bids"]
     if not depth_summary:
-        # no CLOB data — fall back to Gamma only
-        price = gamma_ask if side == "BUY" else gamma_bid
-        if price is None or price <= 0:
-            return {"avg_price": 0, "shares_filled": 0, "value_filled": 0,
-                    "levels_used": 0, "fill_frac": 0.0}
-        shares = order_value / price
-        return {"avg_price": round(price, 6), "shares_filled": round(shares, 2),
-                "value_filled": round(order_value, 2), "levels_used": 1,
-                "fill_frac": 1.0}
+        return {"avg_price": 0, "shares_filled": 0, "value_filled": 0,
+                "levels_used": 0, "fill_frac": 0.0}
 
     asks = sorted(depth_summary.get("top_asks", []), key=lambda x: x["price"])
     bids = sorted(depth_summary.get("top_bids", []), key=lambda x: x["price"], reverse=True)
-    all_asks = asks
-    all_bids = bids
-
     if side == "BUY":
-        # Prefer the better of CLOB top ask and Gamma bestAsk
-        best = None
-        if all_asks:
-            best = all_asks[0]["price"]
-        if gamma_ask is not None and (best is None or gamma_ask < best):
-            best = gamma_ask
-        if best is None:
-            return {"avg_price": 0, "shares_filled": 0, "value_filled": 0,
-                    "levels_used": 0, "fill_frac": 0.0}
-        # If Gamma offers a better price, use Gamma for full fill
-        if gamma_ask is not None and gamma_ask <= (all_asks[0]["price"] if all_asks else float("inf")):
-            shares = order_value / gamma_ask
-            return {"avg_price": round(gamma_ask, 6), "shares_filled": round(shares, 2),
-                    "value_filled": round(order_value, 2), "levels_used": 1,
-                    "fill_frac": 1.0}
-        return walk_book("BUY", order_value, all_asks, all_bids)
-    else:
-        best = None
-        if all_bids:
-            best = all_bids[0]["price"]
-        if gamma_bid is not None and (best is None or gamma_bid > best):
-            best = gamma_bid
-        if best is None:
-            return {"avg_price": 0, "shares_filled": 0, "value_filled": 0,
-                    "levels_used": 0, "fill_frac": 0.0}
-        if gamma_bid is not None and gamma_bid >= (all_bids[0]["price"] if all_bids else 0):
-            shares = order_value / gamma_bid
-            return {"avg_price": round(gamma_bid, 6), "shares_filled": round(shares, 2),
-                    "value_filled": round(order_value, 2), "levels_used": 1,
-                    "fill_frac": 1.0}
-        return walk_book("SELL", order_value, all_asks, all_bids)
+        return walk_book("BUY", order_value, asks, bids)
+    return walk_book("SELL", order_value, asks, bids)
 
 
 # ── one-shot convenience wrappers ─────────────────────────────────────
@@ -300,6 +293,7 @@ def fetch_market_depth(token_id: str) -> dict | None:
 
 def fetch_market_depths_batch(
     bucket_token_map: dict[str, str],
+    fetch_cycle_id: str | None = None,
 ) -> dict[str, dict | None]:
     """Batch depth fetch for many buckets at once.
 
@@ -322,7 +316,7 @@ def fetch_market_depths_batch(
     result: dict[str, dict | None] = {}
     for bucket in buckets:
         raw = by_asset.get(bucket_token_map[bucket])
-        result[bucket] = compute_depth_summary(raw)
+        result[bucket] = compute_depth_summary(raw, fetch_cycle_id=fetch_cycle_id)
     return result
 
 
@@ -358,6 +352,7 @@ class DepthCache:
         self._no_cache: dict[str, dict | None] = {}
         self._token_ids: dict[str, str] = {}
         self._no_token_ids: dict[str, str] = {}
+        self._fetch_cycle_id: str | None = None
         self._lock = threading.Lock()
         self._running = False
         self._thread: threading.Thread | None = None
@@ -381,6 +376,11 @@ class DepthCache:
         with self._lock:
             return dict(self._no_cache)
 
+    def get_bundle(self) -> tuple[dict[str, dict | None], dict[str, dict | None], str | None]:
+        """Return YES/NO depth and the coherent refresh cycle identifier."""
+        with self._lock:
+            return dict(self._cache), dict(self._no_cache), self._fetch_cycle_id
+
     def start(self) -> None:
         """Start the background refresh thread (daemon)."""
         if self._running:
@@ -400,19 +400,23 @@ class DepthCache:
     def _loop(self) -> None:
         while self._running:
             try:
+                cycle_id = str(time.time_ns())
                 with self._lock:
                     yes_tids = dict(self._token_ids)
                     no_tids = dict(self._no_token_ids)
 
                 if yes_tids:
-                    depths = fetch_market_depths_batch(yes_tids)
+                    depths = fetch_market_depths_batch(yes_tids, fetch_cycle_id=cycle_id)
                     with self._lock:
                         self._cache = depths
 
                 if no_tids:
-                    no_depths = fetch_market_depths_batch(no_tids)
+                    no_depths = fetch_market_depths_batch(no_tids, fetch_cycle_id=cycle_id)
                     with self._lock:
                         self._no_cache = no_depths
+                if yes_tids and no_tids:
+                    with self._lock:
+                        self._fetch_cycle_id = cycle_id
             except Exception as exc:
                 logger.warning("DepthCache refresh failed: %s", exc)
 
