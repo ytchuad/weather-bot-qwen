@@ -20,7 +20,7 @@ from .minute_partition import (
     partition_start_from_directory,
 )
 from .schema import jsonable
-from .storage import _default_root, _json_dump, _sha256, _timestamp, read_books
+from .storage import _date_scan_root, _default_root, _json_dump, _sha256, _timestamp, read_books
 from .weather_schema import WEATHER_SCHEMA_VERSION, validate_weather_snapshot
 
 logger = logging.getLogger(__name__)
@@ -172,12 +172,13 @@ class WeatherSnapshotStore:
             return None
         return kind, match.group("partition"), bool(match.group("temporary"))
 
-    def scan(self) -> list[WeatherPartitionInfo]:
-        if not self.root.exists():
+    def scan(self, date_value: str | None = None) -> list[WeatherPartitionInfo]:
+        scan_root = _date_scan_root(self.root, date_value)
+        if scan_root is None or not scan_root.exists():
             return []
         groups: dict[tuple[Path, str], WeatherPartitionInfo] = {}
-        for path in self.root.rglob("*"):
-            if not path.is_file() or any(part.startswith(".") for part in path.relative_to(self.root).parts):
+        for path in scan_root.rglob("*"):
+            if not path.is_file() or any(part.startswith(".") for part in path.relative_to(scan_root).parts):
                 continue
             parsed = self._parse_part_file(path)
             if parsed is None:
@@ -462,7 +463,7 @@ class WeatherSnapshotStore:
         start_dt = _timestamp(start) if start else None
         end_dt = _timestamp(end) if end else None
         result: list[tuple[WeatherPartitionInfo, dict[str, Any]]] = []
-        for info in self.scan():
+        for info in self.scan(date_value=date_value):
             if info.status != "complete" or (only_unuploaded and info.uploaded):
                 continue
             if verify_checksums and info.checksum_valid is not True:

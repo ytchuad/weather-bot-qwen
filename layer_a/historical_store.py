@@ -422,19 +422,19 @@ class HistoricalStore:
         except (TypeError, ValueError):
             return False
 
-    def _local_records(self, kind: str) -> list[dict[str, Any]]:
+    def _local_records(self, kind: str, *, date_value: str | None = None) -> list[dict[str, Any]]:
         if kind == "model":
-            return [record for _info, record in self.local_store.iter_records()]
+            return [record for _info, record in self.local_store.iter_records(date_value=date_value)]
         if kind == "market":
             return [
                 record
-                for info in self.local_market_store.scan()
+                for info in self.local_market_store.scan(date_value=date_value)
                 if info.status in {"complete", "incomplete"}
                 for record in self.local_market_store.read_partition_snapshots(info)
             ]
         return [
             record
-            for info in self.local_weather_store.scan()
+            for info in self.local_weather_store.scan(date_value=date_value)
             if info.status in {"complete", "incomplete"}
             for record in self.local_weather_store.read_partition_snapshots(info)
         ]
@@ -546,12 +546,18 @@ class HistoricalStore:
             )
         return rows
 
-    def _remote_records(self, kind: str) -> list[dict[str, Any]]:
+    def _remote_records(self, kind: str, *, date_value: str | None = None) -> list[dict[str, Any]]:
         if kind == "model":
-            return [record for _info, record in self._remote_model_store().iter_records()]
+            return [record for _info, record in self._remote_model_store().iter_records(date_value=date_value)]
         if kind == "market":
-            return [record for _info, record in self._remote_market_store().read_snapshot_records()]
-        return [record for _info, record in self._remote_weather_store().read_snapshot_records()]
+            return [
+                record
+                for _info, record in self._remote_market_store().read_snapshot_records(date_value=date_value)
+            ]
+        return [
+            record
+            for _info, record in self._remote_weather_store().read_snapshot_records(date_value=date_value)
+        ]
 
     @staticmethod
     def _key(kind: str, record: Mapping[str, Any]) -> str | None:
@@ -573,9 +579,9 @@ class HistoricalStore:
         existing_backfill = isinstance(existing_status, Mapping) and bool(existing_status.get("buffer_backfill"))
         return candidate_backfill and not existing_backfill
 
-    def _merged_records(self, kind: str) -> list[dict[str, Any]]:
-        local = self._local_records(kind)
-        remote = self._remote_records(kind)
+    def _merged_records(self, kind: str, *, date_value: str | None = None) -> list[dict[str, Any]]:
+        local = self._local_records(kind, date_value=date_value)
+        remote = self._remote_records(kind, date_value=date_value)
         merged: dict[str, tuple[int, dict[str, Any]]] = {}
         for rank, records in ((1, remote), (2, local)):
             for record in records:
@@ -611,7 +617,7 @@ class HistoricalStore:
         # advanced only by remote refresh would make the UI stale indefinitely.
         # Re-scan the small local/remote read set on every API query instead.
         with self._lock:
-            data = self._merged_records(kind)
+            data = self._merged_records(kind, date_value=date_value)
         start_dt = _timestamp(start) if start else None
         end_dt = _timestamp(end) if end else None
         timestamp_field = "decision_timestamp" if kind != "weather" else "snapshot_timestamp"

@@ -102,8 +102,12 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
   const [isolated, setIsolated] = useState<string | null>(null)
   const { data, isLoading, isError } = useQuery({
     queryKey: ["modelsComparison", date, isMinTemp],
-    queryFn: () => fetchModelsComparison(date, isMinTemp),
+    queryFn: ({ signal }) => fetchModelsComparison(date, isMinTemp, signal),
     refetchInterval: 60_000,
+    refetchIntervalInBackground: true,
+    refetchOnMount: "always",
+    staleTime: 0,
+    retry: 1,
   })
 
   const chart = useMemo(() => {
@@ -205,8 +209,8 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
     }
   }, [data, isolated, visibleKeys])
 
-  if (isLoading) return <div className="flex h-[360px] w-full items-center justify-center text-sm text-white/40">Loading temperature tracking data...</div>
-  if (isError) return <div className="flex h-[360px] w-full items-center justify-center text-sm text-rose-300">Failed to load tracking data.</div>
+  if (isLoading && !data) return <div className="flex h-[360px] w-full items-center justify-center text-sm text-white/40">Loading temperature tracking data...</div>
+  if (isError && !data) return <div className="flex h-[360px] w-full items-center justify-center text-sm text-rose-300">Failed to load tracking data.</div>
   if (!chart) return <div className="flex h-[360px] w-full items-center justify-center text-xs text-white/35">No trajectory data available yet.</div>
 
   return (
@@ -218,7 +222,7 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
         {isolated && <button onClick={() => setIsolated(null)} className="mono ml-1 rounded-full border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1 text-[10px] font-semibold text-cyan-300 transition-colors hover:bg-cyan-400/20">Show all</button>}
       </div>
       <div className="h-[330px] w-full sm:h-[360px]">
-        <ReactECharts option={chart.option} notMerge={true} style={{ height: "100%", width: "100%" }} />
+        <ReactECharts option={chart.option} notMerge={false} replaceMerge={["series"]} lazyUpdate={true} style={{ height: "100%", width: "100%" }} />
       </div>
       <div className="mono text-[10.5px] tracking-wide text-white/25">Click a series to focus it · {chart.visibleCount} model series · {chart.timestampCount} observations · dashed line = market weighted temperature</div>
     </div>

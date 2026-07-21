@@ -23,6 +23,7 @@ from .minute_partition import (
 from .schema import jsonable
 from .storage import (
     _default_root,
+    _date_scan_root,
     _json_dump,
     _sha256,
     _timestamp,
@@ -182,13 +183,14 @@ class MarketSnapshotStore:
             return None
         return kind, match.group("partition"), temporary
 
-    def scan(self) -> list[MarketPartitionInfo]:
+    def scan(self, date_value: str | None = None) -> list[MarketPartitionInfo]:
         """Scan closed partitions and recoverable open hourly files."""
-        if not self.root.exists():
+        scan_root = _date_scan_root(self.root, date_value)
+        if scan_root is None or not scan_root.exists():
             return []
         groups: dict[tuple[Path, str], MarketPartitionInfo] = {}
-        for path in self.root.rglob("*"):
-            if not path.is_file() or any(part.startswith(".") for part in path.relative_to(self.root).parts):
+        for path in scan_root.rglob("*"):
+            if not path.is_file() or any(part.startswith(".") for part in path.relative_to(scan_root).parts):
                 continue
             parsed = self._parse_part_file(path)
             if parsed is None:
@@ -501,7 +503,7 @@ class MarketSnapshotStore:
         start_dt = _timestamp(start) if start else None
         end_dt = _timestamp(end) if end else None
         result: list[tuple[MarketPartitionInfo, dict[str, Any]]] = []
-        for info in self.scan():
+        for info in self.scan(date_value=date_value):
             if info.status != "complete":
                 continue
             if only_unuploaded and info.uploaded:

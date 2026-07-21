@@ -153,8 +153,8 @@ export function runAllStrategies(): Promise<{ results: unknown[]; total: number 
 }
 
 // Models comparison chart (Hub page)
-export function fetchModelsComparison(date: string, isMinTemp = false): Promise<ModelsComparisonData> {
-  return get(`/charts/models-comparison?date=${encodeURIComponent(date)}&is_min_temp=${isMinTemp}`, { cache: "no-store" })
+export function fetchModelsComparison(date: string, isMinTemp = false, signal?: AbortSignal): Promise<ModelsComparisonData> {
+  return get(`/charts/models-comparison?date=${encodeURIComponent(date)}&is_min_temp=${isMinTemp}`, { cache: "no-store", signal })
 }
 
 // Bucket probability time-series chart
