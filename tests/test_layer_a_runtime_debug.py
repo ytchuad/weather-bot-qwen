@@ -315,6 +315,23 @@ def test_trajectory_chart_uses_minute_projection(monkeypatch):
     assert legacy_payload["data_source"] == "legacy_csv"
 
 
+def test_minute_history_reads_model_from_incomplete_partition(tmp_path):
+    store = _history_store(tmp_path)
+    store.local_store.capture(_model())
+
+    info = store.local_store.scan(date_value=EVENT_DATE)[0]
+    info.files["manifest"].unlink()
+
+    rows = store.minute_history(
+        date_value=EVENT_DATE,
+        market_kind="highest_temperature",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["model_cycle_id"] == "cycle-debug"
+    assert rows[0]["model_predictions"]["model_debug"]["point_prediction"] == 30.2
+
+
 def test_minute_history_does_not_use_other_temperature_market_cycles(tmp_path):
     store = _history_store(tmp_path)
     store.local_store.capture(_model(cycle_id="tmax-cycle"))

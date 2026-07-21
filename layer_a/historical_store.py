@@ -424,7 +424,12 @@ class HistoricalStore:
 
     def _local_records(self, kind: str, *, date_value: str | None = None) -> list[dict[str, Any]]:
         if kind == "model":
-            return [record for _info, record in self.local_store.iter_records(date_value=date_value)]
+            return [
+                record
+                for info in self.local_store.scan(date_value=date_value)
+                if info.status in {"complete", "incomplete"}
+                for record in self.local_store.read_partition_records(info)
+            ]
         if kind == "market":
             return [
                 record

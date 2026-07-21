@@ -456,8 +456,6 @@ class LayerAStore:
         return self.capture(build_layer_a_record(context, **kwargs))
 
     def read_partition_records(self, info: PartitionInfo) -> list[dict[str, Any]]:
-        if info.status != "complete":
-            return []
         path = info.files.get("cycles")
         if path is None:
             return []
