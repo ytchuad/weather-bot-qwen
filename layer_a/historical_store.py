@@ -584,6 +584,29 @@ class HistoricalStore:
         existing_backfill = isinstance(existing_status, Mapping) and bool(existing_status.get("buffer_backfill"))
         return candidate_backfill and not existing_backfill
 
+    _valid_cache: dict[str, dict[str, bool]] = {}  # kind -> key_hash -> valid
+
+    @staticmethod
+    def _is_valid(kind: str, key: str, record: Mapping[str, Any]) -> bool:
+        cache = HistoricalStore._valid_cache
+        kind_cache = cache.get(kind)
+        if kind_cache is not None:
+            cached = kind_cache.get(key)
+            if cached is not None:
+                return cached
+        try:
+            if kind == "model":
+                validate_layer_a_record(record)
+            elif kind == "market":
+                validate_market_snapshot(record)
+            else:
+                validate_weather_snapshot(record)
+            result = True
+        except (TypeError, ValueError):
+            result = False
+        cache.setdefault(kind, {})[key] = result
+        return result
+
     def _merged_records(self, kind: str, *, date_value: str | None = None) -> list[dict[str, Any]]:
         local = self._local_records(kind, date_value=date_value)
         remote = self._remote_records(kind, date_value=date_value)
@@ -593,14 +616,14 @@ class HistoricalStore:
                 key = self._key(kind, record)
                 if key is None:
                     continue
-                valid_rank = rank + (2 if self._valid(kind, record) else 0)
+                valid_rank = rank + (2 if self._is_valid(kind, key, record) else 0)
                 existing = merged.get(key)
                 if (
                     existing is None
                     or valid_rank > existing[0]
                     or (valid_rank == existing[0] and self._prefer_duplicate(kind, record, existing[1]))
                 ):
-                    merged[key] = (valid_rank, jsonable(record))
+                    merged[key] = (valid_rank, record)
         result = [record for _rank, record in merged.values()]
         timestamp_field = "decision_timestamp" if kind != "weather" else "snapshot_timestamp"
         result.sort(key=lambda record: str(record.get(timestamp_field) or ""))
@@ -635,7 +658,7 @@ class HistoricalStore:
                 continue
             if end_dt and (timestamp is None or timestamp > end_dt):
                 continue
-            result.append(jsonable(record))
+            result.append(record)  # already jsonable from _merged_records
         if limit is not None:
             return result[: max(0, int(limit))]
         return result
