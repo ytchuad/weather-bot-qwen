@@ -289,11 +289,23 @@ def validate_weather_snapshot(record: Mapping[str, Any]) -> None:
     status = record.get("observation_status")
     if not isinstance(status, Mapping):
         raise WeatherSnapshotSchemaError("observation_status must be a mapping")
+    status_fields = (
+        "value",
+        "source_timestamp",
+        "age_seconds",
+        "age_minutes",
+        "is_missing",
+        "is_stale",
+        "is_fallback",
+    )
     for field in WEATHER_OBSERVATION_FIELDS:
         if not isinstance(status.get(field), Mapping):
             raise WeatherSnapshotSchemaError(f"observation status is missing: {field}")
-        if "value" not in status[field] or "source_timestamp" not in status[field]:
-            raise WeatherSnapshotSchemaError(f"truthful status fields are missing: {field}")
+        missing_status_fields = [key for key in status_fields if key not in status[field]]
+        if missing_status_fields:
+            raise WeatherSnapshotSchemaError(
+                f"truthful status fields are missing: {field}:{','.join(missing_status_fields)}"
+            )
 
     def walk(value: Any, path: str = "") -> None:
         if isinstance(value, Mapping):

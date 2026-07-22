@@ -18,6 +18,7 @@ from .schema import (
 
 
 MARKET_SCHEMA_VERSION = "layer_a.market.v1"
+DEFAULT_BOOK_FRESHNESS_SECONDS = 60.0
 _PROHIBITED_FIELDS = {
     "account",
     "account_id",
@@ -81,6 +82,11 @@ def _assess_completeness(
     books: Sequence[Mapping[str, Any]],
     latest_model_cycle_id: str | None,
     model_age_seconds: float | None,
+    decision_timestamp: str | None,
+    capture_timestamp: str | None,
+    max_book_age_seconds: float = DEFAULT_BOOK_FRESHNESS_SECONDS,
+    event_slug: str | None = None,
+    market_kind: str | None = None,
 ) -> dict[str, Any]:
     reasons: list[str] = []
     market_identity_complete = bool(market_identity)
@@ -116,10 +122,21 @@ def _assess_completeness(
     }
     depth_pair_complete = True
     book_timestamp_complete = True
+    book_freshness_complete = True
+    token_mapping_complete = True
     fetch_cycle_coherent = True
+    yes_no_fetch_cycle_coherent = True
     source_complete = True
     fetch_cycles: set[str] = set()
+    fetch_cycles_by_bucket: dict[str, set[str]] = {}
     expected_buckets = [str(item.get("bucket")) for item in market_identity]
+    decision_dt = _parse_datetime(decision_timestamp, naive_timezone=timezone.utc)
+    capture_dt = _parse_datetime(capture_timestamp, naive_timezone=timezone.utc)
+    market_by_bucket = {
+        str(item.get("bucket")): item
+        for item in market_identity
+        if isinstance(item, Mapping) and item.get("bucket")
+    }
     for bucket in expected_buckets:
         for side in ("YES", "NO"):
             prefix = f"clob_books[{bucket}/{side}]"
@@ -127,6 +144,7 @@ def _assess_completeness(
             if book is None:
                 depth_pair_complete = False
                 book_timestamp_complete = False
+                book_freshness_complete = False
                 fetch_cycle_coherent = False
                 source_complete = False
                 _add_reason(reasons, prefix)
@@ -134,19 +152,44 @@ def _assess_completeness(
             if not book.get("token_id") or not book.get("asset_id"):
                 token_identity_complete = False
                 _add_reason(reasons, f"{prefix}.token_identity")
+            expected_token = market_by_bucket.get(bucket, {}).get(
+                "yes_token_id" if side == "YES" else "no_token_id"
+            )
+            if expected_token and (
+                str(book.get("asset_id")) != str(expected_token)
+                or str(book.get("token_id")) != str(expected_token)
+            ):
+                token_mapping_complete = False
+                token_identity_complete = False
+                _add_reason(reasons, f"{prefix}.unknown_token_mapping")
             if book.get("validation_status") != "valid":
                 depth_pair_complete = False
                 _add_reason(reasons, f"{prefix}.validation_status")
             if not isinstance(book.get("bids"), list) or not isinstance(book.get("asks"), list):
                 depth_pair_complete = False
                 _add_reason(reasons, f"{prefix}.depth")
-            if (
-                not book.get("book_timestamp")
-                or not isinstance(book.get("book_age_seconds"), (int, float))
-                or float(book.get("book_age_seconds")) < 0
-            ):
+            book_dt = _parse_datetime(book.get("book_timestamp"), naive_timezone=timezone.utc)
+            book_age = book.get("book_age_seconds")
+            timestamp_ok = bool(book_dt is not None)
+            if decision_dt is not None and book_dt is not None:
+                timestamp_ok = timestamp_ok and book_dt <= decision_dt
+            if capture_dt is not None and book_dt is not None:
+                timestamp_ok = timestamp_ok and book_dt <= capture_dt
+            age_ok = isinstance(book_age, (int, float)) and math.isfinite(float(book_age)) and 0 <= float(book_age) <= max_book_age_seconds
+            if not timestamp_ok:
                 book_timestamp_complete = False
-                _add_reason(reasons, f"{prefix}.book_timestamp")
+                if book_dt is not None and ((decision_dt is not None and book_dt > decision_dt) or (capture_dt is not None and book_dt > capture_dt)):
+                    _add_reason(reasons, f"{prefix}.future_book_timestamp")
+                else:
+                    _add_reason(reasons, f"{prefix}.book_timestamp")
+            if not age_ok:
+                book_freshness_complete = False
+                _add_reason(reasons, f"{prefix}.book_age_seconds")
+            if timestamp_ok and decision_dt is not None and book_dt is not None and isinstance(book_age, (int, float)):
+                expected_age = (decision_dt - book_dt).total_seconds()
+                if abs(expected_age - float(book_age)) > 1.0:
+                    book_freshness_complete = False
+                    _add_reason(reasons, f"{prefix}.book_age_mismatch")
             if not book.get("source_name"):
                 source_complete = False
                 _add_reason(reasons, f"{prefix}.source_name")
@@ -156,6 +199,7 @@ def _assess_completeness(
                 _add_reason(reasons, f"{prefix}.fetch_cycle_id")
             else:
                 fetch_cycles.add(str(cycle))
+                fetch_cycles_by_bucket.setdefault(bucket, set()).add(str(cycle))
             if book.get("tick_size") in (None, ""):
                 depth_pair_complete = False
                 _add_reason(reasons, f"{prefix}.tick_size")
@@ -166,6 +210,25 @@ def _assess_completeness(
     if len(fetch_cycles) > 1:
         fetch_cycle_coherent = False
         _add_reason(reasons, "fetch_cycle_id_incoherent")
+    for bucket, cycles in fetch_cycles_by_bucket.items():
+        if len(cycles) > 1:
+            yes_no_fetch_cycle_coherent = False
+            fetch_cycle_coherent = False
+            _add_reason(reasons, f"yes_no_fetch_cycle_mismatch:{bucket}")
+    if event_slug:
+        slug_kind = None
+        slug_value = str(event_slug).lower()
+        if slug_value.startswith("highest-temperature-"):
+            slug_kind = "highest_temperature"
+        elif slug_value.startswith("lowest-temperature-"):
+            slug_kind = "lowest_temperature"
+        if slug_kind is not None and market_kind and slug_kind != str(market_kind):
+            market_identity_complete = False
+            _add_reason(reasons, "event_slug_market_kind_mismatch")
+    condition_ids = [str(item.get("condition_id")) for item in market_identity if item.get("condition_id")]
+    if len(condition_ids) != len(set(condition_ids)):
+        market_identity_complete = False
+        _add_reason(reasons, "condition_id_duplicate")
     model_link_complete = bool(
         latest_model_cycle_id
         and isinstance(model_age_seconds, (int, float))
@@ -179,7 +242,10 @@ def _assess_completeness(
         and token_identity_complete
         and depth_pair_complete
         and book_timestamp_complete
+        and book_freshness_complete
+        and token_mapping_complete
         and fetch_cycle_coherent
+        and yes_no_fetch_cycle_coherent
         and source_complete
         and model_link_complete
     )
@@ -190,7 +256,10 @@ def _assess_completeness(
         "token_identity_complete": token_identity_complete,
         "depth_pair_complete": depth_pair_complete,
         "book_timestamp_complete": book_timestamp_complete,
+        "book_freshness_complete": book_freshness_complete,
+        "token_mapping_complete": token_mapping_complete,
         "fetch_cycle_coherent": fetch_cycle_coherent,
+        "yes_no_fetch_cycle_coherent": yes_no_fetch_cycle_coherent,
         "source_complete": source_complete,
         "model_link_complete": model_link_complete,
         "replay_eligible_for_market_replay": replay_eligible,
@@ -216,11 +285,26 @@ def build_market_snapshot(
     gamma_reference_data: Mapping[str, Any] | None = None,
     source_status: Mapping[str, Any] | None = None,
     market_snapshot_id: str | None = None,
+    capture_timestamp: Any = None,
+    max_book_age_seconds: float = DEFAULT_BOOK_FRESHNESS_SECONDS,
 ) -> dict[str, Any]:
     """Normalize one strategy-independent minute of market/depth state."""
     decision_iso = _iso_datetime(decision_timestamp, naive_timezone=timezone.utc)
     if decision_iso is None:
         raise MarketSnapshotSchemaError("decision_timestamp is invalid")
+    capture_value = capture_timestamp
+    if capture_value is None:
+        capture_value = datetime.now(timezone.utc)
+        decision_dt = _parse_datetime(decision_iso, naive_timezone=timezone.utc)
+        if decision_dt is not None and capture_value < decision_dt:
+            # Historical/test builders may intentionally construct a future
+            # decision slot.  Never create a structurally impossible capture
+            # timestamp before that decision; live callers pass the actual
+            # capture time explicitly when this distinction matters.
+            capture_value = decision_dt
+    capture_iso = _iso_datetime(capture_value, naive_timezone=timezone.utc)
+    if capture_iso is None:
+        raise MarketSnapshotSchemaError("capture_timestamp is invalid")
     event_date_iso = event_date.isoformat() if isinstance(event_date, date) else str(event_date)
     market_records: list[dict[str, Any]] = []
     books: list[dict[str, Any]] = []
@@ -259,7 +343,7 @@ def build_market_snapshot(
         "market_snapshot_id": str(snapshot_id),
         "schema_version": MARKET_SCHEMA_VERSION,
         "decision_timestamp": decision_iso,
-        "capture_timestamp": _iso_datetime(datetime.now(timezone.utc), naive_timezone=timezone.utc),
+        "capture_timestamp": capture_iso,
         "event_date": event_date_iso,
         "location": str(location),
         "market_kind": str(market_kind),
@@ -279,6 +363,11 @@ def build_market_snapshot(
         books=books,
         latest_model_cycle_id=latest_model_cycle_id,
         model_age_seconds=model_age_seconds,
+        decision_timestamp=decision_iso,
+        capture_timestamp=capture_iso,
+        max_book_age_seconds=max_book_age_seconds,
+        event_slug=event_slug,
+        market_kind=market_kind,
     )
     validate_market_snapshot(record)
     return record
@@ -336,6 +425,7 @@ def validate_market_snapshot(record: Mapping[str, Any]) -> None:
 
 __all__ = [
     "MARKET_SCHEMA_VERSION",
+    "DEFAULT_BOOK_FRESHNESS_SECONDS",
     "MarketSnapshotSchemaError",
     "build_market_snapshot",
     "make_market_snapshot_id",

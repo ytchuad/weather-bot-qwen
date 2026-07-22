@@ -49,6 +49,20 @@ def health():
         layer_a_summary["canonical_collector"] = get_default_canonical_collector().health_summary()
     except Exception:
         layer_a_summary["canonical_collector"] = {"status": "unavailable"}
+    try:
+        from layer_a.quality import build_and_write_daily_quality_report, get_default_quality_worker
+
+        quality = build_and_write_daily_quality_report()
+        layer_a_summary["quality_worker"] = get_default_quality_worker().health_summary()
+        layer_a_summary["quality_report"] = {
+            "report_date": quality.get("report_date"),
+            "gate_passed": quality.get("gate_passed", False),
+            "report_path": quality.get("report_path"),
+            "metrics": quality.get("metrics", {}),
+        }
+    except Exception:
+        layer_a_summary["quality_report"] = {"status": "unavailable"}
+        layer_a_summary.setdefault("quality_worker", {"status": "unavailable"})
     weather_summary = layer_a_summary.get("weather", {})
     weather_collector = layer_a_summary.get("weather_collector", {})
     market_summary = layer_a_summary.get("market", {})

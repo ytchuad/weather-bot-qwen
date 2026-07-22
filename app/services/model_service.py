@@ -10,6 +10,10 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+import hashlib
+import json
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -33,6 +37,109 @@ logger = logging.getLogger(__name__)
 
 _medium_cache = TTLCache(maxsize=128, ttl=CACHE_TTL_MEDIUM)
 
+_MODEL_ARTIFACT_DIRS = {
+    "baseline": Path("models/intraday_ml"),
+    "rain_nowcast": Path("models/intraday_ml_rain_nowcast"),
+    "rain_observed": Path("models/intraday_minute_ai_model_2b"),
+    "model_a": Path("models/intraday_minute_ml"),
+    "model_b": Path("models/intraday_minute_ml_model_b"),
+    "model_c": Path("models/intraday_minute_ml_model_c"),
+    "model_d": Path("models/intraday_minute_ml_model_d_tmin"),
+    "model_e": Path("models/intraday_minute_ml_model_e_morning_tmin"),
+    "model_g": Path("models/intraday_minute_ml_model_g"),
+    "model_2a": Path("models/intraday_minute_ml_model_2a"),
+    "model_2a_v2": Path("models/intraday_minute_ml_model_2a_v2"),
+    "model_2b": Path("models/intraday_minute_ai_model_2b"),
+}
+
+
+def _artifact_fingerprint(directory: Path, extra_files: tuple[Path, ...] = ()) -> str:
+    digest = hashlib.sha256()
+    candidates = set(extra_files)
+    if directory.exists():
+        candidates.update(
+            path
+            for path in directory.iterdir()
+            if path.is_file() and path.suffix.lower() in {".json", ".txt", ".pkl", ".joblib", ".bin"}
+        )
+    for path in sorted(candidates, key=lambda value: str(value)):
+        if not path.exists() or not path.is_file():
+            continue
+        digest.update(str(path).replace("\\", "/").encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:24] if candidates else "unavailable"
+
+
+@lru_cache(maxsize=64)
+def _runtime_model_lineage(model_name: str) -> dict:
+    """Resolve the exact runtime artifact and ordered feature schema."""
+    name = str(model_name)
+    if name == "9d":
+        directory = Path("models")
+        feature_path = directory / "feature_config.json"
+        feature_schema: list[str] = []
+        try:
+            payload = json.loads(feature_path.read_text(encoding="utf-8"))
+            feature_schema = [str(item) for item in payload.get("features", [])]
+        except (OSError, json.JSONDecodeError, AttributeError):
+            feature_schema = []
+        identity = f"{directory.as_posix()}#sha256:{_artifact_fingerprint(directory)}"
+        return {
+            "model_version": "xgb-runtime-v1",
+            "artifact_identity": identity,
+            "feature_spec_path": str(feature_path),
+            "feature_schema": feature_schema,
+        }
+    if name == "aws":
+        return {
+            "model_version": "aws-forecast-runtime-v1",
+            "artifact_identity": "runtime://hko-aws-forecast/v1",
+            "feature_spec_path": "runtime://hko-aws-forecast/input-schema-v1",
+            "feature_schema": ["forecast_aws", "fallback_mean", "fallback_std", "bias"],
+        }
+    directory = _MODEL_ARTIFACT_DIRS.get(name)
+    if directory is None:
+        return {
+            "model_version": f"runtime-{name}-v1",
+            "artifact_identity": f"runtime://{name}/v1",
+            "feature_spec_path": f"runtime://{name}/input-schema-v1",
+            "feature_schema": [name],
+        }
+    feature_path = directory / "feature_list.json"
+    feature_schema = []
+    try:
+        payload = json.loads(feature_path.read_text(encoding="utf-8"))
+        feature_schema = [str(item) for item in payload] if isinstance(payload, list) else []
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    fingerprint = _artifact_fingerprint(directory)
+    return {
+        "model_version": f"{directory.name}:{fingerprint}",
+        "artifact_identity": f"{directory.as_posix()}#sha256:{fingerprint}",
+        "feature_spec_path": str(feature_path),
+        "feature_schema": feature_schema,
+    }
+
+
+def _model_lineage_metadata() -> dict[str, dict]:
+    names = {"9d", "aws", *_MODEL_ARTIFACT_DIRS.keys()}
+    metadata = {name: _runtime_model_lineage(name) for name in sorted(names)}
+    try:
+        metadata.update(_model_2a_lineage_metadata())
+        for name, item in metadata.items():
+            if name not in {"model_2a", "model_2a_v2"}:
+                continue
+            feature_path = Path(str(item.get("feature_list_path") or item.get("feature_spec_path") or ""))
+            try:
+                feature_values = json.loads(feature_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                feature_values = []
+            if isinstance(feature_values, list):
+                item["feature_schema"] = [str(value) for value in feature_values]
+    except Exception as exc:
+        logger.warning("Could not collect model artifact lineage: %s", exc)
+    return metadata
+
 
 def _model_2a_lineage_metadata() -> dict:
     """Return lineage metadata without reloading trained model artifacts."""
@@ -49,6 +156,11 @@ def _model_2a_lineage_metadata() -> dict:
             "feature_spec": str(adapter.feature_spec_path),
             "feature_spec_path": str(adapter.feature_spec_path),
             "feature_list_path": str(adapter.feature_list_path),
+            "feature_schema": jsonable(
+                json.loads(adapter.feature_list_path.read_text(encoding="utf-8"))
+                if adapter.feature_list_path.exists()
+                else []
+            ),
             "wind_fields": "wind_highland_only" if adapter.model_version == "v1" else "wind_offshore_highland_only",
         }
     return metadata
@@ -155,7 +267,14 @@ def predict_9d(
         if np.isnan(mean) or np.isnan(std):
             return None
         mean += bias
-        return {"mean": float(mean), "std": float(std)}
+        feature_values = features.to_dict() if hasattr(features, "to_dict") else dict(features)
+        return {
+            "mean": float(mean),
+            "std": float(std),
+            "_features": jsonable(feature_values),
+            "_numeric_features": jsonable(feature_values),
+            "feature_metadata": jsonable(meta or {}),
+        }
     except Exception as e:
         logger.warning("predict_9d failed: %s", e)
         return None
@@ -181,7 +300,19 @@ def predict_aws(
         mean = fallback_mean
         std = fallback_std
         source = "⚠️ AWS 無數據 (沿用 9D)"
-    return {"mean": float(mean), "std": float(std), "source": source}
+    input_values = {
+        "forecast_aws": forecast_aws,
+        "fallback_mean": fallback_mean,
+        "fallback_std": fallback_std,
+        "bias": bias,
+    }
+    return {
+        "mean": float(mean),
+        "std": float(std),
+        "source": source,
+        "_features": jsonable(input_values),
+        "_numeric_features": jsonable(input_values),
+    }
 
 
 # ── Intraday (all models) ────────────────────────────────────────────
@@ -630,6 +761,18 @@ def run_all_models(
             "mean": fallback_temp + bias,
             "std": 1.5 * std_mult,
             "source": "⚠️ 9-Day Fallback",
+            "_features": {
+                "forecast_aws": forecast_aws_val,
+                "fallback_temperature": fallback_temp,
+                "bias": bias,
+                "std_mult": std_mult,
+            },
+            "_numeric_features": {
+                "forecast_aws": forecast_aws_val,
+                "fallback_temperature": fallback_temp,
+                "bias": bias,
+                "std_mult": std_mult,
+            },
         }
         pred_9d["probs"] = compute_bucket_probs(
             pred_9d["mean"], pred_9d["std"], markets, is_today, is_min_temp,
@@ -680,6 +823,25 @@ def run_all_models(
             _fm = intra_preds.pop("_feature_metadata", {})
             if _fm:
                 output["_feature_metadata"] = _fm
+    lineage = _model_lineage_metadata()
+    feature_metadata = output.setdefault("_feature_metadata", {})
+    feature_metadata["model_lineage"] = {
+        **(feature_metadata.get("model_lineage") or {}),
+        **lineage,
+    }
+    for model_key, prediction in output.items():
+        if str(model_key).startswith("_") or not isinstance(prediction, dict):
+            continue
+        metadata = lineage.get(str(model_key)) or _runtime_model_lineage(str(model_key))
+        raw = prediction.get("raw") if isinstance(prediction.get("raw"), dict) else prediction
+        if not prediction.get("_features") and isinstance(raw, dict) and raw.get("_features"):
+            prediction["_features"] = raw["_features"]
+        if not prediction.get("_numeric_features") and isinstance(raw, dict) and raw.get("_numeric_features"):
+            prediction["_numeric_features"] = raw["_numeric_features"]
+        prediction.setdefault("artifact_identity", metadata.get("artifact_identity"))
+        prediction.setdefault("feature_spec", metadata.get("feature_spec_path"))
+        prediction.setdefault("feature_schema", metadata.get("feature_schema", []))
+        prediction.setdefault("model_version", metadata.get("model_version"))
     return output
 
 

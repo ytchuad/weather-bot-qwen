@@ -620,6 +620,7 @@ def compute_rain_kwargs(
     rain_60m = 0.0
     rain_120m = 0.0
     rain_data_ok = False
+    rain_current: float | None = None
     rain_df = pd.DataFrame()
     rain_source_error = None
 
@@ -629,6 +630,7 @@ def compute_rain_kwargs(
             rain_df = rain_df[rain_df["datetime"] <= now_dt]
             if not rain_df.empty:
                 now_rain = rain_df["rainfall"].iloc[-1]
+                rain_current = float(now_rain)
                 target_time_60 = now_dt - pd.Timedelta(minutes=60)
                 prev_60 = rain_df[rain_df["datetime"] <= target_time_60]
                 rain_60m_ago = prev_60["rainfall"].iloc[-1] if not prev_60.empty else 0.0
@@ -649,6 +651,7 @@ def compute_rain_kwargs(
     kwargs: dict[str, Any] = {
         "rain_60m": rain_60m,
         "rain_120m": rain_120m,
+        "rain_current": 0.0 if rain_current is None else rain_current,
         "rain_data_ok": rain_data_ok,
         "rainfall_60m_missing_flag": 0 if rain_data_ok else 1,
         "rainfall_120m_missing_flag": 0 if rain_data_ok else 1,
@@ -709,7 +712,7 @@ def compute_rain_kwargs(
         rain_source_timestamp = rain_times.max() if not rain_times.empty else None
 
     rain_status: dict[str, object] = {}
-    for field in ("rain_60m", "rain_120m", "rainfall_60m", "rainfall_120m"):
+    for field in ("rain_current", "rain_60m", "rain_120m", "rainfall_60m", "rainfall_120m"):
         value = kwargs.get(field, 0.0)
         if rain_data_ok and rain_source_timestamp is not None:
             rain_status[field] = InputStatus.from_value(

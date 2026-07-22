@@ -250,6 +250,16 @@ def fetch_event_markets(slug: str, is_min_temp: bool = False) -> list[dict]:
     event = fetch_event_by_slug(slug)
     if event is None:
         return []
+    expected_kind = "lowest_temperature" if is_min_temp else "highest_temperature"
+    event_kind = market_kind_from_slug(str(event.get("slug") or slug))
+    if event_kind is not None and event_kind != expected_kind:
+        logger.error(
+            "Refusing to route %s markets through %s event slug %s",
+            expected_kind,
+            event_kind,
+            slug,
+        )
+        return []
     return _parse_markets_from_event(event, is_min_temp)
 
 
@@ -319,6 +329,18 @@ def _parse_markets_from_event(event: dict, is_min_temp: bool) -> list[dict]:
         extras["market_schema_version"] = str(
             m.get("market_schema_version") or m.get("schemaVersion") or "gamma_market.v1"
         )
+        # Keep canonical aliases in the source payload as well as the legacy
+        # Gamma names.  Layer A normalization can then validate the exact
+        # condition/token mapping without guessing which API spelling was
+        # present in this response.
+        if m.get("conditionId") is not None:
+            extras["condition_id"] = m["conditionId"]
+        if m.get("id") is not None:
+            extras["market_id"] = m["id"]
+        if clob_ids and len(clob_ids) >= 2:
+            extras["yes_token_id"] = clob_ids[0]
+            extras["no_token_id"] = clob_ids[1]
+        extras["market_kind"] = "lowest_temperature" if is_min_temp else "highest_temperature"
         for k in ("conditionId", "bestAsk", "spread", "lastTradePrice",
                   "liquidityClob", "volume24hrClob"):
             v = m.get(k)
@@ -372,3 +394,42 @@ def fetch_today_event(target_date_str: str) -> dict | None:
         if ev_date and ev_date.strftime("%Y-%m-%d") == target_date_str:
             return {"slug": ev["slug"], "title": ev["title"]}
     return None
+
+
+def market_kind_from_slug(slug: str | None) -> str | None:
+    """Return the temperature market kind encoded by an event slug."""
+    value = str(slug or "").strip().lower()
+    if value.startswith("highest-temperature-"):
+        return "highest_temperature"
+    if value.startswith("lowest-temperature-"):
+        return "lowest_temperature"
+    return None
+
+
+def fetch_today_event_for_kind(target_date_str: str, *, is_min_temp: bool) -> dict | None:
+    """Resolve the event for one temperature kind and target date.
+
+    ``fetch_today_event`` predates the two-event market layout and returns the
+    first matching temperature event.  This helper filters by both date and
+    kind so a Tmin capture can never inherit a Tmax slug.
+    """
+    expected_kind = "lowest_temperature" if is_min_temp else "highest_temperature"
+    events = search_events("hong-kong-temperature")
+    for event in events:
+        slug = str(event.get("slug") or "")
+        if market_kind_from_slug(slug) != expected_kind:
+            continue
+        event_date = parse_date_from_event(str(event.get("title") or ""), slug)
+        if event_date and event_date.isoformat() == str(target_date_str):
+            return {"slug": slug, "title": event.get("title", "")}
+    return None
+
+
+def resolve_event_slug_for_kind(target_date: date, *, is_min_temp: bool) -> str:
+    """Resolve a kind-specific event slug, with a deterministic local fallback."""
+    found = fetch_today_event_for_kind(target_date.isoformat(), is_min_temp=is_min_temp)
+    if found and found.get("slug"):
+        return str(found["slug"])
+    from execution.market_templates import resolve_slug
+
+    return resolve_slug("hk-tmin" if is_min_temp else "hk-tmax", target_date)

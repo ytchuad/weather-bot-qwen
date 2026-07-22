@@ -74,9 +74,9 @@ def resolve_today_event(
     def _pick_for(d: date) -> dict | None:
         bucket = by_date.get(d, {})
         if preferred == "tmax":
-            return bucket.get("tmax") or bucket.get("tmin")
+            return bucket.get("tmax")
         if preferred == "tmin":
-            return bucket.get("tmin") or bucket.get("tmax")
+            return bucket.get("tmin")
         # auto
         return bucket.get("tmax") or bucket.get("tmin")
 

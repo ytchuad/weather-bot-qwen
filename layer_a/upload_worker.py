@@ -54,6 +54,17 @@ class LayerAUploadWorker:
                     result = retry()
                     summary["uploaded"] += int(result.get("uploaded", 0))
                     summary["failed"] += int(result.get("failed", 0))
+            try:
+                from .quality import build_and_write_daily_quality_report
+
+                quality = build_and_write_daily_quality_report()
+                summary["quality_report"] = {
+                    "report_date": quality.get("report_date"),
+                    "gate_passed": quality.get("gate_passed", False),
+                    "report_path": quality.get("report_path"),
+                }
+            except Exception as quality_error:
+                summary["quality_report_error"] = type(quality_error).__name__
             self._last_run = datetime.now(timezone.utc).isoformat()
             self._last_error = None
         except Exception as exc:

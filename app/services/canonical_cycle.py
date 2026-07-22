@@ -53,6 +53,8 @@ class CanonicalCycle:
     partial_fill_policy: str
     context_json: dict[str, Any]
     gamma_reference_prices: dict[str, Any]
+    market_snapshot_id: str | None
+    weather_snapshot_id: str | None
     layer_a_record: dict[str, Any]
 
 
@@ -220,15 +222,17 @@ def _context_json(
     if gamma_info:
         context["gamma_market_info"] = gamma_info
 
-    for model_key in ("model_2a", "model_2a_v2"):
-        prediction = results.get(model_key)
-        if isinstance(prediction, Mapping):
-            raw = prediction.get("raw")
-            if isinstance(raw, Mapping):
-                if raw.get("_features"):
-                    context[f"{model_key}_features"] = raw["_features"]
-                if raw.get("_numeric_features"):
-                    context[f"{model_key}_numeric_features"] = raw["_numeric_features"]
+    for model_key, prediction in results.items():
+        if str(model_key).startswith("_") or not isinstance(prediction, Mapping):
+            continue
+        raw = prediction.get("raw") if isinstance(prediction.get("raw"), Mapping) else prediction
+        if isinstance(raw, Mapping):
+            diagnostic = raw.get("_features") or prediction.get("diagnostic_features")
+            numeric = raw.get("_numeric_features") or prediction.get("numeric_features")
+            if diagnostic:
+                context[f"{model_key}_features"] = diagnostic
+            if numeric:
+                context[f"{model_key}_numeric_features"] = numeric
 
     metadata = results.get("_feature_metadata")
     if isinstance(metadata, Mapping):
@@ -283,6 +287,116 @@ def _persist_layer_a(record: Mapping[str, Any]) -> None:
         # Capture must not stop paper strategy execution.  The local health
         # surface still shows a missing cycle when storage did not close.
         logger.exception("Layer A capture failed for cycle %s", record["decision_cycle_id"])
+
+
+def _capture_linked_layer_a_snapshots(
+    *,
+    cycle_id: str,
+    decision_timestamp: datetime,
+    target_date: date,
+    event_slug: str,
+    is_min_temp: bool,
+    markets: list[Mapping[str, Any]],
+    state: Mapping[str, Any],
+    rain_kwargs: Mapping[str, Any],
+    context_json: Mapping[str, Any],
+    market_depth: Mapping[str, Any],
+    market_depth_no: Mapping[str, Any],
+    depth_fetch_cycle_id: str | None,
+    gamma_reference_prices: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    """Persist and return the immutable market/weather IDs for this cycle."""
+    market_snapshot_id: str | None = None
+    weather_snapshot_id: str | None = None
+    market_kind = "lowest_temperature" if is_min_temp else "highest_temperature"
+    try:
+        from layer_a.market_schema import build_market_snapshot
+        from layer_a.market_storage import get_default_market_store
+
+        market_snapshot = build_market_snapshot(
+            decision_timestamp=decision_timestamp,
+            capture_timestamp=decision_timestamp,
+            event_date=target_date,
+            location="Hong Kong",
+            event_slug=event_slug,
+            market_kind=market_kind,
+            markets=markets,
+            market_depth=market_depth,
+            market_depth_no=market_depth_no,
+            fetch_cycle_id=depth_fetch_cycle_id or f"cycle:{cycle_id}",
+            latest_model_cycle_id=cycle_id,
+            latest_model_cycle_timestamp=decision_timestamp,
+            gamma_reference_prices=gamma_reference_prices,
+            gamma_reference_data={
+                str(market.get("bucket")): jsonable(dict(market))
+                for market in markets
+                if market.get("bucket")
+            },
+            source_status={
+                "collector": "canonical_cycle_link",
+                "market_source": "polymarket_gamma_reference",
+                "book_source": "polymarket_clob_cache",
+                "fetch_cycle_id": depth_fetch_cycle_id,
+            },
+        )
+        result = get_default_market_store().capture(market_snapshot)
+        market_snapshot_id = str(result.market_snapshot_id)
+    except Exception:
+        logger.exception("Linked market snapshot capture failed for cycle %s", cycle_id)
+
+    try:
+        from layer_a.schema import _parse_datetime
+        from layer_a.weather_capture import _ensure_weather_fields
+        from layer_a.weather_schema import build_weather_snapshot
+        from layer_a.weather_storage import get_default_weather_store
+
+        weather_state = dict(state)
+        weather_state.update(
+            {
+                key: context_json[key]
+                for key in ("pressure_current", "dew_point_current")
+                if context_json.get(key) is not None
+            }
+        )
+        if rain_kwargs.get("rain_current") is not None:
+            weather_state["rain_current"] = rain_kwargs.get("rain_current")
+        weather_state["observation_buffer_status"] = {
+            **dict(state.get("observation_buffer_status") or {}),
+            **dict((context_json.get("observation_buffer_status") or {}) if isinstance(context_json.get("observation_buffer_status"), Mapping) else {}),
+        }
+        weather_state["weather_input_status"] = {
+            **dict(state.get("weather_input_status") or {}),
+            **dict((context_json.get("weather_input_status") or {}) if isinstance(context_json.get("weather_input_status"), Mapping) else {}),
+        }
+        observation_timestamp = _parse_datetime(
+            state.get("time_now") or state.get("decision_timestamp") or decision_timestamp,
+            naive_timezone=timezone.utc,
+        ) or decision_timestamp
+        weather_state = _ensure_weather_fields(
+            weather_state,
+            observation_timestamp=observation_timestamp,
+        )
+        model_timestamp = min(decision_timestamp, observation_timestamp)
+        weather_snapshot = build_weather_snapshot(
+            snapshot_timestamp=observation_timestamp,
+            capture_timestamp=decision_timestamp,
+            event_date=target_date,
+            location="Hong Kong",
+            weather_state=weather_state,
+            latest_model_cycle_id=cycle_id,
+            model_cycle_timestamp=model_timestamp,
+            source_status={
+                "collector": "canonical_cycle_link",
+                "observation_source": "hko_intraday_state",
+                "model_link_source": "canonical_cycle",
+                "clob_fetched": False,
+            },
+        )
+        result = get_default_weather_store().capture(weather_snapshot)
+        weather_snapshot_id = str(result.weather_snapshot_id)
+    except Exception:
+        logger.exception("Linked weather snapshot capture failed for cycle %s", cycle_id)
+    return market_snapshot_id, weather_snapshot_id
 
 
 def _build_uncached_cycle(
@@ -396,8 +510,30 @@ def _build_uncached_cycle(
     )
     paper_execution_mode = get_paper_execution_mode()
     partial_fill_policy = get_partial_fill_policy()
-    context_json["paper_execution_mode"] = paper_execution_mode
     cycle_id = _cycle_slot_key(decision_timestamp, target_date, event_slug, is_min_temp)
+    market_snapshot_id, weather_snapshot_id = _capture_linked_layer_a_snapshots(
+        cycle_id=cycle_id,
+        decision_timestamp=decision_timestamp,
+        target_date=target_date,
+        event_slug=event_slug,
+        is_min_temp=is_min_temp,
+        markets=markets,
+        state=state,
+        rain_kwargs=rain_kwargs,
+        context_json=context_json,
+        market_depth=market_depth,
+        market_depth_no=market_depth_no,
+        depth_fetch_cycle_id=depth_fetch_cycle_id,
+        gamma_reference_prices=prices,
+    )
+    context_json["market_snapshot_id"] = market_snapshot_id
+    context_json["weather_snapshot_id"] = weather_snapshot_id
+    context_json["layer_a_linkage"] = {
+        "market_snapshot_id": market_snapshot_id,
+        "weather_snapshot_id": weather_snapshot_id,
+        "linkage_status": "complete" if market_snapshot_id and weather_snapshot_id else "incomplete",
+    }
+    context_json["paper_execution_mode"] = paper_execution_mode
     payload: dict[str, Any] = {
         "decision_cycle_id": cycle_id,
         "schema_version": "layer_a.v1",
@@ -406,6 +542,8 @@ def _build_uncached_cycle(
         "location": "Hong Kong",
         "market_kind": "lowest_temperature" if is_min_temp else "highest_temperature",
         "event_slug": event_slug,
+        "market_snapshot_id": market_snapshot_id,
+        "weather_snapshot_id": weather_snapshot_id,
         "markets": markets,
         "market_depth": market_depth,
         "market_depth_no": market_depth_no,
@@ -446,6 +584,8 @@ def _build_uncached_cycle(
         partial_fill_policy=payload["partial_fill_policy"],
         context_json=context_json,
         gamma_reference_prices=prices,
+        market_snapshot_id=market_snapshot_id,
+        weather_snapshot_id=weather_snapshot_id,
         layer_a_record=layer_record,
     )
     _persist_layer_a(cycle.layer_a_record)
@@ -459,8 +599,7 @@ def get_canonical_cycle(
     event_slug: str | None = None,
 ) -> CanonicalCycle:
     """Return the shared cycle for the current deterministic sampling slot."""
-    from execution.market_templates import resolve_slug
-    from app.services.market_service import fetch_today_event
+    from app.services.market_service import resolve_event_slug_for_kind, market_kind_from_slug
     from app.services.weather_service import hkt_now
 
     decision_timestamp = datetime.now(timezone.utc)
@@ -469,11 +608,11 @@ def get_canonical_cycle(
     slug_key = (target_date_str, is_min_temp)
     with _CACHE_LOCK:
         slug = event_slug or _SLUG_CACHE.get(slug_key)
+    if slug and market_kind_from_slug(slug) not in (None, "lowest_temperature" if is_min_temp else "highest_temperature"):
+        logger.error("Rejecting canonical event slug %s for market kind %s", slug, "lowest_temperature" if is_min_temp else "highest_temperature")
+        slug = None
     if not slug:
-        today_event = fetch_today_event(target_date_str)
-        slug = (today_event.get("slug") if today_event else None) or resolve_slug(
-            "hk-tmin" if is_min_temp else "hk-tmax"
-        )
+        slug = resolve_event_slug_for_kind(target, is_min_temp=is_min_temp)
         with _CACHE_LOCK:
             _SLUG_CACHE[slug_key] = slug
     cycle_id = _cycle_slot_key(decision_timestamp, target, slug, is_min_temp)
@@ -593,6 +732,8 @@ def build_strategy_context_from_cycle(cycle: CanonicalCycle, acct: StrategyAccou
         "all_results": results,
         "context_json": context_json,
         "decision_cycle_id": cycle.decision_cycle_id,
+        "market_snapshot_id": getattr(cycle, "market_snapshot_id", None),
+        "weather_snapshot_id": getattr(cycle, "weather_snapshot_id", None),
         "canonical_cycle": cycle,
     }
 

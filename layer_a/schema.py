@@ -444,6 +444,13 @@ def _normalise_model(
     diagnostic_default = context_json.get(f"{model_name}_features")
     numeric = model.get("numeric_features", raw.get("_numeric_features", numeric_default))
     diagnostic = model.get("diagnostic_features", raw.get("_features", diagnostic_default))
+    # A few legacy intraday adapters emitted only ``_features``.  Those are
+    # the actual inference vector; retaining the same map in both fields is
+    # more truthful than recording an empty numeric input set.
+    if not isinstance(numeric, Mapping) and isinstance(diagnostic, Mapping):
+        numeric = diagnostic
+    if not isinstance(diagnostic, Mapping) and isinstance(numeric, Mapping):
+        diagnostic = numeric
     quantiles = dict(model.get("quantiles")) if isinstance(model.get("quantiles"), Mapping) else {}
     for key, aliases in _MODEL_QUANTILE_ALIASES.items():
         if key not in quantiles:
@@ -473,16 +480,20 @@ def _normalise_model(
     model_version = _first(model, "model_version", "feature_version") or model_lineage.get("model_version")
     artifact_identity = _first(model, "artifact_identity") or model_lineage.get("artifact_identity")
     feature_spec = _first(model, "feature_spec", "feature_spec_path") or model_lineage.get("feature_spec_path")
+    feature_schema = _first(model, "feature_schema", "feature_order", "feature_columns") or model_lineage.get("feature_schema") or model_lineage.get("feature_columns")
     input_status = model.get("model_input_status")
     if not isinstance(input_status, Mapping):
         input_status = status
+    input_metadata = model.get("feature_metadata") or raw.get("feature_metadata") or {}
     result = {
         "model_name": str(model.get("model_name") or model_name),
         "model_version": jsonable(model_version),
         "artifact_identity": jsonable(artifact_identity),
         "feature_spec": jsonable(feature_spec),
+        "feature_schema": jsonable(feature_schema if isinstance(feature_schema, (list, tuple, Mapping)) else []),
         "numeric_features": jsonable(numeric if isinstance(numeric, Mapping) else {}),
         "diagnostic_features": jsonable(diagnostic if isinstance(diagnostic, Mapping) else {}),
+        "inference_input_metadata": jsonable(input_metadata if isinstance(input_metadata, Mapping) else {}),
         "quantiles": quantiles,
         "point_prediction": jsonable(point_prediction),
         "full_bucket_probabilities": jsonable(probabilities),
@@ -514,8 +525,8 @@ def _normalise_market(
         "condition_id": jsonable(_first(market, "condition_id", "conditionId")),
         "bucket": bucket,
         "explicit_outcomes": outcomes,
-        "yes_token_id": jsonable(_first(market, "yes_token_id", "token_id")),
-        "no_token_id": jsonable(_first(market, "no_token_id", "no_token_id")),
+        "yes_token_id": jsonable(_first(market, "yes_token_id", "token_id", "yes_asset_id")),
+        "no_token_id": jsonable(_first(market, "no_token_id", "no_asset_id")),
         "yes_asset_id": jsonable(yes_asset),
         "no_asset_id": jsonable(no_asset),
         "tick_size": jsonable(_first(market, "tick_size", "orderPriceMinTickSize")),
@@ -553,12 +564,16 @@ def _normalise_book(
     depth: Mapping[str, Any] | None,
     *,
     decision_iso: str | None,
+    capture_iso: str | None = None,
 ) -> dict[str, Any]:
     raw = jsonable(depth) if isinstance(depth, Mapping) else None
     depth = depth if isinstance(depth, Mapping) else {}
     token_id = market.get("yes_token_id") if token_side == "YES" else market.get("no_token_id")
-    asset_id = depth.get("asset_id", depth.get("token_id"))
-    book_iso = _iso_datetime(depth.get("timestamp"), naive_timezone=timezone.utc)
+    asset_id = depth.get("asset_id") or depth.get("token_id")
+    book_iso = _iso_datetime(
+        depth.get("book_timestamp", depth.get("timestamp")),
+        naive_timezone=timezone.utc,
+    )
     decision_dt = _parse_datetime(decision_iso, naive_timezone=timezone.utc)
     book_dt = _parse_datetime(book_iso, naive_timezone=timezone.utc)
     age = None
@@ -596,10 +611,14 @@ def _normalise_book(
         "condition_id": market.get("condition_id"),
         "bucket": bucket,
         "token_side": token_side,
-        "token_id": jsonable(token_id),
+        "token_id": jsonable(depth.get("token_id") or token_id),
         "asset_id": jsonable(asset_id),
         "book_timestamp": book_iso,
+        # Preserve the source spelling for diagnostics and migration tooling;
+        # replay uses the canonical ``book_timestamp`` field above.
+        "source_book_timestamp": jsonable(depth.get("book_timestamp", depth.get("timestamp"))),
         "decision_timestamp": decision_iso,
+        "capture_timestamp": capture_iso,
         "book_age_seconds": age,
         "source_name": jsonable(depth.get("source_name")),
         "fetch_cycle_id": jsonable(depth.get("fetch_cycle_id")),
@@ -644,7 +663,11 @@ def _book_sources(context: Mapping[str, Any]) -> dict[tuple[str, str], Mapping[s
     return sources
 
 
-def _build_market_and_books(context: Mapping[str, Any], decision_iso: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _build_market_and_books(
+    context: Mapping[str, Any],
+    decision_iso: str | None,
+    capture_iso: str | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     raw_markets = context.get("market_identities") or context.get("markets") or []
     if isinstance(raw_markets, Mapping):
         raw_markets = list(raw_markets.values())
@@ -681,6 +704,7 @@ def _build_market_and_books(context: Mapping[str, Any], decision_iso: str | None
                     market,
                     sources.get((bucket, side)),
                     decision_iso=decision_iso,
+                    capture_iso=capture_iso,
                 )
             )
     return market_records, books
@@ -734,6 +758,8 @@ def build_layer_a_record(
     market_identities: Sequence[Mapping[str, Any]] | None = None,
     books: Any = None,
     gamma_reference_prices: Mapping[str, Any] | None = None,
+    market_snapshot_id: str | None = None,
+    weather_snapshot_id: str | None = None,
 ) -> dict[str, Any]:
     """Build one complete-or-incomplete, strategy-independent Layer A record."""
     source: dict[str, Any] = dict(context or {})
@@ -755,6 +781,15 @@ def build_layer_a_record(
     decision_iso = _iso_datetime(decision_value)
     if decision_iso is None:
         raise LayerASchemaError("decision_timestamp is invalid")
+    capture_value = capture_timestamp
+    if capture_value is None:
+        capture_value = datetime.now(timezone.utc)
+        decision_dt = _parse_datetime(decision_iso, naive_timezone=timezone.utc)
+        if decision_dt is not None and capture_value < decision_dt:
+            capture_value = decision_dt
+    capture_iso = _iso_datetime(capture_value, naive_timezone=timezone.utc)
+    if capture_iso is None:
+        raise LayerASchemaError("capture_timestamp is invalid")
     event_date_value = event_date or source.get("event_date") or source.get("target_date_str") or context_json.get("snapshot_date")
     if isinstance(event_date_value, date):
         event_date_iso = event_date_value.isoformat()
@@ -777,7 +812,7 @@ def build_layer_a_record(
     # Explicit direct model/market/book kwargs are installed into a temporary
     # source so the same normalization path is used for app and test payloads.
     models = _model_inputs(source, context_json, status)
-    markets, book_records = _build_market_and_books(source, decision_iso)
+    markets, book_records = _build_market_and_books(source, decision_iso, capture_iso)
     refs = gamma_reference_prices
     if refs is None:
         refs = source.get("gamma_reference_prices") or context_json.get("gamma_reference_prices") or context_json.get("market_prices") or {}
@@ -785,11 +820,13 @@ def build_layer_a_record(
         "decision_cycle_id": str(cycle_id),
         "schema_version": schema_version,
         "decision_timestamp": decision_iso,
-        "capture_timestamp": _iso_datetime(capture_timestamp or datetime.now(timezone.utc), naive_timezone=timezone.utc),
+        "capture_timestamp": capture_iso,
         "event_date": event_date_iso,
         "location": str(location),
         "market_kind": str(kind),
         "event_slug": str(slug),
+        "market_snapshot_id": market_snapshot_id or source.get("market_snapshot_id") or context_json.get("market_snapshot_id"),
+        "weather_snapshot_id": weather_snapshot_id or source.get("weather_snapshot_id") or context_json.get("weather_snapshot_id"),
         "weather_state": weather,
         "models": models,
         "market_identity": markets,
@@ -810,6 +847,13 @@ def _add_reason(reasons: list[str], value: str) -> None:
 def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
     """Calculate per-cycle completeness and exact missing-field reasons."""
     reasons: list[str] = []
+    market_snapshot_link_complete = record.get("market_snapshot_id") not in (None, "")
+    weather_snapshot_link_complete = record.get("weather_snapshot_id") not in (None, "")
+    snapshot_linkage_complete = market_snapshot_link_complete and weather_snapshot_link_complete
+    if not market_snapshot_link_complete:
+        _add_reason(reasons, "market_snapshot_id")
+    if not weather_snapshot_link_complete:
+        _add_reason(reasons, "weather_snapshot_id")
     weather = record.get("weather_state")
     if not isinstance(weather, Mapping):
         _add_reason(reasons, "weather_state_missing")
@@ -877,6 +921,12 @@ def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
 
     books = record.get("clob_books")
     books_by_key: dict[tuple[str, str], Mapping[str, Any]] = {}
+    token_mapping_complete = True
+    market_by_bucket = {
+        str(item.get("bucket")): item
+        for item in market_records or []
+        if isinstance(item, Mapping) and item.get("bucket")
+    }
     if not isinstance(books, list):
         books = []
     for index, book in enumerate(books):
@@ -891,11 +941,27 @@ def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
         if not book.get("asset_id"):
             token_identity_complete = False
             _add_reason(reasons, f"clob_books[{index}].asset_id")
+        bucket_market = market_by_bucket.get(str(book.get("bucket") or ""), {})
+        expected_token = bucket_market.get(
+            "yes_token_id" if str(book.get("token_side") or "").upper() == "YES" else "no_token_id"
+        )
+        if expected_token and (
+            str(book.get("asset_id")) != str(expected_token)
+            or str(book.get("token_id")) != str(expected_token)
+        ):
+            token_mapping_complete = False
+            token_identity_complete = False
+            _add_reason(reasons, f"clob_books[{index}].unknown_token_mapping")
 
     depth_pair_complete = True
     book_timestamp_complete = True
+    book_freshness_complete = True
     fetch_cycle_coherent = True
+    yes_no_fetch_cycle_coherent = True
     cycles: set[str] = set()
+    cycles_by_bucket: dict[str, set[str]] = {}
+    decision_dt = _parse_datetime(record.get("decision_timestamp"), naive_timezone=timezone.utc)
+    capture_dt = _parse_datetime(record.get("capture_timestamp"), naive_timezone=timezone.utc)
     expected_buckets = [str(item.get("bucket")) for item in market_records or [] if isinstance(item, Mapping)]
     for bucket in expected_buckets:
         for side in ("YES", "NO"):
@@ -904,6 +970,7 @@ def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
             if book is None:
                 depth_pair_complete = False
                 book_timestamp_complete = False
+                book_freshness_complete = False
                 fetch_cycle_coherent = False
                 _add_reason(reasons, prefix)
                 continue
@@ -914,18 +981,67 @@ def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
             if not isinstance(book.get("bids"), list) or not isinstance(book.get("asks"), list):
                 depth_pair_complete = False
                 _add_reason(reasons, f"{prefix}.depth")
-            if not book.get("book_timestamp") or not isinstance(book.get("book_age_seconds"), (int, float)) or float(book.get("book_age_seconds")) < 0:
+            book_dt = _parse_datetime(book.get("book_timestamp"), naive_timezone=timezone.utc)
+            book_age = book.get("book_age_seconds")
+            timestamp_ok = bool(book_dt is not None)
+            if decision_dt is not None and book_dt is not None:
+                timestamp_ok = timestamp_ok and book_dt <= decision_dt
+            if capture_dt is not None and book_dt is not None:
+                timestamp_ok = timestamp_ok and book_dt <= capture_dt
+            age_ok = (
+                isinstance(book_age, (int, float))
+                and math.isfinite(float(book_age))
+                and 0 <= float(book_age) <= 60.0
+            )
+            if not timestamp_ok:
                 book_timestamp_complete = False
-                _add_reason(reasons, f"{prefix}.book_timestamp")
+                if book_dt is not None and (
+                    (decision_dt is not None and book_dt > decision_dt)
+                    or (capture_dt is not None and book_dt > capture_dt)
+                ):
+                    _add_reason(reasons, f"{prefix}.future_book_timestamp")
+                else:
+                    _add_reason(reasons, f"{prefix}.book_timestamp")
+            if not age_ok:
+                book_freshness_complete = False
+                _add_reason(reasons, f"{prefix}.book_age_seconds")
+            if timestamp_ok and decision_dt is not None and book_dt is not None and isinstance(book_age, (int, float)):
+                expected_age = (decision_dt - book_dt).total_seconds()
+                if abs(expected_age - float(book_age)) > 1.0:
+                    book_freshness_complete = False
+                    _add_reason(reasons, f"{prefix}.book_age_mismatch")
             cycle = book.get("fetch_cycle_id")
             if not cycle:
                 fetch_cycle_coherent = False
                 _add_reason(reasons, f"{prefix}.fetch_cycle_id")
             else:
                 cycles.add(str(cycle))
+                cycles_by_bucket.setdefault(str(book.get("bucket") or ""), set()).add(str(cycle))
     if len(cycles) > 1:
         fetch_cycle_coherent = False
         _add_reason(reasons, "fetch_cycle_id_incoherent")
+    for bucket, bucket_cycles in cycles_by_bucket.items():
+        if len(bucket_cycles) > 1:
+            fetch_cycle_coherent = False
+            yes_no_fetch_cycle_coherent = False
+            _add_reason(reasons, f"yes_no_fetch_cycle_mismatch:{bucket}")
+    condition_ids = [
+        str(item.get("condition_id"))
+        for item in market_records or []
+        if isinstance(item, Mapping) and item.get("condition_id")
+    ]
+    if len(condition_ids) != len(set(condition_ids)):
+        market_identity_complete = False
+        _add_reason(reasons, "condition_id_duplicate")
+    slug_value = str(record.get("event_slug") or "").lower()
+    slug_kind = (
+        "highest_temperature" if slug_value.startswith("highest-temperature-")
+        else "lowest_temperature" if slug_value.startswith("lowest-temperature-")
+        else None
+    )
+    if slug_kind is not None and slug_kind != str(record.get("market_kind") or ""):
+        market_identity_complete = False
+        _add_reason(reasons, "event_slug_market_kind_mismatch")
     if not books and expected_buckets:
         depth_pair_complete = False
         book_timestamp_complete = False
@@ -939,7 +1055,10 @@ def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
         and token_identity_complete
         and depth_pair_complete
         and book_timestamp_complete
+        and book_freshness_complete
+        and token_mapping_complete
         and fetch_cycle_coherent
+        and yes_no_fetch_cycle_coherent
     )
     rejection_reasons = list(reasons)
     if not replay_model:
@@ -953,7 +1072,13 @@ def assess_completeness(record: Mapping[str, Any]) -> dict[str, Any]:
         "token_identity_complete": bool(token_identity_complete),
         "depth_pair_complete": bool(depth_pair_complete),
         "book_timestamp_complete": bool(book_timestamp_complete),
+        "book_freshness_complete": bool(book_freshness_complete),
+        "token_mapping_complete": bool(token_mapping_complete),
         "fetch_cycle_coherent": bool(fetch_cycle_coherent),
+        "yes_no_fetch_cycle_coherent": bool(yes_no_fetch_cycle_coherent),
+        "market_snapshot_link_complete": bool(market_snapshot_link_complete),
+        "weather_snapshot_link_complete": bool(weather_snapshot_link_complete),
+        "snapshot_linkage_complete": bool(snapshot_linkage_complete),
         "replay_eligible_for_model_analysis": replay_model,
         "replay_eligible_for_clob_strategy": replay_clob,
         "missing_fields": list(reasons),

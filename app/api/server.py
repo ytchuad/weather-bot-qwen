@@ -15,6 +15,7 @@ from app.api import backtest, charts, data, diagnostics, health, history, layer_
 logger = logging.getLogger(__name__)
 _layer_a_upload_worker = None
 _layer_a_canonical_collector = None
+_layer_a_quality_worker = None
 
 
 @asynccontextmanager
@@ -38,6 +39,21 @@ async def lifespan(app: FastAPI):
         get_default_weather_store().startup_scan()
     except Exception:
         logger.exception("Layer A weather startup scan failed")
+    try:
+        from layer_a.quality import build_and_write_daily_quality_report
+
+        build_and_write_daily_quality_report()
+    except Exception:
+        logger.exception("Layer A quality report startup generation failed")
+    try:
+        from layer_a.quality import get_default_quality_worker
+
+        global _layer_a_quality_worker
+        _layer_a_quality_worker = get_default_quality_worker()
+        _layer_a_quality_worker.start()
+        logger.info("Layer A quality report worker started")
+    except Exception:
+        logger.exception("Layer A quality report worker start failed")
     try:
         from layer_a.market_capture import get_default_market_collector
 
@@ -108,6 +124,8 @@ async def lifespan(app: FastAPI):
         logger.exception("Layer A remote history refresh stop failed")
     if _layer_a_upload_worker is not None:
         _layer_a_upload_worker.stop()
+    if _layer_a_quality_worker is not None:
+        _layer_a_quality_worker.stop()
     strategies.stop_scheduler()
 
 

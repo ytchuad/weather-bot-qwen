@@ -33,6 +33,7 @@ LAYER_A_DIR = Path(os.getenv("LAYER_A_DIR", str(DATA_DIR / "layer_a")))
 LAYER_A_EXPORT_DIR = Path(os.getenv("LAYER_A_EXPORT_DIR", str(DATA_DIR / "layer_a_exports")))
 LAYER_A_MARKET_DIR = Path(os.getenv("LAYER_A_MARKET_DIR", str(DATA_DIR / "layer_a_market")))
 LAYER_A_WEATHER_DIR = Path(os.getenv("LAYER_A_WEATHER_DIR", str(DATA_DIR / "layer_a_weather")))
+LAYER_A_QUALITY_DIR = Path(os.getenv("LAYER_A_QUALITY_DIR", str(DATA_DIR / "layer_a_quality")))
 LAYER_A_MINUTE_PARTITION_MINUTES = int(os.getenv("LAYER_A_MINUTE_PARTITION_MINUTES", "10"))
 LAYER_A_LEGACY_CSV_DIR = Path(os.getenv("LAYER_A_LEGACY_CSV_DIR", str(DATA_DIR / "export")))
 

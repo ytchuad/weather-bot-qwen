@@ -16,9 +16,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 
 from app.services.market_depth_service import fetch_market_depths_batch
-from app.services.market_service import fetch_event_markets, fetch_today_event
-from execution.market_templates import resolve_slug
-
+from app.services.market_service import (
+    fetch_event_markets,
+    market_kind_from_slug,
+    resolve_event_slug_for_kind,
+)
 from .market_schema import build_market_snapshot
 from .market_storage import MarketSnapshotStore, get_default_market_store
 from .schema import jsonable
@@ -37,6 +39,7 @@ class MarketCollectionRun:
     snapshots: list[dict[str, Any]] = field(default_factory=list)
     capture_results: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
+    event_slugs: dict[str, str] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -46,6 +49,7 @@ class MarketCollectionRun:
             "captured_count": sum(item.get("status") == "captured" for item in self.capture_results),
             "duplicate_count": sum(item.get("status") == "duplicate" for item in self.capture_results),
             "errors": jsonable(self.errors),
+            "event_slugs": dict(self.event_slugs),
             "market_snapshot_ids": [item.get("market_snapshot_id") for item in self.snapshots],
         }
 
@@ -113,25 +117,28 @@ def collect_market_snapshots_once(
     market_store = market_store or get_default_market_store()
     model_store = model_store or get_default_store()
 
-    slug = event_slug
-    if not slug:
-        try:
-            event = fetch_today_event(target.isoformat())
-            slug = event.get("slug") if isinstance(event, Mapping) else None
-        except Exception as exc:
-            run.errors.append({"stage": "gamma_event", "error": type(exc).__name__})
-        slug = slug or resolve_slug("hk-tmax", target)
-    if not slug:
-        run.errors.append({"stage": "gamma_event", "error": "event_slug_missing"})
-        return run
-
     requested = {_market_kind(bool(value)) for value in market_kinds}
     markets_by_kind: dict[str, list[dict[str, Any]]] = {}
+    slugs_by_kind: dict[str, str] = {}
     for is_min_temp, kind in _MARKET_KINDS:
         if kind not in requested:
             continue
+        kind_slug = event_slug if market_kind_from_slug(event_slug) == kind else None
+        if not kind_slug:
+            try:
+                kind_slug = resolve_event_slug_for_kind(target, is_min_temp=is_min_temp)
+            except Exception as exc:
+                run.errors.append(
+                    {"stage": "gamma_event", "market_kind": kind, "error": type(exc).__name__}
+                )
+                kind_slug = None
+        if not kind_slug:
+            run.errors.append({"stage": "gamma_event", "market_kind": kind, "error": "event_slug_missing"})
+            continue
+        slugs_by_kind[kind] = str(kind_slug)
+        run.event_slugs[kind] = str(kind_slug)
         try:
-            markets = fetch_event_markets(slug, is_min_temp=is_min_temp)
+            markets = fetch_event_markets(str(kind_slug), is_min_temp=is_min_temp)
             markets_by_kind[kind] = [dict(item) for item in markets if isinstance(item, Mapping)]
             if not markets_by_kind[kind]:
                 run.errors.append({"stage": "gamma_markets", "market_kind": kind, "error": "no_markets"})
@@ -140,6 +147,50 @@ def collect_market_snapshots_once(
             run.errors.append(
                 {"stage": "gamma_markets", "market_kind": kind, "error": type(exc).__name__}
             )
+
+    # Fail closed when Gamma routes an identity from one event into another
+    # market kind.  A shared condition/token is never safe to replay because
+    # it makes YES/NO books indistinguishable across Tmax/Tmin.
+    identity_owners: dict[tuple[str, str], tuple[str, str]] = {}
+    invalid_kinds: set[str] = set()
+    for kind, markets in markets_by_kind.items():
+        expected_slug_kind = market_kind_from_slug(slugs_by_kind.get(kind))
+        if expected_slug_kind is not None and expected_slug_kind != kind:
+            invalid_kinds.add(kind)
+            run.errors.append(
+                {
+                    "stage": "market_routing",
+                    "market_kind": kind,
+                    "error": "event_slug_kind_mismatch",
+                    "event_slug": slugs_by_kind.get(kind),
+                }
+            )
+        for market in markets:
+            bucket = str(market.get("bucket") or "")
+            for identity_field in ("conditionId", "condition_id", "token_id", "yes_token_id", "no_token_id"):
+                value = market.get(identity_field)
+                if value in (None, ""):
+                    continue
+                identity_key = (identity_field.replace("conditionId", "condition_id"), str(value))
+                previous = identity_owners.get(identity_key)
+                if previous is not None and previous[0] != kind:
+                    invalid_kinds.update({kind, previous[0]})
+                    run.errors.append(
+                        {
+                            "stage": "market_routing",
+                            "market_kind": kind,
+                            "error": "cross_market_kind_identity_collision",
+                            "field": identity_key[0],
+                            "value": identity_key[1],
+                            "previous_market_kind": previous[0],
+                            "previous_bucket": previous[1],
+                            "bucket": bucket,
+                        }
+                    )
+                else:
+                    identity_owners[identity_key] = (kind, bucket)
+    for kind in invalid_kinds:
+        markets_by_kind[kind] = []
 
     token_map: dict[str, str] = {}
     for kind, markets in markets_by_kind.items():
@@ -175,7 +226,7 @@ def collect_market_snapshots_once(
         try:
             model_record = model_store.latest_completed_model_record(
                 event_date=target.isoformat(),
-                event_slug=str(slug),
+                event_slug=str(slugs_by_kind.get(kind)),
                 market_kind=kind,
                 before_timestamp=decision,
             )
@@ -204,7 +255,7 @@ def collect_market_snapshots_once(
                 decision_timestamp=decision,
                 event_date=target,
                 location="Hong Kong",
-                event_slug=str(slug),
+                event_slug=str(slugs_by_kind.get(kind)),
                 market_kind=kind,
                 markets=markets,
                 market_depth=yes_depth,
@@ -300,15 +351,27 @@ class MarketSnapshotCollector:
 
     def _loop(self) -> None:
         while not self._stop.is_set():
-            started = time.monotonic()
             self.run_once()
-            elapsed = time.monotonic() - started
-            wait_seconds = max(0.1, self.interval_seconds - elapsed)
-            self._stop.wait(wait_seconds)
+            if self._stop.is_set():
+                break
+            # Align every subsequent run to a wall-clock boundary.  A
+            # sleep-after-work loop drifts by network latency and eventually
+            # skips minute slots during slow Gamma/CLOB responses.
+            period = max(1.0, self.interval_seconds)
+            now = time.time()
+            next_boundary = (int(now // period) + 1) * period
+            self._stop.wait(max(0.1, next_boundary - now))
 
     def start(self) -> None:
         if self.running:
             return
+        try:
+            store = self.once_kwargs.get("market_store") or get_default_market_store()
+            startup_scan = getattr(store, "startup_scan", None)
+            if callable(startup_scan):
+                startup_scan()
+        except Exception:
+            logger.exception("Layer A market collector startup recovery failed")
         self._stop.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="layer-a-market-collector")
         self._thread.start()

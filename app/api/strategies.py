@@ -196,7 +196,7 @@ def delete_strategy(sid: str):
 @router.post("/suggest", response_model=SuggestResponse)
 @prediction_cache
 def suggest_strategy(req: SuggestRequest):
-    from app.services.market_service import fetch_today_event, fetch_event_markets
+    from app.services.market_service import fetch_event_markets, resolve_event_slug_for_kind
     from app.services.weather_service import fetch_hko_data, get_intraday_state, hkt_now
 
     target_date = _parse_date(req.date)
@@ -213,8 +213,10 @@ def suggest_strategy(req: SuggestRequest):
     rain_kwargs = compute_rain_kwargs(_sd, hkt_now())
     
     # 關鍵修正：先將日期轉換為 Event Slug，再抓取市場數據
-    today_event = fetch_today_event(target_date_str)
-    slug = today_event.get("slug") if today_event else None
+    try:
+        slug = resolve_event_slug_for_kind(target_date, is_min_temp=req.is_min_temp)
+    except Exception:
+        slug = None
     markets = fetch_event_markets(slug, is_min_temp=req.is_min_temp) if slug else []
     
     if not markets:

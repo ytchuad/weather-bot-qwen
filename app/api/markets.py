@@ -106,19 +106,19 @@ def _resolve_today_event(date_str: str | None = None, is_min_temp: bool = False)
 
     bucket = by_date.get(target_date, {})
     if is_min_temp:
-        ev = bucket.get("tmin") or bucket.get("tmax")
+        ev = bucket.get("tmin")
     else:
-        ev = bucket.get("tmax") or bucket.get("tmin")
+        ev = bucket.get("tmax")
     if ev is None:
         future_dates = sorted([d for d in by_date if d > target_date])
         if future_dates:
             future_bucket = by_date[future_dates[0]]
-            ev = future_bucket.get("tmin" if is_min_temp else "tmax") or future_bucket.get("tmax" if is_min_temp else "tmin")
+            ev = future_bucket.get("tmin" if is_min_temp else "tmax")
         if ev is None:
             past_dates = sorted([d for d in by_date if d < target_date], reverse=True)
             if past_dates:
                 past_bucket = by_date[past_dates[0]]
-                ev = past_bucket.get("tmin" if is_min_temp else "tmax") or past_bucket.get("tmax" if is_min_temp else "tmin")
+                ev = past_bucket.get("tmin" if is_min_temp else "tmax")
     return ev
 
 

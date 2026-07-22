@@ -482,7 +482,7 @@ def build_execution_snapshots(
             if depth_cycle != fetch_cycle_id:
                 raise SnapshotValidationError("YES/NO books are from different fetch cycles")
             observed_cycles.add(depth_cycle)
-            book_timestamp = _parse_timestamp(depth.get("timestamp"))
+            book_timestamp = _parse_timestamp(depth.get("book_timestamp", depth.get("timestamp")))
             age = (decision - book_timestamp).total_seconds()
             if age < 0.0 or age > max_book_age_seconds:
                 raise SnapshotValidationError(

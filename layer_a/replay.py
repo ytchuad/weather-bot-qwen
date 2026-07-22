@@ -7,7 +7,7 @@ import json
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from execution.clob_execution import CLOBExecutionSnapshot, DepthLevel, walk_depth
 
@@ -209,6 +209,88 @@ def load_weather_snapshot_records(path: Path | str) -> list[dict[str, Any]]:
     return _weather_records_from_zip(path) if path.suffix.lower() == ".zip" else _weather_records_from_directory(path)
 
 
+def _linked_market_snapshots(
+    model_record: Mapping[str, Any],
+    snapshots: Iterable[Mapping[str, Any]],
+    *,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Dereference immutable market snapshots for one model cycle.
+
+    New records carry an anchor ``market_snapshot_id``.  In that mode a
+    missing anchor is a hard linkage failure; embedded legacy books are never
+    used as a fallback.  Older records without the field retain the historical
+    ``latest_model_cycle_id`` join for migration compatibility.
+    """
+    values = [dict(item) for item in snapshots if isinstance(item, Mapping)]
+    model_id = str(model_record.get("decision_cycle_id") or "")
+    anchor_id = str(model_record.get("market_snapshot_id") or "")
+    strict = bool(anchor_id)
+    event_date = str(model_record.get("event_date") or "")
+    event_slug = str(model_record.get("event_slug") or "")
+    market_kind = str(model_record.get("market_kind") or "")
+    eligible: list[dict[str, Any]] = []
+    anchor_found = False
+    for snapshot in values:
+        snapshot_id = str(snapshot.get("market_snapshot_id") or "")
+        identity_match = snapshot_id == anchor_id if strict else str(snapshot.get("latest_model_cycle_id") or "") == model_id
+        cycle_match = str(snapshot.get("latest_model_cycle_id") or "") == model_id
+        if strict and not (identity_match or cycle_match):
+            continue
+        if not strict and not identity_match:
+            continue
+        if event_date and str(snapshot.get("event_date") or "") != event_date:
+            continue
+        if event_slug and str(snapshot.get("event_slug") or "") != event_slug:
+            continue
+        if market_kind and str(snapshot.get("market_kind") or "") != market_kind:
+            continue
+        try:
+            snapshot_time = _dt(snapshot.get("decision_timestamp")) if snapshot.get("decision_timestamp") else None
+        except (TypeError, ValueError):
+            continue
+        if start is not None and (snapshot_time is None or snapshot_time < start):
+            continue
+        if end is not None and (snapshot_time is None or snapshot_time >= end):
+            continue
+        if strict and snapshot_id == anchor_id:
+            anchor_found = True
+        eligible.append(snapshot)
+    if strict and not anchor_found:
+        return [], False
+    eligible.sort(key=lambda item: _dt(item["decision_timestamp"]))
+    return eligible, (anchor_found if strict else True)
+
+
+def _linked_weather_snapshots(
+    model_record: Mapping[str, Any],
+    snapshots: Iterable[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], bool]:
+    values = [dict(item) for item in snapshots if isinstance(item, Mapping)]
+    anchor_id = str(model_record.get("weather_snapshot_id") or "")
+    model_id = str(model_record.get("decision_cycle_id") or "")
+    strict = bool(anchor_id)
+    event_date = str(model_record.get("event_date") or "")
+    eligible: list[dict[str, Any]] = []
+    anchor_found = False
+    for snapshot in values:
+        snapshot_id = str(snapshot.get("weather_snapshot_id") or "")
+        if strict and snapshot_id != anchor_id and str(snapshot.get("latest_model_cycle_id") or "") != model_id:
+            continue
+        if not strict and str(snapshot.get("latest_model_cycle_id") or "") != model_id:
+            continue
+        if event_date and str(snapshot.get("event_date") or "") != event_date:
+            continue
+        if strict and snapshot_id == anchor_id:
+            anchor_found = True
+        eligible.append(snapshot)
+    if strict and not anchor_found:
+        return [], False
+    eligible.sort(key=lambda item: _dt(item["snapshot_timestamp"]))
+    return eligible, (anchor_found if strict else True)
+
+
 def replay_model_cycle_minute_view(
     model_record: dict[str, Any],
     market_snapshots: Iterable[dict[str, Any]],
@@ -229,8 +311,21 @@ def replay_model_cycle_minute_view(
         next_time = model_time + timedelta(minutes=5)
     delay = max(0, int(entry_delay_minutes))
     eligible_start = model_time + timedelta(minutes=delay)
-    markets = list(market_snapshots)
-    weather = list(weather_snapshots)
+    if model_record.get("market_snapshot_id") not in (None, ""):
+        markets, market_link_ok = _linked_market_snapshots(
+            model_record,
+            market_snapshots,
+            start=model_time,
+            end=next_time,
+        )
+    else:
+        markets = [dict(item) for item in market_snapshots if isinstance(item, Mapping)]
+        market_link_ok = True
+    if model_record.get("weather_snapshot_id") not in (None, ""):
+        weather, weather_link_ok = _linked_weather_snapshots(model_record, weather_snapshots)
+    else:
+        weather = [dict(item) for item in weather_snapshots if isinstance(item, Mapping)]
+        weather_link_ok = True
     rows = build_minute_view(
         [model_record],
         markets,
@@ -254,6 +349,8 @@ def replay_model_cycle_minute_view(
         "execution_minutes": [row["timestamp"] for row in execution_rows],
         "books_evaluated": sum(1 for row in execution_rows if row.get("market_snapshot_id")),
         "weather_minutes_evaluated": sum(1 for row in execution_rows if row.get("weather_snapshot_id")),
+        "market_snapshot_linkage_ok": market_link_ok,
+        "weather_snapshot_linkage_ok": weather_link_ok,
         "future_model_leakage": any(
             row.get("model_cycle_timestamp")
             and _dt(row["model_cycle_timestamp"]) > _dt(row["timestamp"])
@@ -325,18 +422,12 @@ def replay_market_signal(
     model_id = str(model_record.get("decision_cycle_id"))
     model_time = _dt(model_record["decision_timestamp"])
     next_time = _dt(next_model_timestamp) if next_model_timestamp is not None else None
-    linked: list[dict[str, Any]] = []
-    for snapshot in market_snapshots:
-        if str(snapshot.get("latest_model_cycle_id")) != model_id:
-            continue
-        try:
-            snapshot_time = _dt(snapshot["decision_timestamp"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if snapshot_time < model_time or (next_time is not None and snapshot_time >= next_time):
-            continue
-        linked.append(snapshot)
-    linked.sort(key=lambda item: _dt(item["decision_timestamp"]))
+    linked, linkage_ok = _linked_market_snapshots(
+        model_record,
+        market_snapshots,
+        start=model_time,
+        end=next_time,
+    )
     eligible_linked_count = len(linked)
 
     signal_record = dict(model_record)
@@ -378,6 +469,7 @@ def replay_market_signal(
         "candidate_count": sum(len(item["candidates"]) for item in candidates_by_snapshot),
         "candidates_by_snapshot": candidates_by_snapshot,
         "all_linked_one_minute_books_replayed": eligible_linked_count == len(linked),
+        "market_snapshot_linkage_ok": linkage_ok,
     }
 
 
@@ -402,6 +494,46 @@ def replay_layer_a(
     depth_walk: dict[str, Any] | None = None
     candidates: list[dict[str, Any]] = []
     for record in records:
+        if record.get("market_snapshot_id") not in (None, ""):
+            linked, linkage_ok = _linked_market_snapshots(record, market_snapshots)
+            if (record.get("completeness") or {}).get("replay_eligible_for_clob_strategy") is True and linkage_ok:
+                eligible_cycles += 1
+            for immutable_snapshot in linked:
+                immutable_books = immutable_snapshot.get("clob_books", [])
+                reconstructed_books += len(immutable_books)
+                replay_record = dict(record)
+                replay_record["clob_books"] = immutable_books
+                replay_record["gamma_reference_prices"] = immutable_snapshot.get("gamma_reference_prices", {})
+                if depth_walk is None:
+                    by_key = {
+                        (str(book.get("bucket")), str(book.get("token_side")).upper()): book
+                        for book in immutable_books
+                        if isinstance(book, dict)
+                    }
+                    for bucket in sorted({key[0] for key in by_key}):
+                        yes = by_key.get((bucket, "YES"))
+                        no = by_key.get((bucket, "NO"))
+                        if yes is None or no is None:
+                            continue
+                        try:
+                            yes_snapshot = _snapshot(yes)
+                            no_snapshot = _snapshot(no)
+                            buy = walk_depth(yes_snapshot, "BUY", requested_shares)
+                            sell = walk_depth(yes_snapshot, "SELL", requested_shares)
+                            no_buy = walk_depth(no_snapshot, "BUY", requested_shares)
+                            depth_walk = {
+                                "decision_cycle_id": record.get("decision_cycle_id"),
+                                "bucket": bucket,
+                                "yes_buy": buy.to_dict(),
+                                "yes_sell": sell.to_dict(),
+                                "no_buy": no_buy.to_dict(),
+                                "fee_and_vwap_recomputed": True,
+                            }
+                            break
+                        except (KeyError, TypeError, ValueError):
+                            continue
+                candidates.extend(_strategy_candidates(replay_record, strategy_a_threshold, requested_shares))
+            continue
         books = record.get("clob_books", [])
         reconstructed_books += len(books)
         if (record.get("completeness") or {}).get("replay_eligible_for_clob_strategy") is True:

@@ -274,6 +274,121 @@ class WeatherSnapshotStore:
                     known[str(snapshot_id)] = snapshot
         return known
 
+    def _find_snapshot_partition(
+        self,
+        snapshot_id: str,
+        partitions: Iterable[WeatherPartitionInfo],
+    ) -> WeatherPartitionInfo | None:
+        for info in partitions:
+            for snapshot in self._read_info_snapshots(info):
+                if str(snapshot.get("weather_snapshot_id") or "") == str(snapshot_id):
+                    return info
+        return None
+
+    def _replace_open_snapshot(
+        self,
+        info: WeatherPartitionInfo,
+        snapshot: Mapping[str, Any],
+    ) -> bool:
+        """Replace a same-ID record in an open append buffer atomically."""
+        raw_path = next(
+            (item for item in info.temporary_files if item.name.startswith("snapshots-") and item.suffix == ".tmp"),
+            None,
+        )
+        if raw_path is None or not raw_path.exists():
+            return False
+        records = _read_raw_jsonl(raw_path)
+        snapshot_id = str(snapshot.get("weather_snapshot_id") or "")
+        replaced = False
+        for index, current in enumerate(records):
+            if str(current.get("weather_snapshot_id") or "") == snapshot_id:
+                records[index] = jsonable(snapshot)
+                replaced = True
+        if not replaced:
+            return False
+        replacement = Path(f"{raw_path}.replace.tmp")
+        replacement.write_bytes(
+            "".join(f"{_json_dump(record)}\n" for record in records).encode("utf-8")
+        )
+        os.replace(replacement, raw_path)
+        return True
+
+    def _replace_closed_snapshot(
+        self,
+        info: WeatherPartitionInfo,
+        snapshot: Mapping[str, Any],
+    ) -> WeatherPartitionInfo | None:
+        """Rewrite one closed chunk so a deterministic ID remains unique.
+
+        A CSV buffer backfill is an authoritative correction for a bad capture
+        of the same minute.  The old line is replaced in the closed chunk and
+        the checksum/manifest are regenerated atomically; a second line with
+        the same ID is never written.
+        """
+        final_path = info.files.get("snapshots")
+        if final_path is None or not final_path.exists():
+            return None
+        records = self._read_info_snapshots(info)
+        snapshot_id = str(snapshot.get("weather_snapshot_id") or "")
+        replaced = False
+        for index, current in enumerate(records):
+            if str(current.get("weather_snapshot_id") or "") == snapshot_id:
+                records[index] = jsonable(snapshot)
+                replaced = True
+        if not replaced:
+            return None
+
+        raw_payload = "".join(f"{_json_dump(record)}\n" for record in records).encode("utf-8")
+        compressed_tmp = Path(f"{final_path}.tmp")
+        manifest_path = info.files.get("manifest") or info.directory / f"manifest-{info.partition_id}.json"
+        manifest_tmp = Path(f"{manifest_path}.tmp")
+        decision_times = [
+            _timestamp(record.get("snapshot_timestamp"))
+            for record in records
+            if _timestamp(record.get("snapshot_timestamp")) is not None
+        ]
+        partition_start = partition_start_from_directory(info.directory)
+        if partition_start is None and decision_times:
+            partition_start = minute_partition_start(min(decision_times), self.partition_minutes)
+        compression = _write_compressed(compressed_tmp, raw_payload)
+        manifest = {
+            "schema_version": WEATHER_SCHEMA_VERSION,
+            "partition_id": info.partition_id,
+            "partition_relative_path": str(info.directory.relative_to(self.root)).replace("\\", "/"),
+            "files": {"snapshots": final_path.name, "manifest": manifest_path.name},
+            "file_checksums": {final_path.name: _sha256(compressed_tmp)},
+            "file_sizes": {final_path.name: compressed_tmp.stat().st_size},
+            "first_timestamp": min(decision_times).isoformat() if decision_times else None,
+            "last_timestamp": max(decision_times).isoformat() if decision_times else None,
+            "snapshot_count": len(records),
+            "weather_snapshot_ids": [str(record["weather_snapshot_id"]) for record in records],
+            "partition_minutes": self.partition_minutes,
+            "partition_start": partition_start.isoformat() if partition_start else None,
+            "partition_end": (
+                partition_start + timedelta(minutes=self.partition_minutes)
+            ).isoformat() if partition_start else None,
+            "compression": compression,
+            "created_at": (info.manifest or {}).get("created_at") or datetime.now(timezone.utc).isoformat(),
+            "closed_at": datetime.now(timezone.utc).isoformat(),
+            "checksum_scope": "snapshots; manifest hash is calculated by export checksums",
+        }
+        manifest_tmp.write_text(_json_dump(manifest) + "\n", encoding="utf-8")
+        os.replace(compressed_tmp, final_path)
+        os.replace(manifest_tmp, manifest_path)
+        receipt = self.receipts_dir / f"{info.partition_id}.json"
+        receipt.unlink(missing_ok=True)
+        updated = WeatherPartitionInfo(
+            partition_id=info.partition_id,
+            directory=info.directory,
+            files={"snapshots": final_path, "manifest": manifest_path},
+            manifest=manifest,
+            status="complete",
+            checksum_valid=True,
+            uploaded=False,
+        )
+        self._maybe_auto_upload(updated)
+        return updated
+
     def _minute_directory(self, snapshot: Mapping[str, Any]) -> Path:
         decision = _timestamp(snapshot["snapshot_timestamp"])
         if decision is None:
@@ -417,12 +532,25 @@ class WeatherSnapshotStore:
             for snapshot in clean:
                 snapshot_id = str(snapshot["weather_snapshot_id"])
                 existing = known_records.get(snapshot_id)
-                if snapshot_id in known and not (
-                    # Historical captures may already contain a same-minute
-                    # snapshot.  Keep storage append-only while allowing the
-                    # CSV buffer to append the authoritative correction.
-                    _is_buffer_backfill(snapshot) and existing is not None and not _is_buffer_backfill(existing)
-                ):
+                if snapshot_id in known:
+                    if _is_buffer_backfill(snapshot) and existing is not None and not _is_buffer_backfill(existing):
+                        existing_info = self._find_snapshot_partition(snapshot_id, partitions)
+                        replaced = False
+                        if existing_info is not None and existing_info.status != "complete":
+                            replaced = self._replace_open_snapshot(existing_info, snapshot)
+                        elif existing_info is not None:
+                            replaced = self._replace_closed_snapshot(existing_info, snapshot) is not None
+                        if replaced:
+                            known_records[snapshot_id] = snapshot
+                            results.append(
+                                WeatherCaptureResult(
+                                    "captured",
+                                    snapshot_id,
+                                    partition_id=existing_info.partition_id if existing_info else None,
+                                    snapshot=snapshot,
+                                )
+                            )
+                            continue
                     results.append(WeatherCaptureResult("duplicate", snapshot_id, snapshot=snapshot))
                     continue
                 grouped.setdefault(self._minute_directory(snapshot), []).append(snapshot)

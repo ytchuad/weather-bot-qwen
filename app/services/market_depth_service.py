@@ -67,6 +67,7 @@ def fetch_order_books_batch(token_ids: list[str]) -> list[dict]:
 def compute_depth_summary(
     book: dict | None,
     fetch_cycle_id: str | None = None,
+    source_token_id: str | None = None,
 ) -> dict | None:
     """Compact depth summary from a raw order book dict.
 
@@ -84,7 +85,10 @@ def compute_depth_summary(
 
     raw_bids = book.get("bids", [])
     raw_asks = book.get("asks", [])
-    ts_raw = book.get("timestamp")
+    # ``book_timestamp`` is the canonical Layer A name.  Keep the upstream
+    # ``timestamp`` alias for existing callers, but never discard the source
+    # timestamp when normalizing a book.
+    ts_raw = book.get("book_timestamp", book.get("timestamp"))
 
     validation_errors: list[str] = []
 
@@ -144,7 +148,9 @@ def compute_depth_summary(
         depth_imbalance = round((total_bid_size - total_ask_size) / denom, 4)
 
     return {
-        "asset_id": book.get("asset_id") or book.get("market"),
+        "asset_id": book.get("asset_id") or book.get("market") or book.get("token_id") or source_token_id,
+        "token_id": book.get("token_id") or source_token_id or book.get("asset_id") or book.get("market"),
+        "book_timestamp": ts_raw,
         "timestamp": ts_raw,
         "tick_size": book.get("tick_size"),
         "minimum_order_size": book.get("min_order_size", book.get("minimum_order_size")),
@@ -288,7 +294,7 @@ def compute_execution_estimate(
 def fetch_market_depth(token_id: str) -> dict | None:
     """One-shot: fetch order book + compute depth summary for one token."""
     book = fetch_order_book(token_id)
-    return compute_depth_summary(book)
+    return compute_depth_summary(book, source_token_id=token_id)
 
 
 def fetch_market_depths_batch(
@@ -311,12 +317,21 @@ def fetch_market_depths_batch(
     # matches the request order, so align by ``asset_id`` instead of position.
     by_asset: dict[str, dict] = {}
     for raw in books:
-        if isinstance(raw, dict) and raw.get("asset_id"):
-            by_asset[raw["asset_id"]] = raw
+        if not isinstance(raw, dict):
+            continue
+        for key in ("asset_id", "token_id", "market"):
+            value = raw.get(key)
+            if value not in (None, ""):
+                by_asset[str(value)] = raw
     result: dict[str, dict | None] = {}
     for bucket in buckets:
-        raw = by_asset.get(bucket_token_map[bucket])
-        result[bucket] = compute_depth_summary(raw, fetch_cycle_id=fetch_cycle_id)
+        requested_token = str(bucket_token_map[bucket])
+        raw = by_asset.get(requested_token)
+        result[bucket] = compute_depth_summary(
+            raw,
+            fetch_cycle_id=fetch_cycle_id,
+            source_token_id=requested_token,
+        )
     return result
 
 
@@ -405,18 +420,24 @@ class DepthCache:
                     yes_tids = dict(self._token_ids)
                     no_tids = dict(self._no_token_ids)
 
-                if yes_tids:
-                    depths = fetch_market_depths_batch(yes_tids, fetch_cycle_id=cycle_id)
-                    with self._lock:
-                        self._cache = depths
-
-                if no_tids:
-                    no_depths = fetch_market_depths_batch(no_tids, fetch_cycle_id=cycle_id)
-                    with self._lock:
-                        self._no_cache = no_depths
-                if yes_tids and no_tids:
-                    with self._lock:
-                        self._fetch_cycle_id = cycle_id
+                # Fetch both sides into locals, then publish them together.
+                # Updating the YES cache before the NO request completes can
+                # expose a mixed pair to a model cycle even though both calls
+                # were given the same nominal cycle id.
+                depths = (
+                    fetch_market_depths_batch(yes_tids, fetch_cycle_id=cycle_id)
+                    if yes_tids
+                    else {}
+                )
+                no_depths = (
+                    fetch_market_depths_batch(no_tids, fetch_cycle_id=cycle_id)
+                    if no_tids
+                    else {}
+                )
+                with self._lock:
+                    self._cache = depths
+                    self._no_cache = no_depths
+                    self._fetch_cycle_id = cycle_id if yes_tids and no_tids else None
             except Exception as exc:
                 logger.warning("DepthCache refresh failed: %s", exc)
 
