@@ -172,6 +172,26 @@ def test_chart_api_returns_raw_actual_points_and_projection_diagnostics(monkeypa
     assert points["2026-07-23T09:40:00+08:00"] == 30.0
     assert points["2026-07-23T09:41:00+08:00"] is None
     assert points["2026-07-23T09:48:00+08:00"] is None
+    metadata = {item["timestamp"]: item for item in payload["point_metadata"]}
+    assert metadata["2026-07-23T09:40:00+08:00"] == {
+        "timestamp": "2026-07-23T09:40:00+08:00",
+        "actual_observation_timestamp": "2026-07-23T01:40:00+00:00",
+        "actual_first_seen_timestamp": "2026-07-23T01:48:00+00:00",
+        "actual_source_release_timestamp": None,
+        "actual_release_lag_seconds": None,
+        "prediction_decision_timestamp": None,
+        "weather_data_through": None,
+        "weather_first_seen_timestamp": None,
+        "weather_age_seconds": None,
+        "weather_snapshot_id": None,
+        "model_cycle_id": None,
+        "model_age_seconds": None,
+        "model_cycle_is_real": False,
+    }
+    assert metadata["2026-07-23T09:48:00+08:00"]["prediction_decision_timestamp"] == "2026-07-23T09:48:00+08:00"
+    assert metadata["2026-07-23T09:48:00+08:00"]["model_cycle_id"] == "cycle-1"
+    assert metadata["2026-07-23T09:48:00+08:00"]["model_cycle_is_real"] is True
+    assert payload["expected_model_cycle_interval_seconds"] == 300.0
     assert payload["diagnostics"] == projection["diagnostics"]
 
 

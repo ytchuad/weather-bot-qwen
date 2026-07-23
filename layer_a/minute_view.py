@@ -239,6 +239,9 @@ def _weather_projection(
     weather_first_seen = _weather_first_seen_time(snapshot) if snapshot is not None else None
     actual_observation = _weather_observation_time(actual_snapshot) if actual_snapshot is not None else None
     actual_first_seen = _weather_first_seen_time(actual_snapshot) if actual_snapshot is not None else None
+    actual_source_release = (
+        _time(actual_snapshot.get("source_release_timestamp")) if actual_snapshot is not None else None
+    )
     return {
         "actual_temperature": actual_value,
         **values,
@@ -256,6 +259,10 @@ def _weather_projection(
         "actual_weather_snapshot_id": actual_snapshot.get("weather_snapshot_id") if actual_snapshot is not None else None,
         "actual_observation_timestamp": actual_observation.isoformat() if actual_observation else None,
         "actual_first_seen_timestamp": actual_first_seen.isoformat() if actual_first_seen else None,
+        "actual_source_release_timestamp": actual_source_release.isoformat() if actual_source_release else None,
+        "actual_release_lag_seconds": (
+            _age_seconds(actual_source_release, actual_first_seen) if actual_source_release and actual_first_seen else None
+        ),
         "actual_temperature_quality_status": actual_status.get("quality_status") if actual_status else "missing",
         "weather_observations": projected_status,
     }

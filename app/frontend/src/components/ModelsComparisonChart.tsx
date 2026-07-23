@@ -3,6 +3,13 @@ import { useQuery } from "@tanstack/react-query"
 import ReactECharts from "echarts-for-react"
 import type { EChartsOption, SeriesOption } from "echarts"
 import { fetchModelsComparison } from "../api/client"
+import {
+  buildTrajectoryTooltip,
+  canConnectRealModelCycles,
+  formatHktTime,
+  timestampToEpochMillis,
+} from "../lib/trajectoryFormatting.js"
+import type { TrajectoryPointMetadata } from "../types"
 
 const MODEL_COLORS: Record<string, string> = {
   "9d": "#38bdf8",
@@ -49,19 +56,11 @@ const AXIS_LABEL = {
 }
 
 type Point = number | null
-
-function parseTime(timestamp: string): string {
-  try {
-    const parsed = new Date(timestamp)
-    if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toLocaleTimeString("en-HK", { hour: "2-digit", minute: "2-digit", hour12: false })
-    }
-  } catch {
-    // Fall through to the source timestamp format.
-  }
-  if (timestamp.length >= 16) return timestamp.slice(11, 16)
-  if (timestamp.length >= 5) return timestamp.slice(0, 5)
-  return timestamp
+type Coordinate = [number, number]
+type ChartPoint = {
+  timestamp: string
+  epoch: number
+  metadata: TrajectoryPointMetadata
 }
 
 function padArray(values: Point[] | undefined, length: number): Point[] {
@@ -71,9 +70,49 @@ function padArray(values: Point[] | undefined, length: number): Point[] {
   return [...values, ...new Array(length - values.length).fill(null)]
 }
 
-function averageAt(series: Point[][], index: number): number | null {
-  const values = series.map((values) => values[index]).filter((value): value is number => value != null && Number.isFinite(value))
-  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null
+function coordinate(timestamp: string | null | undefined, value: Point): Coordinate | null {
+  if (value == null || !Number.isFinite(value)) return null
+  const epoch = timestampToEpochMillis(timestamp)
+  return epoch == null ? null : [epoch, value]
+}
+
+function segmentRealCycles(values: Point[], points: ChartPoint[], expectedIntervalSeconds: number | null): Coordinate[][] {
+  const segments: Coordinate[][] = []
+  let segment: Coordinate[] = []
+  let previous: ChartPoint | null = null
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]
+    const realCycle = point.metadata.model_cycle_is_real === true
+    const decisionTimestamp = point.metadata.prediction_decision_timestamp
+    const value = values[index]
+    const next = realCycle ? coordinate(decisionTimestamp, value) : null
+    if (!next || !decisionTimestamp) continue
+    if (!previous || !canConnectRealModelCycles(previous.metadata.prediction_decision_timestamp, decisionTimestamp, expectedIntervalSeconds)) {
+      if (segment.length) segments.push(segment)
+      segment = [next]
+    } else {
+      segment.push(next)
+    }
+    previous = point
+  }
+  if (segment.length) segments.push(segment)
+  return segments
+}
+
+function averageCoordinates(modelSegments: Coordinate[][][]): Coordinate[] {
+  const valuesByTime = new Map<number, number[]>()
+  for (const segments of modelSegments) {
+    for (const segment of segments) {
+      for (const [timestamp, value] of segment) {
+        const values = valuesByTime.get(timestamp) || []
+        values.push(value)
+        valuesByTime.set(timestamp, values)
+      }
+    }
+  }
+  return [...valuesByTime.entries()]
+    .map(([timestamp, values]) => [timestamp, values.reduce((sum, value) => sum + value, 0) / values.length] as Coordinate)
+    .sort(([left], [right]) => left - right)
 }
 
 function SeriesChip({ color, label, dash, dimmed, active, onClick }: {
@@ -113,48 +152,96 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
   const chart = useMemo(() => {
     if (!data || !data.timestamps?.length) return null
 
-    const timestamps = data.timestamps.map(parseTime)
-    const length = timestamps.length
+    const length = data.timestamps.length
+    const rawMetadata = data.point_metadata || []
+    const points: ChartPoint[] = data.timestamps.flatMap((timestamp, index) => {
+      const epoch = timestampToEpochMillis(timestamp)
+      if (epoch == null) return []
+      const supplied = rawMetadata[index]
+      // Legacy rows retain one stored strategy-cycle timestamp per row.  They
+      // are not expanded into minute points, and modern Layer A rows must
+      // explicitly identify a real canonical cycle before a model is drawn.
+      const isLegacyStrategyCycle = data.granularity === "strategy_cycle" && supplied?.model_cycle_is_real == null
+      return [{
+        timestamp,
+        epoch,
+        metadata: {
+          timestamp: supplied?.timestamp ?? timestamp,
+          actual_observation_timestamp: supplied?.actual_observation_timestamp ?? null,
+          actual_first_seen_timestamp: supplied?.actual_first_seen_timestamp ?? null,
+          actual_source_release_timestamp: supplied?.actual_source_release_timestamp ?? null,
+          actual_release_lag_seconds: supplied?.actual_release_lag_seconds ?? null,
+          prediction_decision_timestamp: supplied?.prediction_decision_timestamp ?? (isLegacyStrategyCycle ? timestamp : null),
+          weather_data_through: supplied?.weather_data_through ?? null,
+          weather_first_seen_timestamp: supplied?.weather_first_seen_timestamp ?? null,
+          weather_age_seconds: supplied?.weather_age_seconds ?? null,
+          weather_snapshot_id: supplied?.weather_snapshot_id ?? null,
+          model_cycle_id: supplied?.model_cycle_id ?? null,
+          model_age_seconds: supplied?.model_age_seconds ?? null,
+          model_cycle_is_real: supplied?.model_cycle_is_real ?? isLegacyStrategyCycle,
+        },
+      }]
+    })
+    if (!points.length) return null
+
     const actual = padArray(data.actual_temps, length)
     const market = padArray(data.market_temps, length)
+    const actualCoordinates = points.flatMap((point, index) => {
+      const sourceTimestamp = point.metadata.actual_observation_timestamp || (data.granularity === "strategy_cycle" ? point.timestamp : null)
+      const value = coordinate(sourceTimestamp, actual[index])
+      return value ? [value] : []
+    })
+    const marketCoordinates = points.flatMap((point, index) => {
+      const value = coordinate(point.timestamp, market[index])
+      return value ? [value] : []
+    })
     const visibleModels = Object.entries(data.models).filter(([key]) => !visibleKeys || visibleKeys.has(key))
-    const modelValues = visibleModels.map(([, values]) => padArray(values, length))
-    const consensus = timestamps.map((_, index) => averageAt(modelValues, index))
+    const expectedIntervalSeconds = Number.isFinite(data.expected_model_cycle_interval_seconds) && (data.expected_model_cycle_interval_seconds || 0) > 0
+      ? data.expected_model_cycle_interval_seconds || null
+      : null
+    const modelSegments = visibleModels.map(([, values]) => segmentRealCycles(padArray(values, length), points, expectedIntervalSeconds))
+    const consensusCoordinates = averageCoordinates(modelSegments)
 
-    const allValues = [...actual, ...market, ...consensus, ...modelValues.flat()].filter((value): value is number => value != null && Number.isFinite(value))
+    const allValues = [
+      ...actualCoordinates,
+      ...marketCoordinates,
+      ...consensusCoordinates,
+      ...modelSegments.flat(2),
+    ].map(([, value]) => value)
     const rawMin = allValues.length > 0 ? Math.min(...allValues) : 20
     const rawMax = allValues.length > 0 ? Math.max(...allValues) : 35
     const spread = Math.max(rawMax - rawMin, 1)
     const min = Math.floor((rawMin - spread * 0.08) * 2) / 2
     const max = Math.ceil((rawMax + spread * 0.08) * 2) / 2
-    let lastActualIndex = -1
-    actual.forEach((value, index) => { if (value != null) lastActualIndex = index })
+    const lastActual = actualCoordinates.at(-1)
+    const metadataByEpoch = new Map(points.map((point) => [point.epoch, point]))
 
     const isDimmed = (id: string) => Boolean(isolated && isolated !== id)
-    const line = (id: string, name: string, values: Point[], color: string, options: { dash?: boolean; area?: boolean; z?: number } = {}): SeriesOption => {
+    const line = (id: string, name: string, values: Coordinate[], color: string, options: { dash?: boolean; area?: boolean; z?: number; step?: boolean; showSymbol?: boolean } = {}): SeriesOption => {
       const dimmed = isDimmed(id)
       const focused = isolated === id
       return {
         name,
         type: "line",
-        step: "end",
-        symbol: "none",
+        step: options.step ? "end" : false,
+        symbol: options.showSymbol ? "circle" : "none",
+        symbolSize: options.showSymbol ? 5 : 0,
+        showSymbol: options.showSymbol ?? false,
         data: values,
-        connectNulls: true,
         lineStyle: { width: focused ? 3 : options.area ? 2.4 : options.dash ? 2 : 1.15, color, opacity: dimmed ? 0.1 : options.area || options.dash || focused ? 1 : 0.42, type: options.dash ? "dashed" : "solid" },
         itemStyle: { color, opacity: dimmed ? 0.1 : 1 },
         emphasis: { focus: "series", lineStyle: { width: 3, opacity: 1 } },
         areaStyle: options.area ? { color: { type: "linear", x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: `${color}1c` }, { offset: 1, color: `${color}00` }] } } : undefined,
         z: options.z ?? 1,
-        markLine: id === "actual" && lastActualIndex >= 0 ? { silent: true, symbol: "none", animation: false, lineStyle: { color: "rgba(255,255,255,0.28)", width: 1, type: "dashed" }, label: { formatter: "NOW", position: "insideEndTop", color: "rgba(255,255,255,0.45)", fontFamily: "ui-monospace, monospace", fontSize: 9.5 }, data: [{ xAxis: timestamps[lastActualIndex] }] } : undefined,
+        markLine: id === "actual" && lastActual ? { silent: true, symbol: "none", animation: false, lineStyle: { color: "rgba(255,255,255,0.28)", width: 1, type: "dashed" }, label: { formatter: "LATEST ACTUAL", position: "insideEndTop", color: "rgba(255,255,255,0.45)", fontFamily: "ui-monospace, monospace", fontSize: 9.5 }, data: [{ xAxis: lastActual[0] }] } : undefined,
       }
     }
 
     const series: SeriesOption[] = [
-      line("actual", "Actual Temperature", actual, "#fb7185", { area: true, z: 4 }),
-      line("market", "Polymarket Weighted", market, "#a78bfa", { dash: true, z: 3 }),
-      line("consensus", "Consensus (Mean)", consensus, "#22d3ee", { area: true, z: 3 }),
-      ...visibleModels.map(([key, values]) => line(`model:${key}`, MODEL_LABELS[key] || key, padArray(values, length), MODEL_COLORS[key] || "#94a3b8")),
+      line("actual", "Actual Temperature", actualCoordinates, "#fb7185", { area: true, z: 4 }),
+      line("market", "Polymarket Weighted", marketCoordinates, "#a78bfa", { dash: true, z: 3 }),
+      line("consensus", "Consensus (Mean)", consensusCoordinates, "#22d3ee", { area: true, z: 3, step: true, showSymbol: true }),
+      ...visibleModels.flatMap(([key], index) => modelSegments[index].map((segment) => line(`model:${key}`, MODEL_LABELS[key] || key, segment, MODEL_COLORS[key] || "#94a3b8", { step: true, showSymbol: true }))),
     ]
 
     const option: EChartsOption = {
@@ -170,18 +257,26 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
         axisPointer: { type: "line", lineStyle: { color: "rgba(255,255,255,0.2)", type: "dashed" } },
         formatter: (params: any) => {
           const entries = Array.isArray(params) ? params : [params]
-          const title = entries[0]?.axisValue || ""
-          const rows = entries.filter((entry: any) => entry.value != null).map((entry: any) => `<div style="display:flex;justify-content:space-between;gap:20px;margin-top:3px"><span style="color:${entry.color}">${entry.seriesName}</span><span style="color:#fff;font-weight:600">${Number(entry.value).toFixed(2)}°C</span></div>`).join("")
-          return `<div style="font-family:ui-monospace,monospace;font-size:10px;color:rgba(255,255,255,.55);margin-bottom:6px">${title}</div>${rows}`
+          const first = entries[0]
+          const axisEpoch = Array.isArray(first?.value) ? first.value[0] : first?.axisValue
+          const point = metadataByEpoch.get(Number(axisEpoch))
+          return buildTrajectoryTooltip({
+            timestamp: point?.timestamp || axisEpoch,
+            metadata: point?.metadata,
+            entries: entries.map((entry: any) => ({
+              seriesName: entry.seriesName,
+              color: entry.color,
+              value: Array.isArray(entry.value) ? entry.value[1] : entry.value,
+            })),
+            expectedCycleIntervalSeconds: expectedIntervalSeconds,
+          })
         },
       },
       xAxis: {
-        type: "category",
-        data: timestamps,
-        boundaryGap: false,
+        type: "time",
         axisLine: { lineStyle: { color: "rgba(255,255,255,0.08)" } },
         axisTick: { show: false },
-        axisLabel: { ...AXIS_LABEL, interval: Math.max(1, Math.floor(length / 8)) },
+        axisLabel: { ...AXIS_LABEL, formatter: (value: number) => formatHktTime(value) },
       },
       yAxis: {
         type: "value",
@@ -204,8 +299,7 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
       option,
       chips,
       visibleCount: visibleModels.length,
-      timestampCount: length,
-      granularity: data.granularity || "minute",
+      timestampCount: points.length,
     }
   }, [data, isolated, visibleKeys])
 
@@ -224,7 +318,7 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
       <div className="h-[330px] w-full sm:h-[360px]">
         <ReactECharts option={chart.option} notMerge={false} replaceMerge={["series"]} lazyUpdate={true} style={{ height: "100%", width: "100%" }} />
       </div>
-      <div className="mono text-[10.5px] tracking-wide text-white/25">Click a series to focus it · {chart.visibleCount} model series · {chart.timestampCount} observations · dashed line = market weighted temperature</div>
+      <div className="mono text-[10.5px] tracking-wide text-white/25">All times HKT · model markers are real decision cycles only · {chart.visibleCount} model series · {chart.timestampCount} source timestamps</div>
     </div>
   )
 }

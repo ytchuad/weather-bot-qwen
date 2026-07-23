@@ -315,6 +315,51 @@ def test_trajectory_chart_uses_minute_projection(monkeypatch):
     assert legacy_payload["data_source"] == "legacy_csv"
 
 
+def test_actual_app_models_comparison_endpoint_exposes_trajectory_lineage(monkeypatch):
+    server, services = _patch_lifespan_dependencies(monkeypatch)
+    services["canonical"].interval_seconds = 300.0
+    from app.api import charts
+
+    class Store:
+        def minute_history_projection(self, **kwargs):
+            assert kwargs == {
+                "date_value": EVENT_DATE,
+                "market_kind": "highest_temperature",
+                "limit": 10000,
+            }
+            return {
+                "rows": [{
+                    "timestamp": "2026-07-20T18:00:00+08:00",
+                    "actual_temperature": 30.0,
+                    "actual_observation_timestamp": "2026-07-20T18:00:00+08:00",
+                    "actual_first_seen_timestamp": "2026-07-20T18:02:00+08:00",
+                    "weather_data_through": "2026-07-20T18:00:00+08:00",
+                    "weather_first_seen_timestamp": "2026-07-20T18:02:00+08:00",
+                    "weather_age_seconds": 0.0,
+                    "model_cycle_timestamp": "2026-07-20T18:00:00+08:00",
+                    "model_cycle_id": "cycle-debug",
+                    "model_cycle_is_real": True,
+                    "model_age_seconds": 0.0,
+                    "model_predictions": {"model_debug": {"point_prediction": 30.2}},
+                }],
+                "diagnostics": {"excluded_future_weather_records": 0},
+                "has_layer_a_records": True,
+            }
+
+    monkeypatch.setattr(charts, "get_default_historical_store", lambda: Store())
+    with TestClient(server.app) as client:
+        response = client.get(f"/api/charts/models-comparison?date={EVENT_DATE}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["timestamps"] == ["2026-07-20T18:00:00+08:00"]
+    assert payload["models"] == {"model_debug": [30.2]}
+    assert payload["point_metadata"][0]["actual_observation_timestamp"] == "2026-07-20T18:00:00+08:00"
+    assert payload["point_metadata"][0]["prediction_decision_timestamp"] == "2026-07-20T18:00:00+08:00"
+    assert payload["point_metadata"][0]["model_cycle_id"] == "cycle-debug"
+    assert payload["expected_model_cycle_interval_seconds"] == 300.0
+
+
 def test_minute_history_reads_model_from_incomplete_partition(tmp_path):
     store = _history_store(tmp_path)
     store.local_store.capture(_model())

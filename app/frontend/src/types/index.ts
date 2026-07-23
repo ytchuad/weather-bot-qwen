@@ -158,8 +158,26 @@ export interface ModelsComparisonData {
   market_temps: (number | null)[]
   actual_temps: (number | null)[]
   models: Record<string, (number | null)[]>
+  point_metadata?: TrajectoryPointMetadata[]
+  expected_model_cycle_interval_seconds?: number | null
   granularity?: "minute" | "strategy_cycle"
   data_source?: string
+}
+
+export interface TrajectoryPointMetadata {
+  timestamp: string | null
+  actual_observation_timestamp: string | null
+  actual_first_seen_timestamp: string | null
+  actual_source_release_timestamp: string | null
+  actual_release_lag_seconds: number | null
+  prediction_decision_timestamp: string | null
+  weather_data_through: string | null
+  weather_first_seen_timestamp: string | null
+  weather_age_seconds: number | null
+  weather_snapshot_id: string | null
+  model_cycle_id: string | null
+  model_age_seconds: number | null
+  model_cycle_is_real: boolean | null
 }
 
 export interface BucketProbsData {

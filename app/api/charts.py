@@ -7,6 +7,7 @@ No model loading or live API calls happen here.
 from __future__ import annotations
 
 import logging
+import math
 import re
 from datetime import date as calendar_date
 from typing import Any, Mapping
@@ -74,6 +75,22 @@ def _point_prediction(value: Any) -> float | None:
     return parsed if parsed == parsed else None
 
 
+def _expected_model_cycle_interval_seconds() -> float | None:
+    """Expose the scheduler's configured cadence to trajectory clients.
+
+    The chart uses this value only to decide whether two *real* model cycles
+    may be visually joined.  Keeping it here avoids a frontend-only stale
+    cutoff that silently diverges from the canonical collector configuration.
+    """
+    try:
+        from layer_a.canonical_capture import get_default_canonical_collector
+
+        interval = float(get_default_canonical_collector().interval_seconds)
+    except (ImportError, AttributeError, TypeError, ValueError):
+        return None
+    return interval if math.isfinite(interval) and interval > 0 else None
+
+
 def _minute_comparison_projection(date: str, is_min_temp: bool) -> dict[str, Any]:
     """Build chart rows and timestamp diagnostics from the minute projection."""
     store = get_default_historical_store()
@@ -108,6 +125,24 @@ def _comparison_payload_from_minute_rows(
     timestamps = [str(row.get("timestamp")) for row in rows]
     market_temps = [_market_expected_temperature(row) for row in rows]
     actual_temps = [row.get("actual_temperature") for row in rows]
+    point_metadata = [
+        {
+            "timestamp": row.get("timestamp"),
+            "actual_observation_timestamp": row.get("actual_observation_timestamp"),
+            "actual_first_seen_timestamp": row.get("actual_first_seen_timestamp"),
+            "actual_source_release_timestamp": row.get("actual_source_release_timestamp"),
+            "actual_release_lag_seconds": row.get("actual_release_lag_seconds"),
+            "prediction_decision_timestamp": row.get("model_cycle_timestamp"),
+            "weather_data_through": row.get("weather_data_through"),
+            "weather_first_seen_timestamp": row.get("weather_first_seen_timestamp"),
+            "weather_age_seconds": row.get("weather_age_seconds"),
+            "weather_snapshot_id": row.get("weather_snapshot_id"),
+            "model_cycle_id": row.get("model_cycle_id"),
+            "model_age_seconds": row.get("model_age_seconds"),
+            "model_cycle_is_real": row.get("model_cycle_is_real"),
+        }
+        for row in rows
+    ]
     sources = {str(row.get("source") or "layer_a") for row in rows}
     legacy_only = sources == {"legacy_csv"}
     all_model_keys: set[str] = set()
@@ -144,6 +179,8 @@ def _comparison_payload_from_minute_rows(
         "market_temps": market_temps,
         "actual_temps": actual_temps,
         "models": models,
+        "point_metadata": point_metadata,
+        "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
         "granularity": "strategy_cycle" if legacy_only else "minute",
         "data_source": "legacy_csv" if legacy_only else "layer_a_minute_view",
         "diagnostics": dict(diagnostics or {}),
@@ -159,9 +196,9 @@ def get_models_comparison_chart(
     """Return time-series data for the 'All Models vs Market' comparison chart.
 
     Reads the Layer A minute projection — no models or APIs are touched.
-    Model values are joined backward as-of to each minute.  Repository-synced
-    daily CSV is used by that projection after a rebuild; the legacy SQLite
-    cycle path remains a compatibility fallback.
+    Model values appear only at real decision-cycle timestamps.  Repository-
+    synced daily CSV is used by that projection after a rebuild; the legacy
+    SQLite cycle path remains a compatibility fallback.
     """
     from app.services.weather_service import hkt_now as _hkt_now
     target_date = date or _hkt_now().strftime("%Y-%m-%d")
@@ -176,6 +213,8 @@ def get_models_comparison_chart(
             "market_temps": [],
             "actual_temps": [],
             "models": {},
+            "point_metadata": [],
+            "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
             "granularity": "minute",
             "data_source": "layer_a_minute_view",
             "diagnostics": {
@@ -202,6 +241,8 @@ def get_models_comparison_chart(
             "market_temps": [],
             "actual_temps": [],
             "models": {},
+            "point_metadata": [],
+            "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
             "diagnostics": minute_projection["diagnostics"],
         }
 
@@ -238,6 +279,25 @@ def get_models_comparison_chart(
         "market_temps": market_temps,
         "actual_temps": actual_temps,
         "models": models,
+        "point_metadata": [
+            {
+                "timestamp": row.get("timestamp"),
+                "actual_observation_timestamp": row.get("actual_observation_timestamp"),
+                "actual_first_seen_timestamp": row.get("actual_first_seen_timestamp"),
+                "actual_source_release_timestamp": row.get("actual_source_release_timestamp"),
+                "actual_release_lag_seconds": row.get("actual_release_lag_seconds"),
+                "prediction_decision_timestamp": row.get("model_cycle_timestamp"),
+                "weather_data_through": row.get("weather_data_through"),
+                "weather_first_seen_timestamp": row.get("weather_first_seen_timestamp"),
+                "weather_age_seconds": row.get("weather_age_seconds"),
+                "weather_snapshot_id": row.get("weather_snapshot_id"),
+                "model_cycle_id": row.get("model_cycle_id"),
+                "model_age_seconds": row.get("model_age_seconds"),
+                "model_cycle_is_real": row.get("model_cycle_is_real"),
+            }
+            for row in rows
+        ],
+        "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
         "granularity": "strategy_cycle",
         "data_source": "strategy_snapshot_sqlite",
         "diagnostics": minute_projection["diagnostics"],
