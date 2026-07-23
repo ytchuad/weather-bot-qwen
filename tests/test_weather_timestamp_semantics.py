@@ -53,7 +53,7 @@ def test_canonical_cycle_localizes_naive_hko_timestamp_as_hkt(monkeypatch):
     monkeypatch.setattr("layer_a.weather_storage.get_default_weather_store", lambda: WeatherStore())
     monkeypatch.setattr("layer_a.market_storage.get_default_market_store", lambda: MarketStore())
 
-    _capture_linked_layer_a_snapshots(
+    _market_snapshot_id, weather_snapshot_id, lineage = _capture_linked_layer_a_snapshots(
         cycle_id="cycle-1",
         decision_timestamp=datetime(2026, 7, 23, 11, 5, tzinfo=UTC),
         target_date=EVENT_DATE,
@@ -71,6 +71,13 @@ def test_canonical_cycle_localizes_naive_hko_timestamp_as_hkt(monkeypatch):
 
     assert captured["observation_timestamp"] == "2026-07-23T11:00:00+00:00"
     assert captured["snapshot_timestamp"] == captured["observation_timestamp"]
+    assert weather_snapshot_id == captured["weather_snapshot_id"]
+    assert lineage == {
+        "weather_snapshot_id": weather_snapshot_id,
+        "weather_data_through": "2026-07-23T11:00:00+00:00",
+        "weather_first_seen_timestamp": "2026-07-23T11:05:00+00:00",
+        "weather_age_seconds": 300.0,
+    }
     assert datetime.fromisoformat(str(captured["observation_timestamp"])).astimezone(
         ZoneInfo("Asia/Hong_Kong")
     ).strftime("%Y-%m-%d %H:%M") == "2026-07-23 19:00"
@@ -93,7 +100,10 @@ def test_repeated_observation_version_preserves_earliest_first_seen_timestamp(tm
 
     assert first["weather_snapshot_id"] == repeated["weather_snapshot_id"]
     assert store.capture(first).status == "captured"
-    assert store.capture(repeated).status == "duplicate"
+    duplicate = store.capture(repeated)
+    assert duplicate.status == "duplicate"
+    assert duplicate.snapshot is not None
+    assert duplicate.snapshot["first_seen_timestamp"] == "2026-07-23T01:48:00+00:00"
 
     records = store.read_partition_snapshots(store.scan()[0])
     assert len(records) == 1

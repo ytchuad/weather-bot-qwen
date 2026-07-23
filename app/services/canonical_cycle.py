@@ -55,6 +55,7 @@ class CanonicalCycle:
     gamma_reference_prices: dict[str, Any]
     market_snapshot_id: str | None
     weather_snapshot_id: str | None
+    weather_lineage: dict[str, Any]
     layer_a_record: dict[str, Any]
 
 
@@ -289,6 +290,41 @@ def _persist_layer_a(record: Mapping[str, Any]) -> None:
         logger.exception("Layer A capture failed for cycle %s", record["decision_cycle_id"])
 
 
+def _weather_lineage_from_snapshot(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    decision_timestamp: datetime,
+) -> dict[str, Any]:
+    """Build the immutable weather lineage used by one model decision."""
+    empty = {
+        "weather_snapshot_id": None,
+        "weather_data_through": None,
+        "weather_first_seen_timestamp": None,
+        "weather_age_seconds": None,
+    }
+    if not isinstance(snapshot, Mapping):
+        return empty
+    from layer_a.schema import _parse_datetime
+
+    observation = _parse_datetime(
+        snapshot.get("observation_timestamp") or snapshot.get("snapshot_timestamp"),
+        naive_timezone=HKT,
+    )
+    first_seen = _parse_datetime(snapshot.get("first_seen_timestamp"), naive_timezone=HKT)
+    decision = decision_timestamp.astimezone(timezone.utc)
+    if observation is None or first_seen is None or observation > decision or first_seen > decision:
+        return empty
+    age = (decision - observation).total_seconds()
+    if age < 0:
+        return empty
+    return {
+        "weather_snapshot_id": str(snapshot.get("weather_snapshot_id") or "") or None,
+        "weather_data_through": observation.isoformat(),
+        "weather_first_seen_timestamp": first_seen.isoformat(),
+        "weather_age_seconds": age,
+    }
+
+
 def _capture_linked_layer_a_snapshots(
     *,
     cycle_id: str,
@@ -304,10 +340,11 @@ def _capture_linked_layer_a_snapshots(
     market_depth_no: Mapping[str, Any],
     depth_fetch_cycle_id: str | None,
     gamma_reference_prices: Mapping[str, Any],
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, dict[str, Any]]:
     """Persist and return the immutable market/weather IDs for this cycle."""
     market_snapshot_id: str | None = None
     weather_snapshot_id: str | None = None
+    weather_lineage = _weather_lineage_from_snapshot(None, decision_timestamp=decision_timestamp)
     market_kind = "lowest_temperature" if is_min_temp else "highest_temperature"
     try:
         from layer_a.market_schema import build_market_snapshot
@@ -403,10 +440,14 @@ def _capture_linked_layer_a_snapshots(
             },
         )
         result = get_default_weather_store().capture(weather_snapshot)
-        weather_snapshot_id = str(result.weather_snapshot_id)
+        weather_lineage = _weather_lineage_from_snapshot(
+            getattr(result, "snapshot", None) or weather_snapshot,
+            decision_timestamp=decision_timestamp,
+        )
+        weather_snapshot_id = weather_lineage["weather_snapshot_id"]
     except Exception:
         logger.exception("Linked weather snapshot capture failed for cycle %s", cycle_id)
-    return market_snapshot_id, weather_snapshot_id
+    return market_snapshot_id, weather_snapshot_id, weather_lineage
 
 
 def _build_uncached_cycle(
@@ -521,7 +562,7 @@ def _build_uncached_cycle(
     paper_execution_mode = get_paper_execution_mode()
     partial_fill_policy = get_partial_fill_policy()
     cycle_id = _cycle_slot_key(decision_timestamp, target_date, event_slug, is_min_temp)
-    market_snapshot_id, weather_snapshot_id = _capture_linked_layer_a_snapshots(
+    market_snapshot_id, weather_snapshot_id, weather_lineage = _capture_linked_layer_a_snapshots(
         cycle_id=cycle_id,
         decision_timestamp=decision_timestamp,
         target_date=target_date,
@@ -538,9 +579,14 @@ def _build_uncached_cycle(
     )
     context_json["market_snapshot_id"] = market_snapshot_id
     context_json["weather_snapshot_id"] = weather_snapshot_id
+    context_json["weather_lineage"] = weather_lineage
     context_json["layer_a_linkage"] = {
         "market_snapshot_id": market_snapshot_id,
         "weather_snapshot_id": weather_snapshot_id,
+        "weather_data_through": weather_lineage["weather_data_through"],
+        "weather_first_seen_timestamp": weather_lineage["weather_first_seen_timestamp"],
+        "weather_age_seconds": weather_lineage["weather_age_seconds"],
+        "weather_lineage": weather_lineage,
         "linkage_status": "complete" if market_snapshot_id and weather_snapshot_id else "incomplete",
     }
     context_json["paper_execution_mode"] = paper_execution_mode
@@ -554,6 +600,10 @@ def _build_uncached_cycle(
         "event_slug": event_slug,
         "market_snapshot_id": market_snapshot_id,
         "weather_snapshot_id": weather_snapshot_id,
+        "weather_data_through": weather_lineage["weather_data_through"],
+        "weather_first_seen_timestamp": weather_lineage["weather_first_seen_timestamp"],
+        "weather_age_seconds": weather_lineage["weather_age_seconds"],
+        "weather_lineage": weather_lineage,
         "markets": markets,
         "market_depth": market_depth,
         "market_depth_no": market_depth_no,
@@ -596,6 +646,7 @@ def _build_uncached_cycle(
         gamma_reference_prices=prices,
         market_snapshot_id=market_snapshot_id,
         weather_snapshot_id=weather_snapshot_id,
+        weather_lineage=weather_lineage,
         layer_a_record=layer_record,
     )
     _persist_layer_a(cycle.layer_a_record)
@@ -744,6 +795,7 @@ def build_strategy_context_from_cycle(cycle: CanonicalCycle, acct: StrategyAccou
         "decision_cycle_id": cycle.decision_cycle_id,
         "market_snapshot_id": getattr(cycle, "market_snapshot_id", None),
         "weather_snapshot_id": getattr(cycle, "weather_snapshot_id", None),
+        "weather_lineage": getattr(cycle, "weather_lineage", {}),
         "canonical_cycle": cycle,
     }
 

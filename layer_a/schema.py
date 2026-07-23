@@ -760,6 +760,9 @@ def build_layer_a_record(
     gamma_reference_prices: Mapping[str, Any] | None = None,
     market_snapshot_id: str | None = None,
     weather_snapshot_id: str | None = None,
+    weather_data_through: Any = None,
+    weather_first_seen_timestamp: Any = None,
+    weather_age_seconds: Any = None,
 ) -> dict[str, Any]:
     """Build one complete-or-incomplete, strategy-independent Layer A record."""
     source: dict[str, Any] = dict(context or {})
@@ -809,6 +812,46 @@ def build_layer_a_record(
             market_kind=kind,
         )
     weather = _build_weather_state(source, context_json)
+    weather_lineage_source = source.get("weather_lineage")
+    if not isinstance(weather_lineage_source, Mapping):
+        weather_lineage_source = context_json.get("weather_lineage")
+    if not isinstance(weather_lineage_source, Mapping):
+        weather_lineage_source = {}
+    selected_weather_snapshot_id = (
+        weather_snapshot_id
+        or source.get("weather_snapshot_id")
+        or context_json.get("weather_snapshot_id")
+        or weather_lineage_source.get("weather_snapshot_id")
+    )
+    weather_through_value = (
+        weather_data_through
+        if weather_data_through is not None
+        else source.get("weather_data_through")
+        or context_json.get("weather_data_through")
+        or weather_lineage_source.get("weather_data_through")
+    )
+    weather_first_seen_value = (
+        weather_first_seen_timestamp
+        if weather_first_seen_timestamp is not None
+        else source.get("weather_first_seen_timestamp")
+        or context_json.get("weather_first_seen_timestamp")
+        or weather_lineage_source.get("weather_first_seen_timestamp")
+    )
+    weather_through_iso = _iso_datetime(weather_through_value, naive_timezone=HKT)
+    weather_first_seen_iso = _iso_datetime(weather_first_seen_value, naive_timezone=HKT)
+    decision_dt = _parse_datetime(decision_iso, naive_timezone=timezone.utc)
+    weather_through_dt = _parse_datetime(weather_through_iso, naive_timezone=timezone.utc)
+    if decision_dt is not None and weather_through_dt is not None:
+        weather_age = (decision_dt - weather_through_dt).total_seconds()
+        weather_age = weather_age if weather_age >= 0 else None
+    else:
+        weather_age = None
+    lineage = {
+        "weather_snapshot_id": selected_weather_snapshot_id,
+        "weather_data_through": weather_through_iso,
+        "weather_first_seen_timestamp": weather_first_seen_iso,
+        "weather_age_seconds": weather_age,
+    }
     # Explicit direct model/market/book kwargs are installed into a temporary
     # source so the same normalization path is used for app and test payloads.
     models = _model_inputs(source, context_json, status)
@@ -826,7 +869,11 @@ def build_layer_a_record(
         "market_kind": str(kind),
         "event_slug": str(slug),
         "market_snapshot_id": market_snapshot_id or source.get("market_snapshot_id") or context_json.get("market_snapshot_id"),
-        "weather_snapshot_id": weather_snapshot_id or source.get("weather_snapshot_id") or context_json.get("weather_snapshot_id"),
+        "weather_snapshot_id": selected_weather_snapshot_id,
+        "weather_data_through": weather_through_iso,
+        "weather_first_seen_timestamp": weather_first_seen_iso,
+        "weather_age_seconds": weather_age,
+        "weather_lineage": lineage,
         "weather_state": weather,
         "models": models,
         "market_identity": markets,
@@ -1127,6 +1174,18 @@ def validate_layer_a_record(record: Mapping[str, Any]) -> None:
     for timestamp_field in ("decision_timestamp", "capture_timestamp"):
         if _parse_datetime(record.get(timestamp_field), naive_timezone=timezone.utc) is None:
             raise LayerASchemaError(f"invalid Layer A timestamp: {timestamp_field}")
+    for timestamp_field in ("weather_data_through", "weather_first_seen_timestamp"):
+        value = record.get(timestamp_field)
+        if value not in (None, "") and _parse_datetime(value, naive_timezone=HKT) is None:
+            raise LayerASchemaError(f"invalid weather lineage timestamp: {timestamp_field}")
+    weather_age = record.get("weather_age_seconds")
+    if weather_age is not None and (
+        isinstance(weather_age, bool)
+        or not isinstance(weather_age, (int, float))
+        or not math.isfinite(float(weather_age))
+        or float(weather_age) < 0
+    ):
+        raise LayerASchemaError("weather_age_seconds is invalid")
     try:
         json.dumps(_jsonable(record), ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError) as exc:

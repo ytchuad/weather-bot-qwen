@@ -12,7 +12,8 @@ from typing import Any, Iterable, Mapping
 from execution.clob_execution import CLOBExecutionSnapshot, DepthLevel, walk_depth
 
 from .market_storage import MarketSnapshotStore
-from .minute_view import build_minute_view
+from .minute_view import build_minute_view, select_weather_as_of
+from .schema import HKT, _parse_datetime
 from .storage import LayerAStore, read_books, read_books_bytes
 from .weather_storage import WeatherSnapshotStore
 
@@ -263,32 +264,93 @@ def _linked_market_snapshots(
     return eligible, (anchor_found if strict else True)
 
 
+def _weather_timestamp(snapshot: Mapping[str, Any], *fields: str) -> datetime | None:
+    for field in fields:
+        timestamp = _parse_datetime(snapshot.get(field), naive_timezone=HKT)
+        if timestamp is not None:
+            return timestamp
+    return None
+
+
+def _weather_lineage(snapshot: Mapping[str, Any] | None, decision_timestamp: datetime) -> dict[str, Any] | None:
+    if not isinstance(snapshot, Mapping):
+        return None
+    observation = _weather_timestamp(snapshot, "observation_timestamp", "snapshot_timestamp")
+    first_seen = _weather_timestamp(snapshot, "first_seen_timestamp", "capture_timestamp")
+    if observation is None or first_seen is None:
+        return None
+    decision = decision_timestamp.astimezone(timezone.utc)
+    if observation > decision or first_seen > decision:
+        return None
+    age = (decision - observation).total_seconds()
+    if age < 0:
+        return None
+    return {
+        "weather_snapshot_id": str(snapshot.get("weather_snapshot_id") or "") or None,
+        "weather_data_through": observation.isoformat(),
+        "weather_first_seen_timestamp": first_seen.isoformat(),
+        "weather_age_seconds": age,
+    }
+
+
+def _model_lineage_matches(
+    model_record: Mapping[str, Any],
+    lineage: Mapping[str, Any],
+) -> bool:
+    """Reject an anchor whose stored lineage disagrees with its version."""
+    stored_lineage = model_record.get("weather_lineage")
+    if not isinstance(stored_lineage, Mapping):
+        stored_lineage = {}
+    for field in ("weather_data_through", "weather_first_seen_timestamp"):
+        expected = model_record.get(field) or stored_lineage.get(field)
+        if expected in (None, ""):
+            continue
+        expected_dt = _parse_datetime(expected, naive_timezone=HKT)
+        actual_dt = _parse_datetime(lineage.get(field), naive_timezone=HKT)
+        if expected_dt is None or actual_dt is None or expected_dt != actual_dt:
+            return False
+    expected_age = model_record.get("weather_age_seconds")
+    if expected_age is None:
+        expected_age = stored_lineage.get("weather_age_seconds")
+    if expected_age is not None:
+        try:
+            if abs(float(expected_age) - float(lineage["weather_age_seconds"])) > 1e-6:
+                return False
+        except (KeyError, TypeError, ValueError):
+            return False
+    return True
+
+
 def _linked_weather_snapshots(
     model_record: Mapping[str, Any],
     snapshots: Iterable[Mapping[str, Any]],
-) -> tuple[list[dict[str, Any]], bool]:
+) -> tuple[list[dict[str, Any]], bool, str, dict[str, Any] | None]:
+    """Resolve one cycle's exact weather version as of its decision time.
+
+    A stored model output must stay tied to the weather version that existed
+    when it ran.  Later corrections remain in the immutable weather stream,
+    but cannot replace the anchor until a later model cycle selects them.
+    """
     values = [dict(item) for item in snapshots if isinstance(item, Mapping)]
-    anchor_id = str(model_record.get("weather_snapshot_id") or "")
-    model_id = str(model_record.get("decision_cycle_id") or "")
-    strict = bool(anchor_id)
     event_date = str(model_record.get("event_date") or "")
-    eligible: list[dict[str, Any]] = []
-    anchor_found = False
-    for snapshot in values:
-        snapshot_id = str(snapshot.get("weather_snapshot_id") or "")
-        if strict and snapshot_id != anchor_id and str(snapshot.get("latest_model_cycle_id") or "") != model_id:
-            continue
-        if not strict and str(snapshot.get("latest_model_cycle_id") or "") != model_id:
-            continue
-        if event_date and str(snapshot.get("event_date") or "") != event_date:
-            continue
-        if strict and snapshot_id == anchor_id:
-            anchor_found = True
-        eligible.append(snapshot)
-    if strict and not anchor_found:
-        return [], False
-    eligible.sort(key=lambda item: _dt(item["snapshot_timestamp"]))
-    return eligible, (anchor_found if strict else True)
+    if event_date:
+        values = [snapshot for snapshot in values if str(snapshot.get("event_date") or "") == event_date]
+    anchor_id = str(model_record.get("weather_snapshot_id") or "")
+    decision = _dt(model_record["decision_timestamp"])
+    selected = select_weather_as_of(values, decision)
+    lineage = _weather_lineage(selected, decision)
+    if not anchor_id:
+        return ([dict(selected)] if selected is not None else []), True, "legacy_as_of_selection", lineage
+
+    if not any(str(snapshot.get("weather_snapshot_id") or "") == anchor_id for snapshot in values):
+        return [], False, "weather_anchor_not_found", None
+    if selected is None:
+        return [], False, "no_weather_available_at_decision", None
+    if str(selected.get("weather_snapshot_id") or "") != anchor_id:
+        return [], False, "weather_anchor_not_point_in_time_selection", lineage
+    if lineage is None or not _model_lineage_matches(model_record, lineage):
+        return [], False, "weather_lineage_mismatch", lineage
+    return [dict(selected)], True, "weather_anchor_resolved", lineage
 
 
 def replay_model_cycle_minute_view(
@@ -321,11 +383,10 @@ def replay_model_cycle_minute_view(
     else:
         markets = [dict(item) for item in market_snapshots if isinstance(item, Mapping)]
         market_link_ok = True
-    if model_record.get("weather_snapshot_id") not in (None, ""):
-        weather, weather_link_ok = _linked_weather_snapshots(model_record, weather_snapshots)
-    else:
-        weather = [dict(item) for item in weather_snapshots if isinstance(item, Mapping)]
-        weather_link_ok = True
+    weather, weather_link_ok, weather_link_reason, weather_lineage = _linked_weather_snapshots(
+        model_record,
+        weather_snapshots,
+    )
     rows = build_minute_view(
         [model_record],
         markets,
@@ -351,6 +412,11 @@ def replay_model_cycle_minute_view(
         "weather_minutes_evaluated": sum(1 for row in execution_rows if row.get("weather_snapshot_id")),
         "market_snapshot_linkage_ok": market_link_ok,
         "weather_snapshot_linkage_ok": weather_link_ok,
+        "weather_snapshot_linkage_reason": weather_link_reason,
+        "weather_lineage": weather_lineage,
+        "weather_data_through": (weather_lineage or {}).get("weather_data_through"),
+        "weather_first_seen_timestamp": (weather_lineage or {}).get("weather_first_seen_timestamp"),
+        "weather_age_seconds": (weather_lineage or {}).get("weather_age_seconds"),
         "future_model_leakage": any(
             row.get("model_cycle_timestamp")
             and _dt(row["model_cycle_timestamp"]) > _dt(row["timestamp"])

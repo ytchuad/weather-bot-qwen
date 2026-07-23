@@ -131,7 +131,13 @@ def _weather_preference(snapshot: Mapping[str, Any]) -> tuple[int, datetime, dat
     )
 
 
-def _select_weather(snapshots: Sequence[Mapping[str, Any]], at: datetime) -> Mapping[str, Any] | None:
+def select_weather_as_of(snapshots: Sequence[Mapping[str, Any]], at: datetime) -> Mapping[str, Any] | None:
+    """Return the weather version that was usable at one decision time.
+
+    Both the observation itself and the version's availability must predate
+    ``at``.  The latter is what prevents a later HKO correction from being
+    applied to an earlier model cycle during replay.
+    """
     at_utc = _as_utc(at)
     candidates = [
         snapshot
@@ -152,6 +158,11 @@ def _select_weather(snapshots: Sequence[Mapping[str, Any]], at: datetime) -> Map
         ),
         default=None,
     )
+
+
+def _select_weather(snapshots: Sequence[Mapping[str, Any]], at: datetime) -> Mapping[str, Any] | None:
+    """Private compatibility alias for the projection implementation."""
+    return select_weather_as_of(snapshots, at)
 
 
 def _temperature_status(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -596,4 +607,4 @@ def build_minute_view(
     return build_minute_projection(model_cycles, market_snapshots, weather_snapshots, **kwargs)["rows"]
 
 
-__all__ = ["ALLOWED_CLOCK_SKEW", "build_minute_projection", "build_minute_view"]
+__all__ = ["ALLOWED_CLOCK_SKEW", "build_minute_projection", "build_minute_view", "select_weather_as_of"]

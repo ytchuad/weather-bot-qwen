@@ -45,8 +45,35 @@ python -m pytest -q tests/test_layer_a.py tests/test_layer_a_market.py tests/tes
 66 passed, 4 deselected, 1 warning in 2.93s
 ```
 
+## Session 3 — point-in-time weather availability and replay
+
+已完成：
+
+- `select_weather_as_of` 成為共用 selector：weather version 必須同時滿足 `observation_timestamp <= decision_timestamp` 與 `first_seen_timestamp <= decision_timestamp`；同一 observation 的較晚 correction 只會在其本身 first-seen time 起可被選取。
+- 每個新 canonical model-cycle record 現保存 `weather_snapshot_id`、`weather_data_through`、`weather_first_seen_timestamp`、`weather_age_seconds`，並以相同內容保存於 `weather_lineage`。timestamp 一律 canonical UTC。
+- 若 canonical capture 遇到相同 immutable weather version，weather storage 會把已儲存版本（含原始 `first_seen_timestamp`）回傳給 lineage writer；不會以當次 polling 時間覆寫 lineage。
+- `replay_model_cycle_minute_view` 會在 model `decision_timestamp` 先做完整 version-stream as-of selection，然後要求 stored `weather_snapshot_id` 與該 selection 完全一致；lineage metadata 也會交叉驗證。失配、尚未 first-seen 或不存在的 anchor 會標記 linkage failure，不會以較晚 correction 補值。
+- replay minute rows 固定使用該 model cycle 的 immutable selected version；下一個 real model cycle 之前不會因新 correction 改變已儲存 prediction 的 weather lineage。
+- 未變更 model cadence、market replay interval 或任何 trading strategy rule。
+
+驗證：
+
+```text
+python -m pytest -q tests/test_weather_point_in_time_replay.py tests/test_weather_timestamp_semantics.py tests/test_historical_trajectory_projection.py tests/test_layer_a_weather_history.py -k "not test_export_contains_weather_stream_and_admin_requires_token"
+29 passed, 1 deselected in 1.55s
+
+python -m pytest -q tests/test_layer_a.py tests/test_layer_a_market.py tests/test_layer_a_quality_contract.py tests/test_layer_a_weather_history.py tests/test_layer_a_runtime_debug.py tests/test_weather_timestamp_semantics.py tests/test_historical_trajectory_projection.py tests/test_weather_point_in_time_replay.py -k "not test_export_archive_and_date_filter and not test_replay_smoke_and_threshold_kelly_variants and not test_export_archive_contains_closed_market_partitions and not test_export_contains_weather_stream_and_admin_requires_token"
+69 passed, 4 deselected, 1 warning in 3.04s
+```
+
+新增 focused cases：
+
+- `09:40` observation 在 `09:48` 才 first seen：`09:47` replay 不可用，`09:48` 可用。
+- `09:40` original（`09:48`）與 correction（`10:05`）：`09:50` replay 保持 original，`10:05` cycle 才使用 correction。
+- stored model-cycle lineage 必須 dereference 到 exact as-of version；把 `10:05` correction 錨定到 `09:50` cycle 會被拒絕。
+
 已知環境限制：完整上述 Layer A suite 的 4 個 export tests 需要 Python package `zstandard` 解讀既有 `.zstd` snapshot；目前 runtime 未安裝該 package，4 個測試均在 export read path 以 `ModuleNotFoundError: zstandard` 失敗，與 Session 2 projection diff 無關。
 
-後續（不屬於 Session 2）：
+後續（不屬於 Session 3）：
 
 - frontend 明確指定 `Asia/Hong_Kong` formatting 及 tooltip lineage 顯示。

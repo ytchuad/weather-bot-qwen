@@ -527,6 +527,7 @@ class WeatherSnapshotStore:
             self.close_due()
             partitions = self.scan()
             known = self._known_snapshot_ids(partitions)
+            known_records = self._known_snapshot_records(partitions)
             grouped: dict[Path, list[dict[str, Any]]] = {}
             for snapshot in clean:
                 snapshot_id = str(snapshot["weather_snapshot_id"])
@@ -535,10 +536,20 @@ class WeatherSnapshotStore:
                     # Do not overwrite its original first_seen_timestamp with a
                     # later poll.  A correction receives a different versioned
                     # ID in weather_schema and is appended independently.
-                    results.append(WeatherCaptureResult("duplicate", snapshot_id, snapshot=snapshot))
+                    # Return the stored immutable version so a caller that
+                    # records model-cycle lineage keeps its original
+                    # first_seen_timestamp rather than the later poll time.
+                    results.append(
+                        WeatherCaptureResult(
+                            "duplicate",
+                            snapshot_id,
+                            snapshot=known_records.get(snapshot_id, snapshot),
+                        )
+                    )
                     continue
                 grouped.setdefault(self._minute_directory(snapshot), []).append(snapshot)
                 known.add(snapshot_id)
+                known_records[snapshot_id] = snapshot
             for directory, records in grouped.items():
                 info = self._open_info(directory)
                 raw_path = next(
