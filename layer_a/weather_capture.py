@@ -308,6 +308,8 @@ def _buffered_weather_snapshots(
     *,
     target: date,
     decision: datetime,
+    capture: datetime,
+    source_release_timestamp: datetime | None,
     model_record: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
     """Normalize every valid minute present in the HKO intraday CSV buffer."""
@@ -438,12 +440,15 @@ def _buffered_weather_snapshots(
         snapshots.append(
             build_weather_snapshot(
                 snapshot_timestamp=timestamp,
+                observation_timestamp=timestamp,
                 event_date=target,
                 location="Hong Kong",
                 weather_state=weather_state,
                 latest_model_cycle_id=row_model_id,
                 model_cycle_timestamp=row_model_timestamp,
-                capture_timestamp=decision,
+                capture_timestamp=capture,
+                first_seen_timestamp=capture,
+                source_release_timestamp=source_release_timestamp,
                 source_status={
                     "collector": "layer_a_weather_only",
                     "observation_source": "hko_aws_csv_buffer",
@@ -461,11 +466,14 @@ def collect_weather_snapshots_once(
     target_date: date | None = None,
     event_slug: str | None = None,
     decision_timestamp: datetime | None = None,
+    capture_timestamp: datetime | None = None,
     weather_store: WeatherSnapshotStore | None = None,
     model_store: LayerAStore | None = None,
     state_provider: Callable[[str], Mapping[str, Any] | None] | None = None,
 ) -> WeatherCollectionRun:
     """Capture one weather minute without running any models or fetching CLOB."""
+    # ``decision`` is retained as the legacy collector scheduling timestamp.
+    # It is not substituted for the HKO observation timestamp below.
     decision = _now_utc(decision_timestamp)
     target = target_date or decision.astimezone(HKT).date()
     run = WeatherCollectionRun(decision.isoformat())
@@ -485,10 +493,22 @@ def collect_weather_snapshots_once(
         if not isinstance(state, Mapping):
             run.errors.append({"stage": "weather_state", "error": "state_unavailable"})
             return run
+        # This is when the current collector request completed.  Tests and
+        # callers that need a deterministic operational timestamp may provide
+        # it explicitly.
+        capture = _now_utc(capture_timestamp) if capture_timestamp is not None else _now_utc()
+        observation_timestamp = (
+            _source_timestamp(state.get("observation_timestamp"))
+            or _source_timestamp(state.get("time_now"))
+            or decision
+        )
+        source_release_timestamp = (
+            _source_timestamp(state.get("source_release_timestamp"))
+            or _source_timestamp(state.get("weather_source_release_timestamp"))
+        )
         if use_live_enrichment:
             state = _enrich_live_weather_state(state, target=target, decision=decision)
-        else:
-            state = _ensure_weather_fields(state, observation_timestamp=decision)
+        state = _ensure_weather_fields(state, observation_timestamp=observation_timestamp)
     except Exception as exc:
         run.errors.append({"stage": "weather_state", "error": type(exc).__name__})
         return run
@@ -505,17 +525,23 @@ def collect_weather_snapshots_once(
             state,
             target=target,
             decision=decision,
+            capture=capture,
+            source_release_timestamp=source_release_timestamp,
             model_record=model_record,
         )
         if not run.snapshots:
             run.snapshots.append(
                 build_weather_snapshot(
-                    snapshot_timestamp=decision,
+                    snapshot_timestamp=observation_timestamp,
+                    observation_timestamp=observation_timestamp,
                     event_date=target,
                     location="Hong Kong",
-            weather_state=state,
+                    weather_state=state,
                     latest_model_cycle_id=(model_record or {}).get("decision_cycle_id"),
                     model_cycle_timestamp=(model_record or {}).get("decision_timestamp"),
+                    capture_timestamp=capture,
+                    first_seen_timestamp=capture,
+                    source_release_timestamp=source_release_timestamp,
                     source_status={
                         "collector": "layer_a_weather_only",
                         "observation_source": "hko_intraday_state",

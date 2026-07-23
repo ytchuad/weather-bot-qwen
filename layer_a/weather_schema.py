@@ -62,9 +62,15 @@ def make_weather_snapshot_id(
     event_date: str | date,
     location: str,
     cadence_minutes: int = 1,
+    version_fingerprint: str | None = None,
 ) -> str:
-    """Create a deterministic minute identity independent of model/account state."""
-    parsed = _parse_datetime(snapshot_timestamp, naive_timezone=timezone.utc)
+    """Create an observation or immutable observation-version identity.
+
+    Without ``version_fingerprint`` this returns the legacy minute-level
+    observation identity.  New records provide a fingerprint so corrections
+    for the same observation minute receive distinct immutable IDs.
+    """
+    parsed = _parse_datetime(snapshot_timestamp, naive_timezone=HKT)
     if parsed is None:
         raise WeatherSnapshotSchemaError("snapshot_timestamp is required for weather identity")
     cadence = max(1, int(cadence_minutes))
@@ -72,8 +78,25 @@ def make_weather_snapshot_id(
     slot_minute = (local.minute // cadence) * cadence
     slot = local.replace(minute=slot_minute, second=0, microsecond=0)
     date_value = event_date.isoformat() if isinstance(event_date, date) else str(event_date)
-    material = "|".join((date_value, str(location), slot.isoformat()))
+    material_parts = [date_value, str(location), slot.isoformat()]
+    if version_fingerprint:
+        material_parts.append(str(version_fingerprint))
+    material = "|".join(material_parts)
     return f"ws-{hashlib.sha256(material.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _version_fingerprint(
+    observation_values: Mapping[str, Any],
+    source_release_timestamp: str | None,
+) -> str:
+    """Stable identity material for one immutable HKO observation version."""
+    material = {
+        "observation_values": jsonable(dict(observation_values)),
+        "source_release_timestamp": source_release_timestamp,
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
 
 
 def _first(mapping: Mapping[str, Any], keys: tuple[str, ...]) -> Any:
@@ -196,58 +219,98 @@ def _model_age(decision_timestamp: Any, model_timestamp: Any) -> tuple[str | Non
 
 def build_weather_snapshot(
     *,
-    snapshot_timestamp: Any,
+    snapshot_timestamp: Any = None,
+    observation_timestamp: Any = None,
     event_date: str | date,
     location: str,
     weather_state: Mapping[str, Any] | None = None,
     latest_model_cycle_id: str | None = None,
     model_cycle_timestamp: Any = None,
     capture_timestamp: Any = None,
+    first_seen_timestamp: Any = None,
+    source_release_timestamp: Any = None,
     source_status: Mapping[str, Any] | None = None,
     weather_snapshot_id: str | None = None,
     **values: Any,
 ) -> dict[str, Any]:
-    """Normalize one observation minute while retaining Phase 2A lineage."""
+    """Normalize one immutable HKO observation version.
+
+    ``snapshot_timestamp`` is the backward-compatible alias for
+    ``observation_timestamp``.  It always denotes the observation's wall
+    clock time, never collector capture or model-decision time.
+    """
     state: dict[str, Any] = dict(weather_state or {})
     for key, value in values.items():
         if key not in state:
             state[key] = value
-    snapshot_iso = _iso_datetime(snapshot_timestamp, naive_timezone=timezone.utc)
-    if snapshot_iso is None:
-        raise WeatherSnapshotSchemaError("snapshot_timestamp is invalid")
+    snapshot_iso = _iso_datetime(snapshot_timestamp, naive_timezone=HKT)
+    observation_iso = _iso_datetime(
+        observation_timestamp if observation_timestamp is not None else snapshot_timestamp,
+        naive_timezone=HKT,
+    )
+    if observation_iso is None:
+        raise WeatherSnapshotSchemaError("observation_timestamp is invalid")
+    if snapshot_iso is not None and snapshot_iso != observation_iso:
+        raise WeatherSnapshotSchemaError("snapshot_timestamp must equal observation_timestamp")
     capture_iso = _iso_datetime(
         capture_timestamp or datetime.now(timezone.utc),
-        naive_timezone=timezone.utc,
+        naive_timezone=HKT,
     )
+    if capture_iso is None:
+        raise WeatherSnapshotSchemaError("capture_timestamp is invalid")
+    first_seen_iso = _iso_datetime(
+        first_seen_timestamp if first_seen_timestamp is not None else capture_iso,
+        naive_timezone=HKT,
+    )
+    if first_seen_iso is None:
+        raise WeatherSnapshotSchemaError("first_seen_timestamp is invalid")
+    source_release_value = (
+        source_release_timestamp
+        if source_release_timestamp is not None
+        else state.get("source_release_timestamp")
+    )
+    source_release_iso = _iso_datetime(source_release_value, naive_timezone=HKT)
+    if source_release_value not in (None, "") and source_release_iso is None:
+        raise WeatherSnapshotSchemaError("source_release_timestamp is invalid")
     event_date_iso = event_date.isoformat() if isinstance(event_date, date) else str(event_date)
-    model_iso, age = _model_age(snapshot_iso, model_cycle_timestamp)
+    model_iso, age = _model_age(observation_iso, model_cycle_timestamp)
     if model_iso is None:
         latest_model_cycle_id = None
-    snapshot_id = weather_snapshot_id or make_weather_snapshot_id(
-        snapshot_iso,
-        event_date=event_date_iso,
-        location=location,
-    )
     statuses = {
         field: _status_for(
             state,
             field,
             _value_for(state, field),
-            decision_timestamp=snapshot_iso,
+            decision_timestamp=observation_iso,
         )
         for field in WEATHER_OBSERVATION_FIELDS
     }
     observation_values = {
         field: statuses[field].get("value") for field in WEATHER_OBSERVATION_FIELDS
     }
+    observation_id = make_weather_snapshot_id(
+        observation_iso,
+        event_date=event_date_iso,
+        location=location,
+    )
+    snapshot_id = weather_snapshot_id or make_weather_snapshot_id(
+        observation_iso,
+        event_date=event_date_iso,
+        location=location,
+        version_fingerprint=_version_fingerprint(observation_values, source_release_iso),
+    )
     optional = {}
     for key in ("wind", "uv", "wind_state", "uv_state", "extra_observations"):
         if key in state and state[key] is not None:
             optional[key] = jsonable(state[key])
     record = {
         "weather_snapshot_id": str(snapshot_id),
+        "weather_observation_id": observation_id,
         "schema_version": WEATHER_SCHEMA_VERSION,
-        "snapshot_timestamp": snapshot_iso,
+        "observation_timestamp": observation_iso,
+        "snapshot_timestamp": observation_iso,
+        "source_release_timestamp": source_release_iso,
+        "first_seen_timestamp": first_seen_iso,
         "capture_timestamp": capture_iso,
         "event_date": event_date_iso,
         "location": str(location),
@@ -284,6 +347,17 @@ def validate_weather_snapshot(record: Mapping[str, Any]) -> None:
     for field in required:
         if field not in record:
             raise WeatherSnapshotSchemaError(f"required weather snapshot field is missing: {field}")
+    observation_timestamp = record.get("observation_timestamp", record.get("snapshot_timestamp"))
+    observation_dt = _parse_datetime(observation_timestamp, naive_timezone=HKT)
+    snapshot_dt = _parse_datetime(record.get("snapshot_timestamp"), naive_timezone=HKT)
+    if observation_dt is None or snapshot_dt is None:
+        raise WeatherSnapshotSchemaError("weather observation timestamp is invalid")
+    if observation_dt != snapshot_dt:
+        raise WeatherSnapshotSchemaError("snapshot_timestamp must equal observation_timestamp")
+    for field in ("capture_timestamp", "first_seen_timestamp", "source_release_timestamp"):
+        value = record.get(field)
+        if value not in (None, "") and _parse_datetime(value, naive_timezone=HKT) is None:
+            raise WeatherSnapshotSchemaError(f"{field} is invalid")
     if record.get("schema_version") != WEATHER_SCHEMA_VERSION:
         raise WeatherSnapshotSchemaError(f"unsupported weather snapshot schema: {record.get('schema_version')!r}")
     status = record.get("observation_status")

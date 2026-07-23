@@ -33,6 +33,20 @@
           "entry_price": 0.08499999999999996
         }
       }
+    },
+    "highest-temperature-in-hong-kong-on-july-23-2026": {
+      "enhanced_v1_paper": {
+        "33-34": {
+          "side": "YES",
+          "quantity": 78.95,
+          "entry_price": 0.450357
+        },
+        "34-35": {
+          "side": "NO",
+          "quantity": 79.74,
+          "entry_price": 0.18202399999999996
+        }
+      }
     }
   },
   "enhanced_v3_aggressive_paper": {
@@ -68,6 +82,20 @@
           "entry_price": 0.901089
         }
       }
+    },
+    "highest-temperature-in-hong-kong-on-july-23-2026": {
+      "enhanced_v3_aggressive_paper": {
+        "33-34": {
+          "side": "YES",
+          "quantity": 109.68,
+          "entry_price": 0.322104
+        },
+        "34-35": {
+          "side": "NO",
+          "quantity": 109.03,
+          "entry_price": 0.451712
+        }
+      }
     }
   },
   "enhanced_v2_paper": {
@@ -96,6 +124,20 @@
           "side": "YES",
           "quantity": 8.38,
           "entry_price": 0.895
+        }
+      }
+    },
+    "highest-temperature-in-hong-kong-on-july-23-2026": {
+      "enhanced_v2_paper": {
+        "33-34": {
+          "side": "YES",
+          "quantity": 16.58,
+          "entry_price": 0.587202
+        },
+        "34-35": {
+          "side": "NO",
+          "quantity": 16.41,
+          "entry_price": 0.32448600000000005
         }
       }
     }

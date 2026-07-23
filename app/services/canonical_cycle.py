@@ -16,7 +16,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Mapping
 
 from execution.strategy_account import StrategyAccount
-from layer_a.schema import build_layer_a_record, jsonable, make_decision_cycle_id
+from layer_a.schema import HKT, build_layer_a_record, jsonable, make_decision_cycle_id
 
 logger = logging.getLogger(__name__)
 
@@ -370,8 +370,15 @@ def _capture_linked_layer_a_snapshots(
         }
         observation_timestamp = _parse_datetime(
             state.get("time_now") or state.get("decision_timestamp") or decision_timestamp,
-            naive_timezone=timezone.utc,
+            # HKO ``time_now`` is a local wall-clock timestamp when it comes
+            # from the intraday CSV.  Only storage is UTC; never reinterpret
+            # this source timestamp as an already-UTC value.
+            naive_timezone=HKT,
         ) or decision_timestamp
+        source_release_timestamp = _parse_datetime(
+            state.get("source_release_timestamp") or state.get("weather_source_release_timestamp"),
+            naive_timezone=HKT,
+        )
         weather_state = _ensure_weather_fields(
             weather_state,
             observation_timestamp=observation_timestamp,
@@ -379,7 +386,10 @@ def _capture_linked_layer_a_snapshots(
         model_timestamp = min(decision_timestamp, observation_timestamp)
         weather_snapshot = build_weather_snapshot(
             snapshot_timestamp=observation_timestamp,
+            observation_timestamp=observation_timestamp,
             capture_timestamp=decision_timestamp,
+            first_seen_timestamp=decision_timestamp,
+            source_release_timestamp=source_release_timestamp,
             event_date=target_date,
             location="Hong Kong",
             weather_state=weather_state,

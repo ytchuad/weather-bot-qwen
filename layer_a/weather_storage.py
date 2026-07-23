@@ -527,35 +527,18 @@ class WeatherSnapshotStore:
             self.close_due()
             partitions = self.scan()
             known = self._known_snapshot_ids(partitions)
-            known_records = self._known_snapshot_records(partitions)
             grouped: dict[Path, list[dict[str, Any]]] = {}
             for snapshot in clean:
                 snapshot_id = str(snapshot["weather_snapshot_id"])
-                existing = known_records.get(snapshot_id)
                 if snapshot_id in known:
-                    if _is_buffer_backfill(snapshot) and existing is not None and not _is_buffer_backfill(existing):
-                        existing_info = self._find_snapshot_partition(snapshot_id, partitions)
-                        replaced = False
-                        if existing_info is not None and existing_info.status != "complete":
-                            replaced = self._replace_open_snapshot(existing_info, snapshot)
-                        elif existing_info is not None:
-                            replaced = self._replace_closed_snapshot(existing_info, snapshot) is not None
-                        if replaced:
-                            known_records[snapshot_id] = snapshot
-                            results.append(
-                                WeatherCaptureResult(
-                                    "captured",
-                                    snapshot_id,
-                                    partition_id=existing_info.partition_id if existing_info else None,
-                                    snapshot=snapshot,
-                                )
-                            )
-                            continue
+                    # A matching ID is the same immutable observation version.
+                    # Do not overwrite its original first_seen_timestamp with a
+                    # later poll.  A correction receives a different versioned
+                    # ID in weather_schema and is appended independently.
                     results.append(WeatherCaptureResult("duplicate", snapshot_id, snapshot=snapshot))
                     continue
                 grouped.setdefault(self._minute_directory(snapshot), []).append(snapshot)
                 known.add(snapshot_id)
-                known_records[snapshot_id] = snapshot
             for directory, records in grouped.items():
                 info = self._open_info(directory)
                 raw_path = next(
