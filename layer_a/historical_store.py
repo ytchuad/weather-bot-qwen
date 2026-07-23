@@ -10,13 +10,13 @@ import shutil
 import sys
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .market_schema import validate_market_snapshot
 from .market_storage import MarketSnapshotStore
-from .minute_view import build_minute_view
+from .minute_view import build_minute_projection
 from .schema import jsonable, validate_layer_a_record
 from .storage import LayerAStore, _timestamp
 from .weather_schema import validate_weather_snapshot
@@ -96,6 +96,39 @@ def _date_strings(
         }
     today = datetime.now(timezone.utc).astimezone(HKT).date()
     return {(today - timedelta(days=offset)).isoformat() for offset in range(max(0, lookback_days) + 1)}
+
+
+def _hkt_now() -> datetime:
+    """Single seam for the API's HKT calendar and current-time boundary."""
+    return datetime.now(timezone.utc).astimezone(HKT)
+
+
+def _within_trajectory_window(
+    timestamp: Any,
+    *,
+    date_value: str | None,
+    start: str | None,
+    end: str | None,
+    as_of: datetime,
+) -> bool:
+    parsed = _timestamp(timestamp)
+    if parsed is None:
+        return False
+    local = parsed.astimezone(HKT)
+    if date_value:
+        try:
+            selected = date.fromisoformat(date_value)
+        except ValueError:
+            return False
+        if selected > as_of.date() or local.date() != selected:
+            return False
+    start_dt = _timestamp(start) if start else None
+    end_dt = _timestamp(end) if end else None
+    if start_dt and parsed < start_dt:
+        return False
+    if end_dt and parsed > end_dt:
+        return False
+    return parsed <= as_of.astimezone(timezone.utc)
 
 
 class HistoricalStore:
@@ -674,9 +707,37 @@ class HistoricalStore:
         model_filters: Iterable[str] | None = None,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
+        return self.minute_history_projection(
+            date_value=date_value,
+            start=start,
+            end=end,
+            market_kind=market_kind,
+            bucket_filters=bucket_filters,
+            model_filters=model_filters,
+            limit=limit,
+        )["rows"]
+
+    def minute_history_projection(
+        self,
+        *,
+        date_value: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        market_kind: str | None = None,
+        bucket_filters: Iterable[str] | None = None,
+        model_filters: Iterable[str] | None = None,
+        limit: int = 1000,
+        as_of: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Return the trajectory rows plus read-time timestamp diagnostics.
+
+        This method is projection-only: immutable Layer A input files are
+        read and filtered in memory, never repaired or rewritten.
+        """
+        projection_as_of = (as_of or _hkt_now()).astimezone(timezone.utc)
         # Keep records before ``start`` available for backward as-of model and
-        # prior-valid-weather joins.  The projection applies the requested
-        # range after joining, so a 09:01 row can still see a 09:00 cycle.
+        # weather joins used by replay. The chart projection applies the
+        # requested range after joining, so source lineage stays available.
         cycles = self.records("model", date_value=date_value, end=end)
         markets = self.records("market", date_value=date_value, end=end)
         weather = self.records("weather", date_value=date_value, end=end)
@@ -687,28 +748,44 @@ class HistoricalStore:
         if not has_layer_a_records:
             dates = _date_strings(date_value=date_value, start=start, end=end, lookback_days=self.lookback_days)
             legacy_rows = self._legacy_minute_rows(dates)
-            start_dt = _timestamp(start) if start else None
-            end_dt = _timestamp(end) if end else None
             filtered = [
                 row
                 for row in legacy_rows
-                if (start_dt is None or (_timestamp(row["timestamp"]) or datetime.min.replace(tzinfo=timezone.utc)) >= start_dt)
-                and (end_dt is None or (_timestamp(row["timestamp"]) or datetime.max.replace(tzinfo=timezone.utc)) <= end_dt)
+                if _within_trajectory_window(
+                    row.get("timestamp"),
+                    date_value=date_value,
+                    start=start,
+                    end=end,
+                    as_of=projection_as_of.astimezone(HKT),
+                )
             ]
-            return filtered[: max(0, int(limit))]
-        rows = build_minute_view(
+            return {
+                "rows": filtered[: max(0, int(limit))],
+                "has_layer_a_records": False,
+                "diagnostics": {
+                    "excluded_future_weather_records": 0,
+                    "duplicate_observation_versions": 0,
+                    "latest_weather_observation_timestamp": None,
+                    "latest_weather_first_seen_timestamp": None,
+                },
+            }
+        projection = build_minute_projection(
             cycles,
             markets,
             weather,
             start=start,
             end=end,
+            date_value=date_value,
+            as_of=projection_as_of,
             bucket_filters=list(bucket_filters or []),
             model_filters=list(model_filters or []),
+            exact_model_cycles=True,
             limit=limit,
         )
-        for row in rows:
+        for row in projection["rows"]:
             row.setdefault("source", "layer_a")
-        return rows
+        projection["has_layer_a_records"] = has_layer_a_records
+        return projection
 
     # Explicit read aliases keep callers from depending on the generic kind
     # string and make the read-only boundary obvious in service code/tests.

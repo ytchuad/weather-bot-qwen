@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import date as calendar_date
 from typing import Any, Mapping
 
 from fastapi import APIRouter
@@ -73,24 +74,37 @@ def _point_prediction(value: Any) -> float | None:
     return parsed if parsed == parsed else None
 
 
-def _minute_comparison_rows(date: str, is_min_temp: bool) -> list[dict[str, Any]]:
-    """Build chart rows from the minute projection and its CSV fallback."""
+def _minute_comparison_projection(date: str, is_min_temp: bool) -> dict[str, Any]:
+    """Build chart rows and timestamp diagnostics from the minute projection."""
     store = get_default_historical_store()
     try:
-        return store.minute_history(
-            date_value=date,
-            market_kind="lowest_temperature" if is_min_temp else "highest_temperature",
-            limit=10000,
-        )
+        kwargs = {
+            "date_value": date,
+            "market_kind": "lowest_temperature" if is_min_temp else "highest_temperature",
+            "limit": 10000,
+        }
+        projection_reader = getattr(store, "minute_history_projection", None)
+        if callable(projection_reader):
+            projection = projection_reader(**kwargs)
+            return {
+                "rows": list(projection.get("rows") or []),
+                "diagnostics": dict(projection.get("diagnostics") or {}),
+                "has_layer_a_records": bool(projection.get("has_layer_a_records")),
+            }
+        return {"rows": store.minute_history(**kwargs), "diagnostics": {}, "has_layer_a_records": True}
     except Exception as exc:
         # Keep the existing SQLite path available for installations missing an
         # optional Layer A reader dependency.  Normal deployments should use
         # the minute projection above.
         logger.warning("Layer A minute history unavailable for chart %s: %s", date, exc)
-        return []
+        return {"rows": [], "diagnostics": {}, "has_layer_a_records": False}
 
 
-def _comparison_payload_from_minute_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _comparison_payload_from_minute_rows(
+    rows: list[dict[str, Any]],
+    *,
+    diagnostics: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     timestamps = [str(row.get("timestamp")) for row in rows]
     market_temps = [_market_expected_temperature(row) for row in rows]
     actual_temps = [row.get("actual_temperature") for row in rows]
@@ -132,6 +146,7 @@ def _comparison_payload_from_minute_rows(rows: list[dict[str, Any]]) -> dict[str
         "models": models,
         "granularity": "strategy_cycle" if legacy_only else "minute",
         "data_source": "legacy_csv" if legacy_only else "layer_a_minute_view",
+        "diagnostics": dict(diagnostics or {}),
     }
 
 
@@ -151,9 +166,33 @@ def get_models_comparison_chart(
     from app.services.weather_service import hkt_now as _hkt_now
     target_date = date or _hkt_now().strftime("%Y-%m-%d")
 
-    minute_rows = _minute_comparison_rows(target_date, is_min_temp)
-    if minute_rows and not slug:
-        return _comparison_payload_from_minute_rows(minute_rows)
+    try:
+        future_date = calendar_date.fromisoformat(target_date) > _hkt_now().date()
+    except ValueError:
+        future_date = False
+    if future_date:
+        return {
+            "timestamps": [],
+            "market_temps": [],
+            "actual_temps": [],
+            "models": {},
+            "granularity": "minute",
+            "data_source": "layer_a_minute_view",
+            "diagnostics": {
+                "excluded_future_weather_records": 0,
+                "duplicate_observation_versions": 0,
+                "latest_weather_observation_timestamp": None,
+                "latest_weather_first_seen_timestamp": None,
+            },
+        }
+
+    minute_projection = _minute_comparison_projection(target_date, is_min_temp)
+    minute_rows = minute_projection["rows"]
+    if not slug and (minute_rows or minute_projection["has_layer_a_records"]):
+        return _comparison_payload_from_minute_rows(
+            minute_rows,
+            diagnostics=minute_projection["diagnostics"],
+        )
 
     rows = read_models_comparison(date=target_date, slug=slug)
 
@@ -163,6 +202,7 @@ def get_models_comparison_chart(
             "market_temps": [],
             "actual_temps": [],
             "models": {},
+            "diagnostics": minute_projection["diagnostics"],
         }
 
     timestamps = []
@@ -200,6 +240,7 @@ def get_models_comparison_chart(
         "models": models,
         "granularity": "strategy_cycle",
         "data_source": "strategy_snapshot_sqlite",
+        "diagnostics": minute_projection["diagnostics"],
     }
 
 

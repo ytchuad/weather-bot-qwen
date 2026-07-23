@@ -349,7 +349,9 @@ def test_minute_history_does_not_use_other_temperature_market_cycles(tmp_path):
         market_kind="highest_temperature",
     )
     row = next(item for item in rows if item["timestamp"].startswith("2026-07-20T18:02"))
-    assert row["model_cycle_id"] == "tmax-cycle"
+    assert row["model_cycle_id"] is None
+    cycle_row = next(item for item in rows if item["timestamp"].startswith("2026-07-20T18:00"))
+    assert cycle_row["model_cycle_id"] == "tmax-cycle"
 
 
 def test_strategy_snapshot_sqlite_connection_waits_for_busy_writer(monkeypatch, tmp_path):

@@ -42,19 +42,30 @@ def minute_history(
     limit: int = Query(default=1000, ge=1, le=10000),
 ) -> dict[str, Any]:
     store = get_default_historical_store()
-    rows = store.minute_history(
-        date_value=date,
-        start=start,
-        end=end,
-        bucket_filters=_split_filters(bucket),
-        model_filters=_split_filters(model),
-        limit=limit,
-    )
+    kwargs = {
+        "date_value": date,
+        "start": start,
+        "end": end,
+        "bucket_filters": _split_filters(bucket),
+        "model_filters": _split_filters(model),
+        "limit": limit,
+    }
+    projection_reader = getattr(store, "minute_history_projection", None)
+    if callable(projection_reader):
+        projection = projection_reader(**kwargs)
+        rows = list(projection.get("rows") or [])
+        diagnostics = dict(projection.get("diagnostics") or {})
+    else:
+        # Compatibility for lightweight test/deployment readers that expose
+        # only the original rows-only API.
+        rows = store.minute_history(**kwargs)
+        diagnostics = {}
     result = _envelope(store, rows, "minutes")
+    result["diagnostics"] = diagnostics
     result["join_contract"] = {
-        "weather": "same-minute or latest prior valid snapshot",
+        "weather": "raw actuals at observation_timestamp; replay lineage uses first_seen_timestamp <= row timestamp",
         "market": "same-minute snapshot",
-        "model": "latest cycle timestamp <= minute timestamp",
+        "model": "real decision cycle only",
     }
     return result
 

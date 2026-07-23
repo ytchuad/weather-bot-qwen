@@ -404,8 +404,9 @@ def test_remote_history_cache_is_separate_and_merges_without_reupload(tmp_path):
     assert (tmp_path / "remote-cache" / "layer_a_weather").exists()
     assert not (tmp_path / "local-weather" / "layer_a_weather").exists()
     records = store.records("weather", date_value=EVENT_DATE)
-    assert len(records) == 1
-    assert records[0]["temperature_current"] == 35.0
+    # Session 1 weather IDs are immutable observation-version IDs: the local
+    # correction and the remote original must both survive the merge.
+    assert [record["temperature_current"] for record in records] == [30.0, 35.0]
     assert remote.uploads == []
 
 
