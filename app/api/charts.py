@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 from datetime import date as calendar_date
 from typing import Any, Mapping
@@ -24,6 +25,15 @@ router = APIRouter(prefix="/api/charts", tags=["Charts"])
 _RANGE_BUCKET = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)\s*$")
 _LOW_BUCKET = re.compile(r"^\s*(?:<|<=)\s*(-?\d+(?:\.\d+)?)\s*$")
 _HIGH_BUCKET = re.compile(r"^\s*(?:>|>=)\s*(-?\d+(?:\.\d+)?)\s*$")
+
+
+def _legacy_trajectory_fallback_enabled() -> bool:
+    return os.getenv("ENABLE_LEGACY_TRAJECTORY_FALLBACK", "false").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def _bucket_midpoint(bucket: Any) -> float | None:
@@ -99,6 +109,7 @@ def _minute_comparison_projection(date: str, is_min_temp: bool) -> dict[str, Any
             "date_value": date,
             "market_kind": "lowest_temperature" if is_min_temp else "highest_temperature",
             "limit": 10000,
+            "allow_legacy_fallback": _legacy_trajectory_fallback_enabled(),
         }
         projection_reader = getattr(store, "minute_history_projection", None)
         if callable(projection_reader):
@@ -107,20 +118,38 @@ def _minute_comparison_projection(date: str, is_min_temp: bool) -> dict[str, Any
                 "rows": list(projection.get("rows") or []),
                 "diagnostics": dict(projection.get("diagnostics") or {}),
                 "has_layer_a_records": bool(projection.get("has_layer_a_records")),
+                "status": str(projection.get("status") or "ok"),
+                "data_source": str(projection.get("data_source") or "layer_a_minute_view"),
             }
-        return {"rows": store.minute_history(**kwargs), "diagnostics": {}, "has_layer_a_records": True}
+        minute_kwargs = {key: value for key, value in kwargs.items() if key != "allow_legacy_fallback"}
+        return {
+            "rows": store.minute_history(**minute_kwargs),
+            "diagnostics": {},
+            "has_layer_a_records": True,
+            "status": "ok",
+            "data_source": "layer_a_minute_view",
+        }
     except Exception as exc:
-        # Keep the existing SQLite path available for installations missing an
-        # optional Layer A reader dependency.  Normal deployments should use
-        # the minute projection above.
-        logger.warning("Layer A minute history unavailable for chart %s: %s", date, exc)
-        return {"rows": [], "diagnostics": {}, "has_layer_a_records": False}
+        logger.exception("Layer A minute history unavailable for chart %s", date)
+        return {
+            "rows": [],
+            "diagnostics": {
+                "status": "error",
+                "error_type": type(exc).__name__,
+                "message": "Layer A trajectory history is unavailable",
+            },
+            "has_layer_a_records": False,
+            "status": "error",
+            "data_source": "layer_a_minute_view",
+        }
 
 
 def _comparison_payload_from_minute_rows(
     rows: list[dict[str, Any]],
     *,
     diagnostics: Mapping[str, Any] | None = None,
+    status: str = "ok",
+    data_source: str | None = None,
 ) -> dict[str, Any]:
     timestamps = [str(row.get("timestamp")) for row in rows]
     market_temps = [_market_expected_temperature(row) for row in rows]
@@ -182,7 +211,8 @@ def _comparison_payload_from_minute_rows(
         "point_metadata": point_metadata,
         "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
         "granularity": "strategy_cycle" if legacy_only else "minute",
-        "data_source": "legacy_csv" if legacy_only else "layer_a_minute_view",
+        "data_source": data_source or ("legacy_csv" if legacy_only else "layer_a_minute_view"),
+        "status": status,
         "diagnostics": dict(diagnostics or {}),
     }
 
@@ -196,9 +226,9 @@ def get_models_comparison_chart(
     """Return time-series data for the 'All Models vs Market' comparison chart.
 
     Reads the Layer A minute projection — no models or APIs are touched.
-    Model values appear only at real decision-cycle timestamps.  Repository-
-    synced daily CSV is used by that projection after a rebuild; the legacy
-    SQLite cycle path remains a compatibility fallback.
+    Model values appear only at real decision-cycle timestamps. Legacy CSV or
+    SQLite fallback is disabled by default and must be explicitly enabled with
+    ``ENABLE_LEGACY_TRAJECTORY_FALLBACK=true``.
     """
     from app.services.weather_service import hkt_now as _hkt_now
     target_date = date or _hkt_now().strftime("%Y-%m-%d")
@@ -219,18 +249,24 @@ def get_models_comparison_chart(
             "data_source": "layer_a_minute_view",
             "diagnostics": {
                 "excluded_future_weather_records": 0,
+                "excluded_cross_date_weather_records": 0,
                 "duplicate_observation_versions": 0,
+                "duplicate_weather_snapshot_id_records": 0,
+                "weather_snapshot_id_content_collisions": 0,
                 "latest_weather_observation_timestamp": None,
                 "latest_weather_first_seen_timestamp": None,
             },
+            "status": "empty",
         }
 
     minute_projection = _minute_comparison_projection(target_date, is_min_temp)
     minute_rows = minute_projection["rows"]
-    if not slug and (minute_rows or minute_projection["has_layer_a_records"]):
+    if not slug or not _legacy_trajectory_fallback_enabled():
         return _comparison_payload_from_minute_rows(
             minute_rows,
             diagnostics=minute_projection["diagnostics"],
+            status=minute_projection["status"],
+            data_source=minute_projection["data_source"],
         )
 
     rows = read_models_comparison(date=target_date, slug=slug)
@@ -243,6 +279,9 @@ def get_models_comparison_chart(
             "models": {},
             "point_metadata": [],
             "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
+            "granularity": "strategy_cycle",
+            "data_source": "strategy_snapshot_sqlite",
+            "status": "empty",
             "diagnostics": minute_projection["diagnostics"],
         }
 
@@ -300,6 +339,7 @@ def get_models_comparison_chart(
         "expected_model_cycle_interval_seconds": _expected_model_cycle_interval_seconds(),
         "granularity": "strategy_cycle",
         "data_source": "strategy_snapshot_sqlite",
+        "status": "legacy_fallback",
         "diagnostics": minute_projection["diagnostics"],
     }
 

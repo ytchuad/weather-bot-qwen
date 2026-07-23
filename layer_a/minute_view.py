@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
+import json
 from typing import Any, Sequence
 from zoneinfo import ZoneInfo
 
@@ -115,7 +116,10 @@ def _weather_identity(snapshot: Mapping[str, Any]) -> tuple[str, str, str, str]:
     source_status = snapshot.get("source_status")
     source_status = source_status if isinstance(source_status, Mapping) else {}
     return (
-        str(snapshot.get("weather_observation_id") or (observation.isoformat() if observation else "")),
+        str(
+            snapshot.get("weather_observation_id")
+            or (_minute(observation).isoformat() if observation else "")
+        ),
         str(snapshot.get("location") or ""),
         str(source_status.get("observation_source") or snapshot.get("observation_source") or ""),
         str(source_status.get("station") or snapshot.get("station") or ""),
@@ -129,6 +133,115 @@ def _weather_preference(snapshot: Mapping[str, Any]) -> tuple[int, datetime, dat
         _capture_time(snapshot) or datetime.min.replace(tzinfo=UTC),
         str(snapshot.get("weather_snapshot_id") or ""),
     )
+
+
+def _weather_version_signature(snapshot: Mapping[str, Any]) -> str:
+    """Return stable content identity for one immutable weather version.
+
+    Old Layer A records used a minute-level ``weather_snapshot_id``, so later
+    corrections and restart/backfill duplicates can share the same ID.  The
+    content signature separates genuine corrections while still allowing
+    repeated captures of the exact same version to be merged.
+    """
+    statuses = snapshot.get("observation_status")
+    status_material: dict[str, Any] = {}
+    if isinstance(statuses, Mapping):
+        for field, status in statuses.items():
+            if not isinstance(status, Mapping):
+                continue
+            status_material[str(field)] = {
+                key: status.get(key)
+                for key in (
+                    "value",
+                    "source_timestamp",
+                    "is_missing",
+                    "is_fallback",
+                    "fallback_method",
+                    "raw_status",
+                    "observation_method",
+                )
+            }
+    material = {
+        "observation_timestamp": (
+            _weather_observation_time(snapshot).isoformat()
+            if _weather_observation_time(snapshot)
+            else None
+        ),
+        "source_release_timestamp": snapshot.get("source_release_timestamp"),
+        "location": snapshot.get("location"),
+        "temperature_current": snapshot.get("temperature_current"),
+        "max_so_far": snapshot.get("max_so_far"),
+        "min_so_far": snapshot.get("min_so_far"),
+        "relative_humidity": snapshot.get("relative_humidity"),
+        "pressure": snapshot.get("pressure"),
+        "dew_point": snapshot.get("dew_point"),
+        "rain_current": snapshot.get("rain_current"),
+        "observation_status": status_material,
+    }
+    return json.dumps(
+        jsonable(material),
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=True,
+    )
+
+
+def _weather_version_key(snapshot: Mapping[str, Any]) -> tuple[str, str]:
+    """Identify one immutable version without trusting legacy IDs alone."""
+    version_id = str(snapshot.get("weather_snapshot_id") or "")
+    if not version_id:
+        version_id = "|".join(_weather_identity(snapshot))
+    return version_id, _weather_version_signature(snapshot)
+
+
+def _merge_duplicate_weather_version(
+    previous: Mapping[str, Any],
+    duplicate: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Merge repeated captures while preserving first point-in-time availability."""
+    candidates = [previous, duplicate]
+    representative = min(
+        candidates,
+        key=lambda item: (
+            1 if _weather_is_fallback(item) else 0,
+            _capture_time(item) or datetime.max.replace(tzinfo=UTC),
+        ),
+    )
+    merged = dict(representative)
+    first_seen_values = [value for item in candidates if (value := _weather_first_seen_time(item))]
+    capture_values = [value for item in candidates if (value := _capture_time(item))]
+    if first_seen_values:
+        merged["first_seen_timestamp"] = min(first_seen_values).isoformat()
+    if capture_values:
+        merged["capture_timestamp"] = min(capture_values).isoformat()
+        merged["last_seen_timestamp"] = max(capture_values).isoformat()
+    merged["duplicate_capture_count"] = sum(
+        int(item.get("duplicate_capture_count") or 1) for item in candidates
+    )
+    return merged
+
+
+def _normalize_weather_versions(
+    snapshots: Sequence[Mapping[str, Any]],
+) -> tuple[list[Mapping[str, Any]], int, int]:
+    """Merge exact duplicate versions and retain legacy ID collisions separately."""
+    grouped: dict[tuple[str, str], Mapping[str, Any]] = {}
+    snapshot_id_signatures: dict[str, set[str]] = {}
+    duplicate_captures = 0
+    for snapshot in snapshots:
+        version_id, signature = _weather_version_key(snapshot)
+        if version_id:
+            snapshot_id_signatures.setdefault(version_id, set()).add(signature)
+        key = (version_id, signature)
+        previous = grouped.get(key)
+        if previous is None:
+            grouped[key] = snapshot
+            continue
+        duplicate_captures += 1
+        grouped[key] = _merge_duplicate_weather_version(previous, snapshot)
+    id_collisions = sum(max(0, len(signatures) - 1) for signatures in snapshot_id_signatures.values())
+    return list(grouped.values()), duplicate_captures, id_collisions
 
 
 def select_weather_as_of(snapshots: Sequence[Mapping[str, Any]], at: datetime) -> Mapping[str, Any] | None:
@@ -443,12 +556,26 @@ def _prepare_weather(
     selected_date: date | None,
     as_of: datetime,
 ) -> tuple[list[Mapping[str, Any]], dict[datetime, Mapping[str, Any]], dict[str, Any]]:
+    selected_date_text = selected_date.isoformat() if selected_date else None
+    event_scoped = [
+        snapshot
+        for snapshot in snapshots
+        if selected_date_text is None or str(snapshot.get("event_date") or "") == selected_date_text
+    ]
     scoped = [
         snapshot
         for snapshot in snapshots
         if _in_hkt_date(snapshot.get("observation_timestamp") or snapshot.get("snapshot_timestamp"), selected_date)
     ]
-    excluded_future = sum(1 for snapshot in scoped if _weather_is_future_corrupt(snapshot))
+    diagnostic_scope = event_scoped if selected_date_text and event_scoped else scoped
+    excluded_future = sum(1 for snapshot in diagnostic_scope if _weather_is_future_corrupt(snapshot))
+    excluded_cross_date = sum(
+        1
+        for snapshot in diagnostic_scope
+        if selected_date is not None
+        and (observation := _weather_observation_time(snapshot)) is not None
+        and observation.astimezone(HKT).date() != selected_date
+    )
     valid = [
         snapshot
         for snapshot in scoped
@@ -459,18 +586,8 @@ def _prepare_weather(
     ]
 
     version_ids = [str(snapshot.get("weather_snapshot_id") or "") for snapshot in valid]
-    duplicate_versions = sum(count - 1 for key, count in Counter(version_ids).items() if key and count > 1)
-    unique_versions: dict[str, Mapping[str, Any]] = {}
-    anonymous: list[Mapping[str, Any]] = []
-    for snapshot in valid:
-        version_id = str(snapshot.get("weather_snapshot_id") or "")
-        if not version_id:
-            anonymous.append(snapshot)
-            continue
-        previous = unique_versions.get(version_id)
-        if previous is None or _weather_preference(snapshot) > _weather_preference(previous):
-            unique_versions[version_id] = snapshot
-    valid = [*unique_versions.values(), *anonymous]
+    raw_duplicate_ids = sum(count - 1 for key, count in Counter(version_ids).items() if key and count > 1)
+    valid, duplicate_versions, snapshot_id_collisions = _normalize_weather_versions(valid)
 
     chart_versions = [snapshot for snapshot in valid if _weather_first_seen_time(snapshot) <= _as_utc(as_of)]
     by_observation: dict[tuple[str, str, str, str], Mapping[str, Any]] = {}
@@ -495,7 +612,10 @@ def _prepare_weather(
     )
     diagnostics = {
         "excluded_future_weather_records": excluded_future,
+        "excluded_cross_date_weather_records": excluded_cross_date,
         "duplicate_observation_versions": duplicate_versions,
+        "duplicate_weather_snapshot_id_records": raw_duplicate_ids,
+        "weather_snapshot_id_content_collisions": snapshot_id_collisions,
         "latest_weather_observation_timestamp": (
             _weather_observation_time(latest).isoformat() if latest and _weather_observation_time(latest) else None
         ),
@@ -531,7 +651,10 @@ def build_minute_projection(
     selected_date = _selected_hkt_date(date_value)
     empty_diagnostics = {
         "excluded_future_weather_records": 0,
+        "excluded_cross_date_weather_records": 0,
         "duplicate_observation_versions": 0,
+        "duplicate_weather_snapshot_id_records": 0,
+        "weather_snapshot_id_content_collisions": 0,
         "latest_weather_observation_timestamp": None,
         "latest_weather_first_seen_timestamp": None,
     }

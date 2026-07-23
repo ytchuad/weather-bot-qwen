@@ -326,6 +326,7 @@ def test_actual_app_models_comparison_endpoint_exposes_trajectory_lineage(monkey
                 "date_value": EVENT_DATE,
                 "market_kind": "highest_temperature",
                 "limit": 10000,
+                "allow_legacy_fallback": False,
             }
             return {
                 "rows": [{
@@ -427,6 +428,55 @@ def test_layer_a_preferred_over_legacy_csv(tmp_path):
     rows = store.minute_history(date_value=EVENT_DATE)
     assert rows[0]["source"] == "layer_a"
     assert rows[0]["actual_temperature"] == 30.0
+
+
+def test_trajectory_projection_disables_legacy_csv_by_default(tmp_path):
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    (export_dir / f"{EVENT_DATE}.csv").write_text(
+        "timestamp,snapshot_date,actual_temp\n2026-07-20T10:01:00,2026-07-20,30\n",
+        encoding="utf-8",
+    )
+    store = _history_store(tmp_path)
+    store.legacy_csv_dir = export_dir
+
+    strict = store.minute_history_projection(
+        date_value=EVENT_DATE,
+        allow_legacy_fallback=False,
+    )
+    compatibility = store.minute_history_projection(
+        date_value=EVENT_DATE,
+        allow_legacy_fallback=True,
+    )
+
+    assert strict["rows"] == []
+    assert strict["status"] == "empty"
+    assert strict["data_source"] == "layer_a_minute_view"
+    assert compatibility["rows"][0]["source"] == "legacy_csv"
+    assert compatibility["status"] == "legacy_fallback"
+
+
+def test_trajectory_api_does_not_fall_back_to_sqlite_on_layer_a_error(monkeypatch):
+    from app.api import charts
+
+    class Store:
+        def minute_history_projection(self, **_kwargs):
+            raise RuntimeError("broken layer a")
+
+    monkeypatch.delenv("ENABLE_LEGACY_TRAJECTORY_FALLBACK", raising=False)
+    monkeypatch.setattr(charts, "get_default_historical_store", lambda: Store())
+    monkeypatch.setattr(
+        charts,
+        "read_models_comparison",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("SQLite fallback must remain disabled")),
+    )
+
+    payload = charts.get_models_comparison_chart(date=EVENT_DATE)
+
+    assert payload["timestamps"] == []
+    assert payload["status"] == "error"
+    assert payload["data_source"] == "layer_a_minute_view"
+    assert payload["diagnostics"]["error_type"] == "RuntimeError"
 
 
 def test_naive_minute_view_timestamp_uses_hkt_wall_clock():

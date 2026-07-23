@@ -100,3 +100,22 @@ export function canConnectRealModelCycles(previousTimestamp, nextTimestamp, expe
   const nextDate = formatHktDateTime(nextTimestamp).slice(0, 11)
   return previousDate === nextDate && (next - previous) / 1000 <= expectedCycleIntervalSeconds * 2
 }
+
+export function segmentCoordinatesByCadence(coordinates, expectedCycleIntervalSeconds) {
+  const ordered = [...(coordinates || [])]
+    .filter((point) => Array.isArray(point) && point.length >= 2 && Number.isFinite(point[0]) && Number.isFinite(point[1]))
+    .sort((left, right) => left[0] - right[0])
+  const segments = []
+  let segment = []
+  for (const point of ordered) {
+    const previous = segment.at(-1)
+    if (!previous || canConnectRealModelCycles(previous[0], point[0], expectedCycleIntervalSeconds)) {
+      segment.push(point)
+      continue
+    }
+    segments.push(segment)
+    segment = [point]
+  }
+  if (segment.length) segments.push(segment)
+  return segments
+}

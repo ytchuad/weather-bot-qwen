@@ -6,6 +6,7 @@ import {
   canConnectRealModelCycles,
   formatHktDateTime,
   formatHktTime,
+  segmentCoordinatesByCadence,
 } from "../src/lib/trajectoryFormatting.js"
 
 test("HKT formatting is independent of the browser/runtime timezone", () => {
@@ -64,4 +65,16 @@ test("only real cycles within the configured cadence may be visually joined", ()
   assert.equal(canConnectRealModelCycles("2026-07-23T09:40:00+08:00", "2026-07-23T10:01:00+08:00", 300), false)
   assert.equal(canConnectRealModelCycles("2026-07-23T23:59:00+08:00", "2026-07-24T00:04:00+08:00", 300), false)
   assert.equal(canConnectRealModelCycles("2026-07-23T09:40:00+08:00", "2026-07-23T09:45:00+08:00", null), false)
+})
+
+test("consensus coordinates are split across stale gaps", () => {
+  const coordinates = [
+    [Date.parse("2026-07-23T09:40:00+08:00"), 30.0],
+    [Date.parse("2026-07-23T09:45:00+08:00"), 30.1],
+    [Date.parse("2026-07-23T10:30:00+08:00"), 30.3],
+  ]
+  assert.deepEqual(segmentCoordinatesByCadence(coordinates, 300), [
+    coordinates.slice(0, 2),
+    coordinates.slice(2),
+  ])
 })

@@ -162,6 +162,7 @@ def test_chart_api_returns_raw_actual_points_and_projection_diagnostics(monkeypa
                 "date_value": EVENT_DATE,
                 "market_kind": "highest_temperature",
                 "limit": 10000,
+                "allow_legacy_fallback": False,
             }
             return {**projection, "has_layer_a_records": True}
 
@@ -193,6 +194,67 @@ def test_chart_api_returns_raw_actual_points_and_projection_diagnostics(monkeypa
     assert metadata["2026-07-23T09:48:00+08:00"]["model_cycle_is_real"] is True
     assert payload["expected_model_cycle_interval_seconds"] == 300.0
     assert payload["diagnostics"] == projection["diagnostics"]
+
+
+def test_restart_duplicate_preserves_earliest_first_seen_for_same_version():
+    original = _weather(
+        observation="2026-07-23T09:40:00+08:00",
+        first_seen="2026-07-23T09:48:00+08:00",
+        capture="2026-07-23T09:48:10+08:00",
+        temperature=30.0,
+    )
+    duplicate = {
+        **original,
+        "first_seen_timestamp": "2026-07-23T11:00:00+08:00",
+        "capture_timestamp": "2026-07-23T11:00:10+08:00",
+    }
+
+    projection = build_minute_projection(
+        [],
+        [{"decision_timestamp": "2026-07-23T10:00:00+08:00"}],
+        [original, duplicate],
+        date_value=EVENT_DATE,
+        as_of="2026-07-23T10:00:00+08:00",
+    )
+    row = next(item for item in projection["rows"] if item["timestamp"][11:16] == "10:00")
+
+    assert row["weather_snapshot_id"] == original["weather_snapshot_id"]
+    assert row["weather_first_seen_timestamp"] == "2026-07-23T01:48:00+00:00"
+    assert projection["diagnostics"]["duplicate_observation_versions"] == 1
+
+
+def test_legacy_snapshot_id_collision_keeps_corrections_as_separate_versions():
+    original = _weather(
+        observation="2026-07-23T09:40:00+08:00",
+        first_seen="2026-07-23T09:48:00+08:00",
+        capture="2026-07-23T09:48:10+08:00",
+        temperature=30.0,
+    )
+    correction = _weather(
+        observation="2026-07-23T09:40:00+08:00",
+        first_seen="2026-07-23T10:05:00+08:00",
+        capture="2026-07-23T10:05:10+08:00",
+        temperature=29.6,
+    )
+    correction["weather_snapshot_id"] = original["weather_snapshot_id"]
+    correction.pop("weather_observation_id", None)
+    original.pop("weather_observation_id", None)
+
+    projection = build_minute_projection(
+        [],
+        [
+            {"decision_timestamp": "2026-07-23T09:50:00+08:00"},
+            {"decision_timestamp": "2026-07-23T10:05:00+08:00"},
+        ],
+        [original, correction],
+        date_value=EVENT_DATE,
+        as_of="2026-07-23T10:06:00+08:00",
+    )
+    rows = {row["timestamp"][11:16]: row for row in projection["rows"]}
+
+    assert rows["09:50"]["max_so_far"] == 30.0
+    assert rows["10:05"]["max_so_far"] == 29.6
+    assert projection["diagnostics"]["weather_snapshot_id_content_collisions"] == 1
 
 
 def test_chart_api_returns_no_rows_for_a_future_hkt_date(monkeypatch):

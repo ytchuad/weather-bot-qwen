@@ -728,6 +728,7 @@ class HistoricalStore:
         model_filters: Iterable[str] | None = None,
         limit: int = 1000,
         as_of: datetime | None = None,
+        allow_legacy_fallback: bool = True,
     ) -> dict[str, Any]:
         """Return the trajectory rows plus read-time timestamp diagnostics.
 
@@ -746,6 +747,22 @@ class HistoricalStore:
             markets = [record for record in markets if record.get("market_kind") == market_kind]
         has_layer_a_records = bool(cycles or markets or weather)
         if not has_layer_a_records:
+            if not allow_legacy_fallback:
+                return {
+                    "rows": [],
+                    "has_layer_a_records": False,
+                    "data_source": "layer_a_minute_view",
+                    "status": "empty",
+                    "diagnostics": {
+                        "excluded_future_weather_records": 0,
+                        "excluded_cross_date_weather_records": 0,
+                        "duplicate_observation_versions": 0,
+                        "duplicate_weather_snapshot_id_records": 0,
+                        "weather_snapshot_id_content_collisions": 0,
+                        "latest_weather_observation_timestamp": None,
+                        "latest_weather_first_seen_timestamp": None,
+                    },
+                }
             dates = _date_strings(date_value=date_value, start=start, end=end, lookback_days=self.lookback_days)
             legacy_rows = self._legacy_minute_rows(dates)
             filtered = [
@@ -762,9 +779,14 @@ class HistoricalStore:
             return {
                 "rows": filtered[: max(0, int(limit))],
                 "has_layer_a_records": False,
+                "data_source": "legacy_csv",
+                "status": "legacy_fallback",
                 "diagnostics": {
                     "excluded_future_weather_records": 0,
+                    "excluded_cross_date_weather_records": 0,
                     "duplicate_observation_versions": 0,
+                    "duplicate_weather_snapshot_id_records": 0,
+                    "weather_snapshot_id_content_collisions": 0,
                     "latest_weather_observation_timestamp": None,
                     "latest_weather_first_seen_timestamp": None,
                 },
@@ -785,6 +807,8 @@ class HistoricalStore:
         for row in projection["rows"]:
             row.setdefault("source", "layer_a")
         projection["has_layer_a_records"] = has_layer_a_records
+        projection["data_source"] = "layer_a_minute_view"
+        projection["status"] = "ok"
         return projection
 
     # Explicit read aliases keep callers from depending on the generic kind

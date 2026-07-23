@@ -15,3 +15,7 @@ export function canConnectRealModelCycles(
   nextTimestamp: string | null | undefined,
   expectedCycleIntervalSeconds: number | null | undefined,
 ): boolean
+export function segmentCoordinatesByCadence(
+  coordinates: Array<[number, number]>,
+  expectedCycleIntervalSeconds: number | null | undefined,
+): Array<Array<[number, number]>>

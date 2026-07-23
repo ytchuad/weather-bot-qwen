@@ -7,6 +7,7 @@ import {
   buildTrajectoryTooltip,
   canConnectRealModelCycles,
   formatHktTime,
+  segmentCoordinatesByCadence,
   timestampToEpochMillis,
 } from "../lib/trajectoryFormatting.js"
 import type { TrajectoryPointMetadata } from "../types"
@@ -200,12 +201,15 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
       ? data.expected_model_cycle_interval_seconds || null
       : null
     const modelSegments = visibleModels.map(([, values]) => segmentRealCycles(padArray(values, length), points, expectedIntervalSeconds))
-    const consensusCoordinates = averageCoordinates(modelSegments)
+    const consensusSegments = segmentCoordinatesByCadence(
+      averageCoordinates(modelSegments),
+      expectedIntervalSeconds,
+    )
 
     const allValues = [
       ...actualCoordinates,
       ...marketCoordinates,
-      ...consensusCoordinates,
+      ...consensusSegments.flat(),
       ...modelSegments.flat(2),
     ].map(([, value]) => value)
     const rawMin = allValues.length > 0 ? Math.min(...allValues) : 20
@@ -240,7 +244,7 @@ export default function ModelsComparisonChart({ date, isMinTemp, visibleKeys }: 
     const series: SeriesOption[] = [
       line("actual", "Actual Temperature", actualCoordinates, "#fb7185", { area: true, z: 4 }),
       line("market", "Polymarket Weighted", marketCoordinates, "#a78bfa", { dash: true, z: 3 }),
-      line("consensus", "Consensus (Mean)", consensusCoordinates, "#22d3ee", { area: true, z: 3, step: true, showSymbol: true }),
+      ...consensusSegments.map((segment) => line("consensus", "Consensus (Mean)", segment, "#22d3ee", { area: true, z: 3, step: true, showSymbol: true })),
       ...visibleModels.flatMap(([key], index) => modelSegments[index].map((segment) => line(`model:${key}`, MODEL_LABELS[key] || key, segment, MODEL_COLORS[key] || "#94a3b8", { step: true, showSymbol: true }))),
     ]
 
